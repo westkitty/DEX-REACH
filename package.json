@@ -1,0 +1,41 @@
+{
+  "name": "dex-reach",
+  "version": "0.1.0",
+  "description": "Secure AI-native remote computing control plane and MCP gateway",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test --import tsx tests/*.test.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "gateway": "tsx src/gateway/main.ts",
+    "node": "tsx src/node/main.ts",
+    "probe:backend": "tsx scripts/probe-backend.ts",
+    "bootstrap": "tsx scripts/bootstrap.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "install:macos": "npm run build && tsx scripts/install-macos.ts",
+    "uninstall:macos": "tsx scripts/uninstall-macos.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": "true",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@wonderwhy-er/desktop-commander": "^0.2.50",
+    "express": "^5.1.0",
+    "ws": "^8.18.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "overrides": {
+    "sharp": "0.35.4",
+    "uuid": "11.1.1"
+  }
+}
