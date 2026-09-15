@@ -1,14 +1,14 @@
 # DEX//REACH Operational State
 
 <!-- operational-state:metadata
-{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":"/Users/andrew/DEX-REACH","artifact_path":"","state_revision":2,"last_updated":"2026-09-15T23:20:09Z","current_baseline":{"identity":"validated initial release baseline on main","state":"current-baseline","last_verified":"2026-09-15T23:20:09Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, project docs"],"linked_parent_state":null}
+{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":"/Users/andrew/DEX-REACH","artifact_path":"","state_revision":3,"last_updated":"2026-09-15T23:54:28Z","current_baseline":{"identity":"DEX//REACH 0.2.0 validated client/credential/native-executor baseline on main","state":"current-baseline","last_verified":"2026-09-15T23:54:28Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, project docs"],"linked_parent_state":null}
 -->
 
 ## 1. Project Identity and Scope
 DEX//REACH is a secure AI-native remote-computing control plane intended to replace the useful Remote Desktop Commander workflow without depending on its hosted relay.
 
 ## 2. Current Baseline
-Private repository at `/Users/andrew/DEX-REACH`. macOS gateway and node are installed as user `launchd` services. Public HTTPS ingress is active at `https://macbook-air.tailafb7e8.ts.net` through Tailscale Funnel to the localhost gateway.
+Private repository at `/Users/andrew/DEX-REACH`. macOS gateway and node are installed as user `launchd` services. Public HTTPS ingress is active at `https://macbook-air.tailafb7e8.ts.net` through Tailscale Funnel. The Mac node now uses its own mode-0600 credential file and gateway authentication is keyed by node ID with persisted token hashes.
 
 ## 3. Artifact Contract
 Provide filesystem, search/edit, terminal/process, development/Git, multi-node routing, MCP access, authentication/revocation, bounded output, auditability, ADB discovery, recovery primitives, and persistent local operation.
@@ -19,27 +19,32 @@ Provide filesystem, search/edit, terminal/process, development/Git, multi-node r
 - INV-003: Telemetry is off in the isolated compatibility backend; credentials and secrets never enter Git or audit logs.
 - INV-004: Remote operations are explicitly node-scoped and path/capability bounded.
 - INV-005: Only the authenticated gateway is publicly proxied; raw shell and node sockets are not directly exposed.
+- INV-006: Node credentials are independent; rotating or revoking one node must not invalidate unrelated nodes.
+- INV-007: DEX-native operations must enforce the same allowed-root and command guardrails as compatibility calls.
 ## 5. Verified Working Behavior
 - VER-001: Pinned Desktop Commander 0.2.50 is driven through the official MCP SDK and exposes 26 local tools.
 - VER-002: Gateway and node run persistently under `launchd`; health reports one online Mac node.
 - VER-003: OAuth dynamic registration, owner approval, PKCE, token exchange, stateful MCP, node routing, file roundtrip, and process execution pass through the public HTTPS endpoint.
 - VER-004: Gateway restart terminates node sockets and the node automatically re-registers with the replacement gateway.
-- VER-005: Strict typecheck, production build, 5 regression tests, and npm audit with 0 vulnerabilities pass.
+- VER-005: Strict typecheck, production build, regression tests, and npm audit with 0 vulnerabilities pass.
+- VER-006: Per-node credential migration and live rotation are verified; the Mac reconnects with a new token without restarting the gateway, and the prior token expires after the grace window.
+- VER-007: Public MCP smoke verifies 12 tools including DEX-native file read/write, guarded process execution, ADB discovery, and checkpoint creation from tracked plus untracked dirty Git state.
+- VER-008: Claude Code has DEX//REACH registered at user scope and completed DEX OAuth/PKCE authentication; `claude mcp get dex-reach` reports Connected.
 
 ## 6. Known Not Working
 None in the verified local/public SDK path.
 
 ## 7. Implemented but Unverified
-- UNV-001: Actual ADB device availability is environment-dependent; the bridge/tool path exists.
-- UNV-002: `reach_checkpoint` is implemented but not exercised against a dirty non-DEX repository in this pass.
+- UNV-001: ADB discovery is verified through public MCP, but no Android hardware is currently attached or discoverable by mDNS, so device-control behavior remains unverified.
+- UNV-002: Claude tool invocation through DEX remains blocked by Claude Code account authentication (`loggedIn: false`), not by MCP registration or DEX OAuth.
 
 ## 8. Unknown or Evidence-Stale State
-- UNK-001: Actual ChatGPT and Claude client registration remains unverified because connecting those clients requires explicit user-side authorization/configuration.
+- UNK-001: ChatGPT custom full-MCP workspace deployment remains unverified because this runtime exposes no action for creating an arbitrary custom workspace app; the Business Developer Mode UI action remains external.
 
 ## 9. Pending Work
-- PND-001: Connect ChatGPT and Claude to `https://macbook-air.tailafb7e8.ts.net/mcp` and run parity calls.
-- PND-002: Add per-node enrollment credentials before scaling beyond trusted personal nodes.
-- PND-003: Replace the compatibility adapter incrementally only after native DEX executors match proven behavior.
+- PND-001: Deploy DEX//REACH as a ChatGPT Business custom MCP app in workspace Developer Mode and run host-client parity calls.
+- PND-002: Re-authenticate Claude Code itself, then run a real Claude-issued DEX tool call.
+- PND-003: Attach or discover an Android device and exercise a harmless ADB identity call through DEX. Continue adapter replacement only where native paths have equivalent proof.
 ## 10. Active Decisions, Defaults, and Prohibitions
 - Repository is private by default.
 - Nodes connect outbound to a relay-first gateway; direct/P2P transport is optional future work.
@@ -53,12 +58,18 @@ None in the verified local/public SDK path.
 | VER-002 | Persistent Mac services | verified | Both launchd jobs running; health reports onlineNodes=1 |
 | VER-003 | Public OAuth/MCP execution | verified | `npm run smoke` PASS through Funnel HTTPS URL |
 | VER-004 | Gateway recovery | verified | Deliberate gateway termination followed by node auto re-registration |
-| VER-005 | Static/regression/build | verified | typecheck PASS; 5/5 tests PASS; build PASS |
-| UNK-001 | ChatGPT/Claude host UI | unknown | Explicit external-client connection still required |
+| VER-005 | Static/regression/build | verified | typecheck/test/build/audit PASS |
+| VER-006 | Per-node credential rotation | verified | Live token rotation + node-only restart; gateway PID unchanged; old grace credential expired |
+| VER-007 | Native executor + checkpoint | verified | Public `npm run smoke` PASS with native file/process, ADB discovery, dirty Git checkpoint |
+| VER-008 | Claude MCP registration/OAuth | verified | User-scope server Connected; DEX OAuth callback completed |
+| UNV-001 | Android hardware control | implemented-unverified | No ADB USB or mDNS device currently visible |
+| UNV-002 | Claude-issued tool invocation | implemented-unverified | Claude Code account is logged out |
+| UNK-001 | ChatGPT workspace app | unknown | Developer Mode workspace UI action unavailable to this runtime |
 
 ## 12. Current Change Scope and Impact Radius
-Greenfield DEX//REACH project, `~/.dex-reach` local state, two user LaunchAgents, and one Tailscale Funnel HTTPS reverse proxy. Existing Remote Desktop Commander remains installed and available.
+DEX//REACH repository, `~/.dex-reach` gateway state, per-node credential files, two user LaunchAgents, and the existing Tailscale Funnel HTTPS reverse proxy. Existing Remote Desktop Commander remains installed as fallback while ChatGPT/Claude host parity is incomplete.
 
 ## 13. Compact Revision Log
 - r1 — Initialized authoritative state from the user contract and inspected machine/repository evidence.
 - r2 — Implemented, installed, and validated gateway/node/OAuth/MCP path; added public HTTPS ingress and recovery proof.
+- r3 — Added per-node credential enrollment/rotation, migrated and live-rotated the Mac credential, enforced scope on native operations, moved file/process primitives native, verified ADB discovery and dirty-worktree checkpoint over public MCP, and registered/authenticated Claude Code.

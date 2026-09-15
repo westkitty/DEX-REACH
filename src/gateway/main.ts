@@ -10,6 +10,7 @@ import { AuditLog } from '../shared/audit.js';
 import { loadGatewayConfig } from './config.js';
 import { ReachOAuthProvider } from './auth.js';
 import { NodeRegistry } from './registry.js';
+import { NodeAuthStore } from './node-auth.js';
 import { createReachMcpServer } from './mcp.js';
 
 loadLocalSecrets();
@@ -18,8 +19,11 @@ const issuerUrl = new URL('/', config.publicBaseUrl);
 const resourceUrl = new URL('/mcp', config.publicBaseUrl);
 const audit = new AuditLog();
 const oauth = new ReachOAuthProvider(config.stateDir, config.ownerUser, config.ownerPassword, resourceUrl);
-const registry = new NodeRegistry(config.nodeToken, config.stateDir);
+const nodeAuth = new NodeAuthStore(config.stateDir);
 await oauth.initialize();
+await nodeAuth.initialize();
+if (config.legacyNodeId && config.legacyNodeToken) await nodeAuth.importLegacy(config.legacyNodeId, config.legacyNodeToken);
+const registry = new NodeRegistry(nodeAuth, config.stateDir);
 await registry.initialize();
 
 const allowedHosts = [config.publicBaseUrl.host, config.publicBaseUrl.hostname, 'localhost', '127.0.0.1'];
@@ -27,7 +31,7 @@ const app = createMcpExpressApp({ host: config.host, allowedHosts: [...new Set(a
 app.use(express.urlencoded({ extended: false }));
 
 app.get('/healthz', (_req, res) => {
-  res.json({ ok: true, service: 'DEX//REACH', version: '0.1.0', onlineNodes: registry.listNodes().length });
+  res.json({ ok: true, service: 'DEX//REACH', version: '0.2.0', onlineNodes: registry.listNodes().length });
 });
 
 app.post('/dex/approve', async (req, res) => {

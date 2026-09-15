@@ -8,7 +8,7 @@ function text(value: unknown) {
 }
 
 export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, clientId = 'unknown'): McpServer {
-  const server = new McpServer({ name: 'DEX//REACH', version: '0.1.0' });
+  const server = new McpServer({ name: 'DEX//REACH', version: '0.2.0' });
 
   const routed = async (nodeId: string, operation: string, args: Record<string, unknown>) => {
     const started = Date.now();
@@ -61,6 +61,21 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
     description: 'Capture a reversible Git worktree checkpoint without modifying repository history.',
     inputSchema: { node_id: z.string().min(1), cwd: z.string().optional() }
   }, async ({ node_id, cwd }) => routed(node_id, 'dex.checkpoint', cwd ? { cwd } : {}));
+
+  server.registerTool('reach_file_read', {
+    description: 'Read a bounded UTF-8 text file through the DEX-native executor without the compatibility adapter.',
+    inputSchema: { node_id: z.string().min(1), path: z.string().min(1), max_bytes: z.number().int().positive().max(1048576).default(1048576) }
+  }, async ({ node_id, path, max_bytes }) => routed(node_id, 'dex.file.read', { path, maxBytes: max_bytes }));
+
+  server.registerTool('reach_file_write', {
+    description: 'Write or append bounded UTF-8 text through the DEX-native executor.',
+    inputSchema: { node_id: z.string().min(1), path: z.string().min(1), text: z.string(), mode: z.enum(['rewrite', 'append']).default('rewrite') }
+  }, async ({ node_id, path, text: value, mode }) => routed(node_id, 'dex.file.write', { path, text: value, mode }));
+
+  server.registerTool('reach_process_run', {
+    description: 'Run a bounded shell command through the DEX-native executor with REACH Guard and scope enforcement.',
+    inputSchema: { node_id: z.string().min(1), command: z.string().min(1), cwd: z.string().optional(), timeout_ms: z.number().int().positive().max(60000).default(15000) }
+  }, async ({ node_id, command, cwd, timeout_ms }) => routed(node_id, 'dex.process.run', { command, ...(cwd ? { cwd } : {}), timeoutMs: timeout_ms }));
 
   server.registerTool('reach_result_read', {
     description: 'Read the next bounded segment of a large result using a continuation handle.',

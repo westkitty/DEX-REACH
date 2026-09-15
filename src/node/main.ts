@@ -37,7 +37,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     } else if (request.operation === 'dex.result.read') {
       value = results.read(String(request.args.handle || ''), Number(request.args.offset || 0), Number(request.args.length || 65536));
     } else {
-      value = await nativeCall(config.nodeId, request.operation, request.args);
+      value = await nativeCall(config.nodeId, request.operation, request.args, config.allowedRoots, config.profile);
     }
     const result = results.bound(value);
     await audit.append({
@@ -73,7 +73,7 @@ async function connect(): Promise<void> {
       fingerprint: await executionFingerprint(config.nodeId),
       tools: backend.listTools(),
       allowedRoots: config.allowedRoots,
-      agentVersion: '0.1.0'
+      agentVersion: '0.2.0'
     };
     ws.send(JSON.stringify(hello));
     console.log(`DEX//REACH node connected to ${url.origin}`);

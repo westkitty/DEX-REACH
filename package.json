@@ -1,6 +1,6 @@
 {
   "name": "dex-reach",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Secure AI-native remote computing control plane and MCP gateway",
   "main": "index.js",
   "scripts": {
@@ -13,7 +13,8 @@
     "bootstrap": "tsx scripts/bootstrap.ts",
     "smoke": "tsx scripts/smoke.ts",
     "install:macos": "npm run build && tsx scripts/install-macos.ts",
-    "uninstall:macos": "tsx scripts/uninstall-macos.ts"
+    "uninstall:macos": "tsx scripts/uninstall-macos.ts",
+    "nodes": "tsx scripts/node-credentials.ts"
   },
   "keywords": [],
   "author": "",

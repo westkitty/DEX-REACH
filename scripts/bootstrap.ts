@@ -35,5 +35,10 @@ const lines = [
   'DEX_REACH_GATEWAY_WS=ws://127.0.0.1:8787/node'
 ];
 await fs.writeFile(file, lines.join('\n') + '\n', { mode: 0o600 });
+const nodeDir = path.join(stateDir, 'nodes');
+await fs.mkdir(nodeDir, { recursive: true, mode: 0o700 });
+const nodeFile = path.join(nodeDir, `${nodeId}.env`);
+const nodeLines = lines.filter(line => /^(DEX_REACH_NODE_|DEX_REACH_ALLOWED_ROOTS|DEX_REACH_PROFILE|DEX_REACH_GATEWAY_WS)=?/.test(line));
+await fs.writeFile(nodeFile, nodeLines.join('\n') + '\n', { mode: 0o600 });
 console.log(`DEX//REACH secrets created at ${file} with mode 0600.`);
 console.log('Owner password was generated locally and was not printed.');

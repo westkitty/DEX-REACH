@@ -23,7 +23,7 @@ export class DesktopCommanderBackend {
       env: { ...getDefaultEnvironment(), HOME: isolatedHome, USER: os.userInfo().username },
       stderr: 'pipe'
     });
-    this.client = new Client({ name: 'dex-reach-node', version: '0.1.0' });
+    this.client = new Client({ name: 'dex-reach-node', version: '0.2.0' });
     await this.client.connect(this.transport);
     const listed = await this.client.listTools();
     this.tools = listed.tools.map(tool => ({

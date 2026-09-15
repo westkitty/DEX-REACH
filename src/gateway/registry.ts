@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { Server } from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
-import { timingSafeEqualText } from '../shared/security.js';
+import type { NodeAuthStore } from './node-auth.js';
 import { REACH_PROTOCOL_VERSION, type GatewayRequest, type GatewayResponse, type NodeHello } from '../shared/protocol.js';
 
 export type NodeRecord = {
@@ -26,7 +26,7 @@ export class NodeRegistry {
   private readonly revoked = new Set<string>();
   private readonly revokedFile: string;
 
-  constructor(private readonly nodeToken: string, stateDir: string) {
+  constructor(private readonly nodeAuth: NodeAuthStore, stateDir: string) {
     this.revokedFile = path.join(stateDir, 'revoked-nodes.json');
   }
 
@@ -40,13 +40,18 @@ export class NodeRegistry {
   }
 
   attach(server: Server): void {
-    server.on('upgrade', (req, socket, head) => {
+    server.on('upgrade', async (req, socket, head) => {
       const url = new URL(req.url || '/', 'http://localhost');
       if (url.pathname !== '/node') return socket.destroy();
       const auth = req.headers.authorization || '';
       const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
       const nodeId = url.searchParams.get('nodeId') || '';
-      if (!nodeId || this.revoked.has(nodeId) || !timingSafeEqualText(token, this.nodeToken)) return socket.destroy();
+      if (!nodeId || this.revoked.has(nodeId)) return socket.destroy();
+      try {
+        if (!(await this.nodeAuth.authenticate(nodeId, token))) return socket.destroy();
+      } catch {
+        return socket.destroy();
+      }
       this.wss.handleUpgrade(req, socket, head, ws => this.accept(ws, nodeId));
     });
   }
@@ -91,6 +96,7 @@ export class NodeRegistry {
 
   async revoke(nodeId: string): Promise<boolean> {
     this.revoked.add(nodeId);
+    await this.nodeAuth.revoke(nodeId);
     const record = this.nodes.get(nodeId);
     if (record) record.socket.close(4001, 'node revoked');
     await fs.mkdir(path.dirname(this.revokedFile), { recursive: true, mode: 0o700 });
