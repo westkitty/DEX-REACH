@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { stateDir } from './local-env.js';
-import type { RequestActor } from './protocol.js';
+import type { ExecutionFingerprint, RequestActor } from './protocol.js';
 import { atomicWriteFile } from './state-io.js';
 import { hashValue } from './hash.js';
 
@@ -21,6 +21,8 @@ export type ExecutionPlan = {
   expiresAt: string;
   checkpointId: string | null;
   used: boolean;
+  fingerprint?: ExecutionFingerprint;
+  fingerprintHash?: string;
 };
 
 function planDir(): string { return path.join(stateDir(), 'plans'); }

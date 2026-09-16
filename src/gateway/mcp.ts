@@ -6,6 +6,19 @@ import type { RequestActor } from '../shared/protocol.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
 
 const NODE_ID_HINT = 'Target node ID exactly as returned by reach_list_nodes (for example "macbook-air.local"). Never guess; each node is a different machine.';
+const EXECUTION_IDENTITY_EXPECTATION = z.object({
+  nodeId: z.string().optional(),
+  hostname: z.string().optional(),
+  platform: z.string().optional(),
+  arch: z.string().optional(),
+  user: z.string().optional(),
+  home: z.string().optional(),
+  cwd: z.string().optional(),
+  repositoryRoot: z.string().nullable().optional(),
+  branch: z.string().nullable().optional(),
+  remote: z.string().nullable().optional(),
+  nodeVersion: z.string().optional()
+});
 
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 const MUTATE = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } as const;
@@ -61,6 +74,13 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
     inputSchema: { node_id: z.string().min(1).describe(NODE_ID_HINT), cwd: z.string().optional().describe('Optional directory to fingerprint instead of the node default.') },
     annotations: READ
   }, async ({ node_id, cwd }) => routed(node_id, 'dex.fingerprint', cwd ? { cwd } : {}));
+
+  server.registerTool('reach_trust_report', {
+    title: 'Get Node Trust Report',
+    description: 'Return a fresh evidence-scoped DEX//REACH trust certificate for one node: execution fingerprint, owner access state, live runtime trust checks, machine-readable invariant IDs, and a certificate hash. PASS applies only to the listed live checks and never substitutes for full release validation.',
+    inputSchema: { node_id: z.string().min(1).describe(NODE_ID_HINT) },
+    annotations: READ
+  }, async ({ node_id }) => routed(node_id, 'dex.trustReport', {}));
 
   server.registerTool('reach_repo_info', {
     title: 'Inspect Git Repository',
@@ -124,10 +144,11 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
     inputSchema: {
       node_id: z.string().min(1).describe(NODE_ID_HINT),
       operation: z.enum(['dex.file.write', 'dex.process.run', 'dex.checkpoint', 'dc.call']).describe('Exact supported mutating target operation.'),
-      arguments: z.record(z.string(), z.unknown()).default({}).describe('Exact target arguments that must match the later commit.')
+      arguments: z.record(z.string(), z.unknown()).default({}).describe('Exact target arguments that must match the later commit.'),
+      expected_identity: EXECUTION_IDENTITY_EXPECTATION.optional().describe('Optional expected execution identity. If supplied, planning fails before mutation when any supplied field differs. Every successful plan also locks the fresh fingerprint and rechecks it at commit time.')
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
-  }, async ({ node_id, operation, arguments: args }) => routed(node_id, 'dex.plan', { operation, arguments: args }));
+  }, async ({ node_id, operation, arguments: args, expected_identity }) => routed(node_id, 'dex.plan', { operation, arguments: args, ...(expected_identity ? { expectedIdentity: expected_identity } : {}) }));
 
   server.registerTool('reach_commit_plan', {
     title: 'Commit Exact Node Plan',

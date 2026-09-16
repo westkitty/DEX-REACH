@@ -81,10 +81,11 @@ async function connect(): Promise<void> {
 
 const cleanupFiles: string[] = [];
 let fixture = '';
+let identityFixture = '';
 try {
   await connect();
   const tools = await client.listTools();
-  const required = ['reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write', 'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'];
+  const required = ['reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_trust_report', 'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write', 'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'];
   for (const name of required) {
     const tool = tools.tools.find(candidate => candidate.name === name);
     if (!tool) throw new Error(`missing MCP tool: ${name}`);
@@ -102,6 +103,10 @@ try {
 
   const fingerprint = jsonContent<{ nodeId: string }>(await client.callTool({ name: 'reach_fingerprint', arguments: { node_id: nodeId } }), 'reach_fingerprint');
   if (fingerprint.nodeId !== nodeId) throw new Error('reach_fingerprint returned the wrong node');
+
+  const trust = jsonContent<{ verdict: string; certificateHash: string; invariants: { count: number } }>(await client.callTool({ name: 'reach_trust_report', arguments: { node_id: nodeId } }), 'reach_trust_report');
+  if (trust.verdict !== 'PASS') throw new Error(`reach_trust_report did not pass: ${JSON.stringify(trust)}`);
+  if (!trust.certificateHash || trust.invariants.count < 21) throw new Error('reach_trust_report omitted certificate or invariant evidence');
 
   type CompatTool = { name: string };
   const compatTools = jsonContent<CompatTool[]>(await client.callTool({ name: 'reach_list_tools', arguments: { node_id: nodeId } }), 'reach_list_tools');
@@ -146,10 +151,15 @@ try {
   const plannedPath = `/tmp/dex-reach-plan-smoke-${process.pid}.txt`;
   cleanupFiles.push(plannedPath);
   const plannedMarker = `DEX-REACH-PLANNED-${Date.now()}`;
-  const plan = jsonContent<{ id: string; requestHash: string }>(await client.callTool({
-    name: 'reach_plan', arguments: { node_id: nodeId, operation: 'dex.file.write', arguments: { path: plannedPath, text: plannedMarker, mode: 'rewrite' } }
+  const rejectedIdentity = await client.callTool({
+    name: 'reach_plan', arguments: { node_id: nodeId, operation: 'dex.file.write', arguments: { path: plannedPath, text: plannedMarker, mode: 'rewrite' }, expected_identity: { nodeId: `${nodeId}-wrong` } }
+  });
+  if (!rejectedIdentity.isError) throw new Error('reach_plan accepted a mismatched expected execution identity');
+
+  const plan = jsonContent<{ id: string; requestHash: string; identityHash: string }>(await client.callTool({
+    name: 'reach_plan', arguments: { node_id: nodeId, operation: 'dex.file.write', arguments: { path: plannedPath, text: plannedMarker, mode: 'rewrite' }, expected_identity: { nodeId } }
   }), 'reach_plan');
-  if (!plan.id || !plan.requestHash) throw new Error('reach_plan did not return an exact plan identity');
+  if (!plan.id || !plan.requestHash || !plan.identityHash) throw new Error('reach_plan did not return an exact request and execution identity');
   const commit = await client.callTool({ name: 'reach_commit_plan', arguments: { node_id: nodeId, plan_id: plan.id } });
   if (commit.isError || !textContent(commit).includes(plan.requestHash)) throw new Error(`reach_commit_plan failed: ${textContent(commit)}`);
   const plannedRead = await client.callTool({ name: 'reach_file_read', arguments: { node_id: nodeId, path: plannedPath } });
@@ -160,6 +170,32 @@ try {
   const roots = nodeRecord.allowedRoots ?? [];
   const fixtureBase = roots.find(root => path.resolve(os.tmpdir()).startsWith(root)) ?? roots.find(root => root === '/tmp' || root === '/private/tmp') ?? roots[0];
   if (!fixtureBase) throw new Error('node advertises no allowed roots for the checkpoint fixture');
+
+  identityFixture = await fs.mkdtemp(path.join(fixtureBase, 'dex-reach-identity-smoke-'));
+  await execFileAsync('git', ['init', '-q'], { cwd: identityFixture });
+  await execFileAsync('git', ['config', 'user.email', 'smoke@dex-reach.invalid'], { cwd: identityFixture });
+  await execFileAsync('git', ['config', 'user.name', 'DEX REACH Smoke'], { cwd: identityFixture });
+  await fs.writeFile(path.join(identityFixture, 'baseline.txt'), 'baseline\n');
+  await execFileAsync('git', ['add', 'baseline.txt'], { cwd: identityFixture });
+  await execFileAsync('git', ['commit', '-q', '-m', 'baseline'], { cwd: identityFixture });
+  await execFileAsync('git', ['branch', '-M', 'main'], { cwd: identityFixture });
+  const canonicalIdentityFixture = await fs.realpath(identityFixture);
+  const driftPath = path.join(identityFixture, 'must-not-write.txt');
+  const driftPlan = jsonContent<{ id: string }>(await client.callTool({
+    name: 'reach_plan', arguments: { node_id: nodeId, operation: 'dex.file.write', arguments: { path: driftPath, text: 'identity-drift-must-block', mode: 'rewrite' }, expected_identity: { branch: 'main', repositoryRoot: canonicalIdentityFixture } }
+  }), 'reach_plan identity drift fixture');
+  await execFileAsync('git', ['switch', '-q', '-c', 'identity-drift'], { cwd: identityFixture });
+  const driftCommit = await client.callTool({ name: 'reach_commit_plan', arguments: { node_id: nodeId, plan_id: driftPlan.id } });
+  if (!driftCommit.isError || !/execution identity changed after planning/.test(textContent(driftCommit))) {
+    throw new Error(`reach_commit_plan did not block execution identity drift: ${textContent(driftCommit)}`);
+  }
+  try {
+    await fs.access(driftPath);
+    throw new Error('identity-drift plan mutated the filesystem despite refusal');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+
   fixture = await fs.mkdtemp(path.join(fixtureBase, 'dex-reach-checkpoint-smoke-'));
   await execFileAsync('git', ['init', '-q'], { cwd: fixture });
   await execFileAsync('git', ['config', 'user.email', 'smoke@dex-reach.invalid'], { cwd: fixture });
@@ -175,10 +211,11 @@ try {
   console.log(JSON.stringify({
     ok: true, version: DEX_REACH_VERSION, oauth: true, mcpTools: tools.tools.length, nodeId,
     compatibilityPolicyVerified: true, remoteCompatibilityTools: expectedCompat.length, compatibilityMutationBlocked: true, urlProxyBlocked: true, nativeFileRoundTrip: true, nativeProcessExecution: true, childEnvironmentSanitized: true,
-    adbBinaryAvailable: true, transactionalPlanCommit: true, signedReceiptsVisible: true, checkpoint: true
+    adbBinaryAvailable: true, trustReport: true, transactionalPlanCommit: true, executionIdentityPlanGuard: true, executionIdentityDriftBlocked: true, signedReceiptsVisible: true, checkpoint: true
   }, null, 2));
 } finally {
   for (const file of cleanupFiles) await fs.unlink(file).catch(() => undefined);
   if (fixture) await fs.rm(fixture, { recursive: true, force: true }).catch(() => undefined);
+  if (identityFixture) await fs.rm(identityFixture, { recursive: true, force: true }).catch(() => undefined);
   await client.close().catch(() => undefined);
 }

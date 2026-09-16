@@ -16,7 +16,7 @@ Only what the node's local policy allows, and only inside the folders you listed
   `NODE OWNER has disabled remote AI execution on this node`. The client still sees your node in the
   list with `aiAccess: off`.
 - **READ-ONLY**: read files under your roots, run a fixed list of inspection commands (`pwd`, `ls`,
-  `cat`, `git status`, …), get a machine fingerprint, list ADB devices. Writes, file edits, directory
+  `cat`, `git status`, …), get a machine fingerprint or live trust report, list ADB devices. Writes, file edits, directory
   creation, non-inspection commands, and Git checkpoints are refused.
 - **ON**: the node's configured profile applies (e.g. `development`): read/write files under your roots,
   run bounded shell commands under your roots (60 s max, output capped), Git inspection/checkpoints,
@@ -49,6 +49,11 @@ approved.
 | Allowed roots and execution profile | You, in your node's `.env` file (restart the node to apply) |
 | Which AI clients may talk to the gateway at all | The gateway owner (gateway OAuth approval) |
 | Revoking your node's credential | The gateway owner (gateway) — *and* you can delete it locally |
+
+## Can DEX//REACH prove which environment a mutation will hit?
+Yes, for the high-assurance plan/commit path. `reach_trust_report` returns a fresh evidence-scoped runtime certificate containing the selected node fingerprint, local access state, live trust checks, release-invariant IDs, and a certificate hash. For a consequential mutation, `reach_plan` captures the fresh execution fingerprint; `reach_commit_plan` rechecks it immediately before execution and refuses the plan if identity or repository state changed. You can also supply `expected_identity` fields when planning to require a known node, user, repository root, branch, remote, or runtime before a plan is created.
+
+The trust report is deliberately narrow: PASS means its listed live checks passed. It does not claim that the entire release suite, second-device hardware, Linux path, or hosted CI was re-run on demand.
 
 ## Can the gateway owner still access my machine?
 Not through DEX//REACH unless your node policy allows it. The gateway owner's access is via the same AI clients

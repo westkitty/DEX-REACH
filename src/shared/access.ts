@@ -21,7 +21,7 @@ export type AccessState = {
 
 export const ACCESS_MODES: readonly AccessMode[] = ['off', 'read-only', 'on'];
 const RANK: Record<AccessMode, number> = { off: 0, 'read-only': 1, on: 2 };
-const READ_OPERATIONS = new Set(['dex.fingerprint', 'dex.repoInfo', 'dex.adbDevices', 'dex.file.read', 'dex.result.read', 'dex.receipts.list']);
+const READ_OPERATIONS = new Set(['dex.fingerprint', 'dex.trustReport', 'dex.repoInfo', 'dex.adbDevices', 'dex.file.read', 'dex.result.read', 'dex.receipts.list']);
 
 export function isAccessMode(value: unknown): value is AccessMode {
   return typeof value === 'string' && (ACCESS_MODES as string[]).includes(value);

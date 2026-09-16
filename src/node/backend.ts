@@ -6,6 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { ToolDescriptor } from '../shared/protocol.js';
 import { stateDir } from '../shared/local-env.js';
+import { REMOTE_BLOCKED_COMPATIBILITY_TOOLS } from '../shared/compatibility.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
 
 const SENSITIVE_ENV_KEY = /(^DEX_REACH_(?:NODE_TOKEN|OWNER_PASSWORD|ENV_FILE)$|TOKEN|PASSWORD|PASSWD|SECRET|AUTHORIZATION|COOKIE|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)/i;
@@ -39,7 +40,7 @@ function findConfig(value: unknown): Record<string, unknown> | null {
   return null;
 }
 
-const REMOTE_BLOCKED_TOOLS = new Set(['set_config_value', 'get_recent_tool_calls', 'give_feedback_to_desktop_commander', 'get_prompts']);
+const REMOTE_BLOCKED_TOOLS = new Set<string>(REMOTE_BLOCKED_COMPATIBILITY_TOOLS);
 
 export class DesktopCommanderBackend {
   private client: Client | null = null;

@@ -39,7 +39,7 @@ A fix must preserve DEX//REACH's core trust model:
 - compatibility safety configuration is node-owned. Remote clients cannot change `allowedDirectories`/telemetry configuration, recover Desktop Commander call history, invoke vendor feedback/onboarding surfaces, or use compatibility URL-fetch mode;
 - ON-mode arbitrary shell execution is a high-authority capability: allowed roots constrain its working directory but are **not** an OS filesystem sandbox for arbitrary shell programs. Child processes nevertheless do not inherit DEX credential variables or obvious secret-bearing environment variables, and known parent secret values are redacted from returned stdout/stderr;
 - capability grants can only narrow authority. They cannot override OFF, READ-ONLY, a stricter client ceiling, or configured node roots;
-- exact-action plans bind the node, client, operation/arguments, policy hash, expiry, and one-use state; concurrent claims admit at most one executor and raw plan arguments are scrubbed after claim or expiry;
+- exact-action plans bind the node, client, operation/arguments, policy hash, fresh execution fingerprint, expiry, and one-use state; optional caller-supplied expected-identity fields must match before planning, commit rechecks the stored execution identity before mutation, concurrent claims admit at most one executor, and raw plan arguments are scrubbed after claim or expiry;
 - execution receipts are node-local Ed25519-signed records containing hashes rather than raw request/result contents and are appended as one predecessor-linked chain;
 - bootstrap, owner-policy, grant-use, plan-claim, receipt-chain, node-auth, revocation, and OAuth persistence use atomic or locked state transitions where concurrent writers could otherwise weaken authority or corrupt state;
 - nodes connect outbound and do not expose a raw shell listener;
@@ -48,6 +48,7 @@ A fix must preserve DEX//REACH's core trust model:
 - public source access grants no gateway, OAuth-client, node, or filesystem authority;
 - credentials, enrollment files, tokens, private keys, policies, and sensitive file contents do not enter Git, public documentation, or the redacted audit trail;
 - persistent-service installation and convenience launchers may restore already-installed services but must not silently widen access mode, client ceilings, capability grants, credentials, roots, profiles, or trust boundaries;
+- live trust reports are evidence-scoped: a PASS means only the listed runtime checks passed and never substitutes for full regression, deployment, hardware, or hosted-CI proof;
 - simulation evidence is never represented as proof of separate physical hardware.
 
 Public visibility of this repository is not a security boundary. Authentication, explicit enrollment, least authority, local policy, revocation, and runtime proof are.

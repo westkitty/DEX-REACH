@@ -117,7 +117,7 @@ Every remote operation names a `node_id`. Unknown, blank, offline, or revoked ID
 
 ## What It Can Do
 
-DEX//REACH currently exposes 15 first-class MCP actions:
+DEX//REACH currently exposes 16 first-class MCP actions:
 
 | Action | Purpose |
 | --- | --- |
@@ -125,14 +125,15 @@ DEX//REACH currently exposes 15 first-class MCP actions:
 | `reach_list_tools` | List compatibility-adapter tools available on one selected node |
 | `reach_call` | Invoke one compatibility tool on one explicit node |
 | `reach_fingerprint` | Prove which physical/runtime environment will execute work |
+| `reach_trust_report` | Return a fresh evidence-scoped trust certificate with runtime checks, fingerprint, access state, invariant IDs, and certificate hash |
 | `reach_repo_info` | Inspect Git repository state without mutating it |
 | `reach_adb_devices` | Discover Android devices visible to a node through ADB |
 | `reach_checkpoint` | Capture a reversible Git worktree checkpoint |
 | `reach_file_read` | Read a bounded UTF-8 file inside the node's allowed roots |
 | `reach_file_write` | Write or append UTF-8 text inside allowed roots |
 | `reach_process_run` | Run a bounded guarded shell command on the selected node |
-| `reach_plan` | Create a short-lived exact-action plan with current policy hash and checkpoint attempt |
-| `reach_commit_plan` | Commit one exact plan once; refuse stale, changed-client, changed-policy, or expired plans |
+| `reach_plan` | Create a short-lived exact-action plan with current policy hash, execution-identity lock, optional expected-identity preflight, and checkpoint attempt |
+| `reach_commit_plan` | Commit one exact plan once; refuse stale, changed-client, changed-policy, changed-identity, or expired plans |
 | `reach_receipts` | Read recent node-signed execution receipts and their tamper-evident hash chain |
 | `reach_result_read` | Continue reading a large bounded result |
 | `reach_revoke_node` | Revoke one node credential and disconnect that node |
@@ -306,8 +307,8 @@ A normal safe sequence is:
 
 1. `reach_list_nodes`
 2. choose the exact `node_id`
-3. `reach_fingerprint` if execution identity matters
-4. for consequential mutation, call `reach_plan` with the exact target operation and arguments
+3. call `reach_trust_report` for a fresh runtime trust certificate; use `reach_fingerprint` when you need the raw identity record
+4. for consequential mutation, call `reach_plan` with the exact target operation and arguments and, when you already know the intended environment, an `expected_identity` constraint
 5. commit that plan once with `reach_commit_plan` (or use a direct mutation only when transactional binding is unnecessary)
 6. inspect the returned result and, when proof matters, `reach_receipts`
 
@@ -320,7 +321,9 @@ and read /Users/device-owner/projects/example/README.md.
 Do not use any other node.
 ```
 
-If the target node is OFF, read-only for a mutation, offline, unknown, or revoked, DEX//REACH returns an error. It does not silently choose another computer.
+Every successful `reach_plan` captures the fresh execution fingerprint and binds it into the plan. `reach_commit_plan` re-captures that identity immediately before mutation and refuses execution if the machine, user, working directory, repository root, branch, remote, platform, architecture, or Node runtime changed. `expected_identity` adds a caller-supplied preflight on top of that automatic drift lock.
+
+If the target node is OFF, read-only for a mutation, offline, unknown, revoked, or no longer matches a planned execution identity, DEX//REACH returns an error. It does not silently choose another computer.
 
 ---
 
@@ -332,13 +335,19 @@ Primary deterministic source/build gate:
 npm run verify
 ```
 
+The machine-consumable release-invariant index can also be emitted directly:
+
+```bash
+npm run invariants
+```
+
 Full deployed golden-worker gate:
 
 ```bash
 npm run verify:golden
 ```
 
-`npm run verify` runs typecheck, the complete regression suite, production build, production dependency audit, and the raw compatibility-backend probe. `npm run verify:golden` adds the live public OAuth/PKCE MCP smoke. The smoke verifies all 15 first-class tools and metadata, deployed node version, the exact 22-tool safe compatibility surface, blocked safety/history/vendor/URL-proxy paths, telemetry/allowed-root policy, child-process credential-environment sanitization, ADB availability, native file/process execution, exact plan→commit, signed receipts, and reversible checkpoint behavior. See [`docs/GOLDEN_WORKER.md`](docs/GOLDEN_WORKER.md) for the end-to-end release path including persistent install and Dock proof.
+`npm run verify` runs typecheck, the machine invariant-manifest check, the complete regression suite, production build, production dependency audit, and the raw compatibility-backend probe. `npm run verify:golden` adds the live public OAuth/PKCE MCP smoke. The smoke verifies all 16 first-class tools and metadata, the evidence-scoped trust report, deployed node version, the exact 22-tool safe compatibility surface, blocked safety/history/vendor/URL-proxy paths, telemetry/allowed-root policy, child-process credential-environment sanitization, ADB availability, native file/process execution, rejected mismatched execution identity, identity-bound plan→commit, signed receipts, and reversible checkpoint behavior. See [`docs/GOLDEN_WORKER.md`](docs/GOLDEN_WORKER.md) for the end-to-end release path including persistent install and Dock proof.
 
 `scripts/sim-two-nodes.ts` drives a second isolated node through the live gateway and verifies multi-node routing, roots, access modes, client caps, audit attribution, credential isolation, and no-fallback behavior.
 

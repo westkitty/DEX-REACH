@@ -1,6 +1,6 @@
 {
   "name": "dex-reach",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Secure AI-native remote computing control plane and MCP gateway",
   "scripts": {
     "test": "node --test --import tsx tests/*.test.ts",
@@ -15,9 +15,10 @@
     "uninstall:macos": "tsx scripts/uninstall-macos.ts",
     "nodes": "tsx scripts/node-credentials.ts",
     "dex": "tsx scripts/dex-reach.ts",
+    "invariants": "tsx scripts/invariants.ts",
     "install:node": "npm run build && tsx scripts/install-node.ts",
     "install:dock": "zsh scripts/install-dock-launcher.sh",
-    "verify": "npm run typecheck && npm test && npm run build && npm audit --omit=dev --audit-level=high && npm run probe:backend",
+    "verify": "npm run typecheck && npm run invariants -- --check && npm test && npm run build && npm audit --omit=dev --audit-level=high && npm run probe:backend",
     "verify:golden": "npm run verify && npm run smoke"
   },
   "keywords": [],

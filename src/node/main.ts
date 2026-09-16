@@ -6,6 +6,8 @@ import { ResultStore } from './result-store.js';
 import { nativeCall, createCheckpoint, defaultCwd } from './native.js';
 import { executionFingerprint } from '../shared/fingerprint.js';
 import { toolGuard, pathAllowed } from '../shared/security.js';
+import { assertExecutionIdentityExpectation, assertExecutionIdentityStable, executionIdentityHash, parseExecutionIdentityExpectation } from '../shared/execution-identity.js';
+import { collectNodeTrustReport } from './trust-report.js';
 import { AuditLog } from '../shared/audit.js';
 import {
   REACH_PROTOCOL_VERSION,
@@ -57,18 +59,33 @@ async function executeOperation(operation: string, args: Record<string, unknown>
   if (operation === 'dex.result.read') {
     return results.read(String(args.handle || ''), Number(args.offset || 0), Number(args.length || 65536));
   }
+  if (operation === 'dex.trustReport') {
+    return collectNodeTrustReport({
+      nodeId: config.nodeId,
+      profile: config.profile,
+      allowedRoots: config.allowedRoots,
+      gatewayWs: config.gatewayWs,
+      tools: backend.listTools(),
+      agentVersion: DEX_REACH_VERSION
+    });
+  }
   if (operation === 'dex.receipts.list') return listReceipts(config.nodeId, Number(args.limit || 20));
   return nativeCall(config.nodeId, operation, args, config.allowedRoots, profile);
 }
 
-async function checkpointForPlan(operation: string, args: Record<string, unknown>): Promise<string | null> {
-  if (!['dex.file.write', 'dex.process.run', 'dc.call'].includes(operation)) return null;
+function identityCwdForPlan(args: Record<string, unknown>): string {
   const cwdCandidate = typeof args.cwd === 'string'
     ? args.cwd
     : typeof args.path === 'string'
       ? path.dirname(args.path)
       : defaultCwd(config.allowedRoots);
-  if (!path.isAbsolute(cwdCandidate) || !pathAllowed(cwdCandidate, config.allowedRoots)) return null;
+  if (!path.isAbsolute(cwdCandidate) || !pathAllowed(cwdCandidate, config.allowedRoots)) return defaultCwd(config.allowedRoots);
+  return cwdCandidate;
+}
+
+async function checkpointForPlan(operation: string, args: Record<string, unknown>): Promise<string | null> {
+  if (!['dex.file.write', 'dex.process.run', 'dc.call'].includes(operation)) return null;
+  const cwdCandidate = identityCwdForPlan(args);
   try {
     return String((await createCheckpoint(cwdCandidate) as { id: string }).id);
   } catch {
@@ -83,6 +100,9 @@ async function buildPlan(actor: RequestActor | undefined, args: Record<string, u
   const state = await loadAccessState(config.nodeId);
   const decision = authorizeOperation(state, actor, operation, config.profile, Date.now(), targetArgs);
   if (!decision.allowed) throw new Error(decision.reason);
+  const fingerprint = await executionFingerprint(config.nodeId, identityCwdForPlan(targetArgs));
+  const expectedIdentity = parseExecutionIdentityExpectation(args.expectedIdentity);
+  assertExecutionIdentityExpectation(expectedIdentity, fingerprint);
   const checkpointId = await checkpointForPlan(operation, targetArgs);
   const plan = await createPlan({
     nodeId: config.nodeId,
@@ -90,7 +110,9 @@ async function buildPlan(actor: RequestActor | undefined, args: Record<string, u
     operation,
     args: targetArgs,
     policyHash: hashValue(state),
-    checkpointId
+    checkpointId,
+    fingerprint,
+    fingerprintHash: executionIdentityHash(fingerprint)
   });
   return {
     id: plan.id,
@@ -99,7 +121,9 @@ async function buildPlan(actor: RequestActor | undefined, args: Record<string, u
     requestHash: plan.requestHash,
     policyHash: plan.policyHash,
     checkpointId: plan.checkpointId,
-    expiresAt: plan.expiresAt
+    expiresAt: plan.expiresAt,
+    identityHash: plan.fingerprintHash,
+    identity: plan.fingerprint
   };
 }
 
@@ -109,6 +133,10 @@ async function commitPlan(actor: RequestActor | undefined, args: Record<string, 
   if ((plan.actor?.clientId || null) !== (actor?.clientId || null) || (plan.actor?.kind || null) !== (actor?.kind || null)) {
     throw new Error('execution plan belongs to a different client');
   }
+  if (!plan.fingerprint || !plan.fingerprintHash) throw new Error('execution plan predates identity binding; create a new plan');
+  if (executionIdentityHash(plan.fingerprint) !== plan.fingerprintHash) throw new Error('stored execution identity is inconsistent; create a new plan');
+  const currentFingerprint = await executionFingerprint(config.nodeId, plan.fingerprint.cwd);
+  assertExecutionIdentityStable(plan.fingerprint, currentFingerprint);
   const reservation = await reserveOperation(
     config.nodeId,
     actor,

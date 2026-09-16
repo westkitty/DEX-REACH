@@ -10,8 +10,8 @@ The golden worker separates and checks these states instead of conflating them:
 2. **Built output** — TypeScript emits successfully and production dependencies are acceptable.
 3. **Installed service definition** — launchd plists are valid and point at the intended repository/runtime.
 4. **Running gateway/node** — the persistent processes actually restarted and the node re-registered.
-5. **Public MCP surface** — OAuth/PKCE reaches the deployed gateway and all 15 first-class tools are advertised.
-6. **Execution path** — compatibility policy, native file/process operations, ADB availability, exact plan→commit, signed receipts, and checkpointing really execute.
+5. **Public MCP surface** — OAuth/PKCE reaches the deployed gateway and all 16 first-class tools are advertised.
+6. **Execution path** — compatibility policy, live trust reporting, native file/process operations, ADB availability, identity-bound exact plan→commit, signed receipts, and checkpointing really execute.
 7. **Owner authority** — local OFF / READ-ONLY / ON policy remains the final gate; installation and the Dock launcher do not widen it.
 8. **Human recovery path** — the Dock icon opens a dedicated DEX//REACH Terminal console from the installed app bundle.
 
@@ -37,6 +37,7 @@ npm run verify
 
 ```bash
 npm run typecheck
+npm run invariants -- --check
 npm test
 npm run build
 npm audit --omit=dev --audit-level=high
@@ -72,14 +73,16 @@ npm run verify:golden
 
 This reruns the deterministic gate and then executes the public OAuth/PKCE smoke. A passing smoke proves the deployed node version and these live paths:
 
-- 15 first-class MCP actions with metadata;
+- 16 first-class MCP actions with metadata;
 - explicit node discovery and fingerprint;
+- an evidence-scoped `reach_trust_report` with fresh runtime checks, invariant IDs, and certificate hash;
 - exactly 22 remote compatibility tools, with node-owned safety configuration, local call-history/vendor surfaces, and URL proxying withheld;
 - isolated compatibility configuration with telemetry disabled and allowed roots enforced;
 - ADB executable availability;
 - native file write/read roundtrip;
 - guarded process execution with DEX/secret-bearing child-environment variables removed;
-- exact one-use `reach_plan` → `reach_commit_plan` execution;
+- refusal of a mismatched caller-supplied execution identity;
+- exact one-use `reach_plan` → `reach_commit_plan` execution with automatic plan-time fingerprint binding and commit-time identity recheck;
 - signed receipt visibility for the committed plan;
 - reversible Git checkpoint capture.
 
@@ -143,7 +146,7 @@ Do **not** call the candidate verified if any of these are true:
 - `install-macos.status.json` is not `complete`;
 - the gateway/node does not reconnect;
 - deployed node version differs from repository version;
-- public smoke fails OAuth resource binding, compatibility-surface restrictions, environment-sanitization proof, or any execution proof;
+- public smoke fails OAuth resource binding, trust-report runtime checks, compatibility-surface restrictions, environment-sanitization proof, execution-identity refusal, or any execution proof;
 - ADB reports `available: false`;
 - the Dock bundle fails signature/path checks or does not open its own console;
 - installation or launcher use changes owner authority without an explicit console action;
