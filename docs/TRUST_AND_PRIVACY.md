@@ -37,7 +37,7 @@ Only what the node's local policy allows, and only inside the folders you listed
 ## Does installing this expose a shell to the internet?
 No. Public availability of the source code does not change the network boundary. The node opens **no listening port**. It makes one outbound WebSocket connection (TLS) to the
 gateway and authenticates with its own per-node credential. The public HTTPS endpoint belongs to the
-gateway (the gateway owner's machine), which only accepts OAuth-authenticated MCP requests from clients Andrew
+gateway (the gateway owner's machine), which only accepts OAuth-authenticated MCP requests from clients the gateway owner
 approved.
 
 ## Who controls what
@@ -50,9 +50,9 @@ approved.
 | Which AI clients may talk to the gateway at all | The gateway owner (gateway OAuth approval) |
 | Revoking your node's credential | The gateway owner (gateway) — *and* you can delete it locally |
 
-## Can Andrew still access my machine?
-Not through DEX//REACH unless your node policy allows it. the gateway owner's access is via the same AI clients
-and hits the same node-side gate. He cannot change your policy file; it is on your disk. He *can*
+## Can the gateway owner still access my machine?
+Not through DEX//REACH unless your node policy allows it. The gateway owner's access is via the same AI clients
+and hits the same node-side gate. They cannot change your policy file; it is on your disk. They *can*
 revoke your node (which only disconnects it).
 
 ## Can I shut ChatGPT out without the gateway owner?
@@ -73,7 +73,7 @@ folder. The gateway does not need to be online.
 - **my node credential leaks?** Someone could run a fake node claiming to be you (and receive requests
   meant for you). They could not reach *your* machine with it. Fix: `npm run nodes -- revoke` on the
   gateway and re-enroll. Credentials are stored mode 0600 and only hashes live on the gateway.
-- **the gateway owner's owner password leaks?** New AI clients could be approved at the gateway. Your node policy
+- **the gateway owner's password leaks?** New AI clients could be approved at the gateway. Your node policy
   still applies to all of them.
 
 ## Are commands logged? Where?
@@ -95,7 +95,7 @@ Your node credential, your policy file, files outside your roots, and anything w
 The compatibility adapter runs with telemetry disabled in an isolated home directory.
 
 ## Known limits (honest)
-- Client attribution ("ChatGPT asked") comes from the OAuth client's registered name, which Andrew sees
+- Client attribution ("ChatGPT asked") comes from the OAuth client's registered name, which the gateway owner sees
   and approves once at the gateway. It is attribution, not cryptographic proof.
 - READ-ONLY is a curated allow-list of inspection commands; anything not on it is refused (so it may refuse
   a harmless command — that is the safe direction).
