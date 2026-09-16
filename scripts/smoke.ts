@@ -82,7 +82,12 @@ await connect();
 const tools = await client.listTools();
 const required = ['reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write', 'reach_process_run', 'reach_result_read', 'reach_revoke_node'];
 for (const name of required) {
-  if (!tools.tools.some(tool => tool.name === name)) throw new Error(`missing MCP tool: ${name}`);
+  const tool = tools.tools.find(candidate => candidate.name === name);
+  if (!tool) throw new Error(`missing MCP tool: ${name}`);
+  // ChatGPT derives action titles and read/write classification from these; keep them mandatory.
+  if (!tool.title || !tool.description || typeof tool.annotations?.readOnlyHint !== 'boolean') {
+    throw new Error(`MCP tool ${name} is missing title, description, or readOnlyHint annotation`);
+  }
 }
 const nodeId = process.env.DEX_REACH_NODE_ID || '';
 if (!nodeId) throw new Error('DEX_REACH_NODE_ID missing');
@@ -102,7 +107,13 @@ const readResult = await client.callTool({ name: 'reach_file_read', arguments: {
 if (readResult.isError || !JSON.stringify(readResult).includes(marker)) throw new Error('DEX-native file roundtrip did not preserve content');
 const processResult = await client.callTool({ name: 'reach_process_run', arguments: { node_id: nodeId, command: 'pwd', cwd: '/tmp', timeout_ms: 4000 } });
 if (processResult.isError) throw new Error('DEX-native process execution failed');
-const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-checkpoint-smoke-'));
+// The checkpoint fixture must live inside a root the node actually advertises; os.tmpdir() may be a
+// per-session /var/folders path outside every allowed root.
+const nodeRecord = (JSON.parse((nodes.content as { text: string }[])[0]!.text) as { nodeId: string; allowedRoots: string[] }[]).find(entry => entry.nodeId === nodeId);
+const roots = nodeRecord?.allowedRoots ?? [];
+const fixtureBase = roots.find(root => path.resolve(os.tmpdir()).startsWith(root)) ?? roots.find(root => root === '/tmp' || root === '/private/tmp') ?? roots[0];
+if (!fixtureBase) throw new Error('node advertises no allowed roots for the checkpoint fixture');
+const fixture = await fs.mkdtemp(path.join(fixtureBase, 'dex-reach-checkpoint-smoke-'));
 await execFileAsync('git', ['init', '-q'], { cwd: fixture });
 await execFileAsync('git', ['config', 'user.email', 'smoke@dex-reach.invalid'], { cwd: fixture });
 await execFileAsync('git', ['config', 'user.name', 'DEX REACH Smoke'], { cwd: fixture });

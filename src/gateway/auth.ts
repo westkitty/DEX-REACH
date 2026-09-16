@@ -29,6 +29,7 @@ type CodeRecord = {
 type PendingApproval = CodeRecord & { ticketId: string };
 
 const EMPTY_STATE: PersistedAuth = { clients: {}, access: {}, refresh: {} };
+export const SUPPORTED_SCOPES: readonly string[] = ['mcp:tools'];
 
 function tokenHash(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -98,6 +99,11 @@ export class ReachOAuthProvider implements OAuthServerProvider {
   async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
     if (!client.redirect_uris.map(String).includes(params.redirectUri)) throw new Error('unregistered redirect_uri');
     if (params.resource && params.resource.toString() !== this.resourceUrl.toString()) throw new Error('invalid resource');
+    // Clients that omit `scope` (or register without one) get the single supported scope instead of an
+    // empty grant that the bearer middleware would later reject; unknown scopes are refused outright.
+    const requestedScopes = params.scopes?.length ? params.scopes : [...SUPPORTED_SCOPES];
+    if (requestedScopes.some(scope => !SUPPORTED_SCOPES.includes(scope))) throw new Error('unsupported scope');
+    params = { ...params, scopes: requestedScopes };
     const ticketId = randomToken(24);
     this.pending.set(ticketId, { ticketId, client, params, expiresAt: Date.now() + 10 * 60 * 1000 });
     const clientName = htmlEscape(client.client_name || client.client_id);
@@ -130,7 +136,7 @@ export class ReachOAuthProvider implements OAuthServerProvider {
     const record = this.codes.get(authorizationCode);
     if (!record || record.expiresAt < Date.now() || record.client.client_id !== client.client_id) throw new Error('invalid authorization code');
     this.codes.delete(authorizationCode);
-    return this.issueTokens(client.client_id, record.params.scopes || ['mcp:tools'], record.params.resource?.toString());
+    return this.issueTokens(client.client_id, record.params.scopes?.length ? record.params.scopes : [...SUPPORTED_SCOPES], record.params.resource?.toString());
   }
   async exchangeRefreshToken(client: OAuthClientInformationFull, refreshToken: string, scopes?: string[], resource?: URL): Promise<OAuthTokens> {
     const record = this.state.refresh[tokenHash(refreshToken)];

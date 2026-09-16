@@ -28,7 +28,37 @@ await registry.initialize();
 
 const allowedHosts = [config.publicBaseUrl.host, config.publicBaseUrl.hostname, 'localhost', '127.0.0.1'];
 const app = createMcpExpressApp({ host: config.host, allowedHosts: [...new Set(allowedHosts)] });
+// The public HTTPS ingress (Tailscale Funnel) proxies from loopback and sets X-Forwarded-For;
+// trusting loopback lets the SDK rate limiters key on the real client instead of failing validation.
+app.set('trust proxy', 'loopback');
 app.use(express.urlencoded({ extended: false }));
+
+// Handshake diagnostics: method, path, status, timing, client UA, JSON-RPC method, MCP protocol version.
+// Never logs query strings, bodies, cookies, or Authorization headers.
+app.use((req, res, next) => {
+  if (req.path === '/healthz') return next();
+  const started = Date.now();
+  const route = req.originalUrl.split('?')[0];
+  res.on('finish', () => {
+    const body = req.body as Record<string, unknown> | undefined;
+    const rpc = body && typeof body === 'object' && typeof body.method === 'string' ? body.method : '';
+    const dcrName = route === '/register' && body && typeof body.client_name === 'string' ? body.client_name : '';
+    const parts = [
+      `[http] ${req.method} ${route} ${res.statusCode} ${Date.now() - started}ms`,
+      `ua=${JSON.stringify(String(req.headers['user-agent'] || '').slice(0, 96))}`,
+      rpc ? `rpc=${rpc}` : '',
+      req.headers['mcp-protocol-version'] ? `mcpv=${String(req.headers['mcp-protocol-version'])}` : '',
+      req.headers['mcp-session-id'] ? 'session=yes' : '',
+      route === '/mcp' ? `accept=${JSON.stringify(String(req.headers.accept || ''))}` : '',
+      dcrName ? `client_name=${JSON.stringify(dcrName)}` : '',
+      route === '/authorize' && typeof req.query.scope === 'string' ? `scope=${JSON.stringify(req.query.scope)}` : '',
+      route === '/authorize' && typeof req.query.resource === 'string' ? `resource=${JSON.stringify(req.query.resource)}` : '',
+      res.statusCode >= 300 && res.statusCode < 400 && route === '/authorize' ? `redirect_error=${JSON.stringify(new URL(String(res.getHeader('location') || 'http://x/'), 'http://x/').searchParams.get('error') || '')}` : ''
+    ].filter(Boolean);
+    console.log(parts.join(' '));
+  });
+  next();
+});
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true, service: 'DEX//REACH', version: '0.2.0', onlineNodes: registry.listNodes().length });

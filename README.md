@@ -63,6 +63,47 @@ npm run nodes -- revoke bigmac
 
 `rotate` keeps the prior credential valid only for the requested grace window, allowing a node to reload the new credential without restarting the gateway. The gateway refreshes persisted credential state on new node connections, so rotation is node-local rather than fleet-wide.
 
+## Enrolling a second device (another person's machine)
+
+Every node is an independent identity: its own node ID, its own credential, its own allowed roots, its own
+profile, and its own locally detected fingerprint. Nothing in routing assumes a particular machine; every
+MCP action takes an explicit `node_id` and the gateway refuses to route to a node that is not online under
+that exact ID, so a command aimed at one machine never silently runs on another.
+
+Workflow (gateway owner = Andrew; new device owner = e.g. Bryan):
+
+1. **Gateway owner enrolls the node** (on the gateway machine):
+   ```bash
+   npm run nodes -- enroll bryan-laptop --profile development --roots /Users/bryan
+   ```
+   This writes `~/.dex-reach/nodes/bryan-laptop.env` (mode 0600) containing the node ID, the freshly
+   generated token, the profile, the allowed roots, and the public `wss://…/node` gateway URL. Only the
+   SHA-256 hash of the token is kept in `node-auth.json`; the plaintext exists only in that env file.
+2. **Transfer the env file securely** to the new device (AirDrop, password manager share, an encrypted
+   channel — never Git, chat, or email). Delete the copy on the gateway machine afterwards if desired; the
+   gateway does not need it. Adjust `DEX_REACH_ALLOWED_ROOTS` to that machine's real paths.
+3. **Install the node on the new device** (Node.js 22+):
+   ```bash
+   git clone git@github.com:westkitty/DEX-REACH.git && cd DEX-REACH && npm ci && npm run build
+   mkdir -p ~/.dex-reach/nodes && mv /path/to/bryan-laptop.env ~/.dex-reach/nodes/ && chmod 600 ~/.dex-reach/nodes/bryan-laptop.env
+   DEX_REACH_ENV_FILE=~/.dex-reach/nodes/bryan-laptop.env node dist/src/node/main.js
+   ```
+   The node detects its own hostname, user, platform, architecture, and runtime, and connects **outbound**
+   over WebSocket to the gateway. No inbound port, SSH exposure, or shell listener is required on the new
+   device.
+4. **Verify from the gateway side**: `curl https://<gateway>/healthz` reports the new online node count, and
+   `reach_list_nodes` from ChatGPT or Claude lists `bryan-laptop` separately with its own fingerprint.
+5. **Select it explicitly** in the AI client (`node_id: "bryan-laptop"`). Revocation (`npm run nodes -- revoke bryan-laptop`
+   or the `reach_revoke_node` action) affects only that credential.
+
+Platform status (honest): the node runtime is portable Node/TypeScript and the protocol is OS-agnostic.
+Persistent service installation is implemented and verified only for macOS `launchd`
+(`npm run install:macos`). Linux (systemd) and Windows (Task Scheduler / service) adapters are not yet
+written; on those platforms run the node manually or under your own supervisor. Bounded process execution
+uses a POSIX login shell (`/bin/zsh` on macOS, `/bin/sh` elsewhere, override with `DEX_REACH_SHELL`) and
+refuses to run on Windows until a Windows executor exists. The compatibility adapter is a Node package and
+starts wherever Node runs, but has only been exercised on macOS.
+
 ## Public HTTPS for ChatGPT / Claude
 
 Keep the gateway bound to localhost and put TLS in front of it. On a Tailscale machine, Funnel can proxy the gateway over public HTTPS:
@@ -90,4 +131,13 @@ npm run smoke
 
 ## Client state
 
-Claude Code can be registered directly with `claude mcp add --transport http --scope user dex-reach https://macbook-air.tailafb7e8.ts.net/mcp` and OAuth-authenticated with `claude mcp login dex-reach`. ChatGPT Business custom full-MCP deployment is performed through workspace Developer Mode / Apps using the same `/mcp` URL; DEX//REACH does not require vendor-specific server code.
+Claude Code can be registered directly with `claude mcp add --transport http --scope user dex-reach https://macbook-air.tailafb7e8.ts.net/mcp` and OAuth-authenticated with `claude mcp login dex-reach`.
+
+ChatGPT Business: create the custom MCP app under Workspace Settings → Apps → Create (Server URL = the
+public `/mcp` URL, Authentication = OAuth, registration = Dynamic Client Registration, default scope
+`mcp:tools`). The app's action list is populated only after an admin **connects** the app (user-side
+Settings → Apps → DEX//REACH → Connect), which runs the OAuth flow against the DEX authorization page; the
+owner credentials are `DEX_REACH_OWNER_USER` / `DEX_REACH_OWNER_PASSWORD` from `~/.dex-reach/secrets.env`.
+Once a link exists, Manage app → Configure actions → Refresh pulls `tools/list` and the actions appear
+with titles and read/write classification derived from MCP tool annotations. Without a connected link the
+app shows "0 actions" and Refresh is disabled — that is not a server fault.

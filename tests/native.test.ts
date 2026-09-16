@@ -27,3 +27,18 @@ test('DEX-native file and process paths enforce scope and guardrails', async () 
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('node shell selection is platform-aware and overridable', async () => {
+  const { nodeShell } = await import('../src/node/native.js');
+  const previous = process.env.DEX_REACH_SHELL;
+  try {
+    delete process.env.DEX_REACH_SHELL;
+    if (process.platform === 'win32') assert.throws(() => nodeShell(), /win32/);
+    else assert.equal(nodeShell(), process.platform === 'darwin' ? '/bin/zsh' : '/bin/sh');
+    process.env.DEX_REACH_SHELL = '/bin/bash';
+    assert.equal(nodeShell(), '/bin/bash');
+  } finally {
+    if (previous === undefined) delete process.env.DEX_REACH_SHELL;
+    else process.env.DEX_REACH_SHELL = previous;
+  }
+});

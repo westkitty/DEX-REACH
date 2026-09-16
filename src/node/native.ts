@@ -95,12 +95,22 @@ export async function nativeWriteFile(file: string, text: string, mode: 'rewrite
   return { path: file, bytes: stat.size, mode };
 }
 
+// POSIX login shell used for bounded process execution. Override with DEX_REACH_SHELL on a node whose
+// shell lives elsewhere. Windows nodes are not supported by this executor yet; fail loudly instead of guessing.
+export function nodeShell(): string {
+  const configured = process.env.DEX_REACH_SHELL?.trim();
+  if (configured) return configured;
+  if (process.platform === 'win32') throw new Error('dex.process.run is not supported on win32 nodes yet');
+  return process.platform === 'darwin' ? '/bin/zsh' : '/bin/sh';
+}
+
 export async function nativeProcess(command: string, cwd: string, profile: ReachProfile, timeoutMs: number): Promise<Record<string, unknown>> {
   const blocked = commandGuard(command, profile);
   if (blocked) throw new Error(blocked);
   const timeout = Math.max(100, Math.min(timeoutMs, 60_000));
+  const shell = nodeShell();
   try {
-    const { stdout, stderr } = await execFileAsync('/bin/zsh', ['-lc', command], { cwd, timeout, maxBuffer: 2 * 1024 * 1024 });
+    const { stdout, stderr } = await execFileAsync(shell, ['-lc', command], { cwd, timeout, maxBuffer: 2 * 1024 * 1024 });
     return { exitCode: 0, stdout, stderr };
   } catch (error) {
     const value = error as Error & { code?: number; stdout?: string; stderr?: string };
