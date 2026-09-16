@@ -98,7 +98,7 @@ ChatGPT / Claude Code / other MCP client
         +---------+---------+
         |                   |
         v                   v
-  Andrew's node        another node
+  gateway node         another node
   local policy         local policy
   local roots          local roots
   local audit          local audit
@@ -208,7 +208,7 @@ A second machine gets its **own** node ID, credential, allowed roots, execution 
 ### 1. Gateway owner enrolls it
 
 ```bash
-npm run nodes -- enroll bryan-laptop --profile development
+npm run nodes -- enroll second-laptop --profile development
 ```
 
 This creates a private node environment file under `~/.dex-reach/nodes/`. Transfer that file privately to the device owner. Do not put it in Git, ChatGPT, email, or a public paste.
@@ -216,13 +216,13 @@ This creates a private node environment file under `~/.dex-reach/nodes/`. Transf
 ### 2. Device owner installs the node
 
 ```bash
-git clone git@github.com:westkitty/DEX-REACH.git
+git clone https://github.com/westkitty/DEX-REACH.git
 cd DEX-REACH
 npm ci
-npm run install:node -- --env /path/to/bryan-laptop.env --roots "$HOME/projects" --service
+npm run install:node -- --env /path/to/second-laptop.env --roots "$HOME/projects" --service
 ```
 
-Because this repository is private, the device owner needs repository access or a separately supplied source/package copy.
+The source repository is public, so no repository invitation is required. Public source access does **not** enroll a device or grant access to any gateway: the separately generated node environment file is still a secret and must be transferred privately.
 
 The node starts with AI access **OFF**.
 
@@ -264,7 +264,7 @@ DEX//REACH is designed around the assumption that AI clients should **not** be t
 
 When access is ON, prompt-injection and compromised-client risk still exist. The point of DEX//REACH is not to pretend otherwise; it gives the machine owner a local boundary, smaller blast radius, auditability, and an immediate kill switch.
 
-Read the plain-language threat model in [`docs/TRUST_AND_PRIVACY.md`](docs/TRUST_AND_PRIVACY.md).
+Read the plain-language threat model in [`docs/TRUST_AND_PRIVACY.md`](docs/TRUST_AND_PRIVACY.md). Report suspected vulnerabilities through the private process in [`SECURITY.md`](SECURITY.md), not a public issue.
 
 ---
 
@@ -282,8 +282,8 @@ Example intent:
 
 ```text
 Using DEX//REACH, list the available nodes.
-Then use only bryan-laptop, get its execution fingerprint,
-and read /Users/bryan/projects/example/README.md.
+Then use only second-laptop, get its execution fingerprint,
+and read /Users/device-owner/projects/example/README.md.
 Do not use any other node.
 ```
 
@@ -347,6 +347,7 @@ Before changing execution, routing, authentication, policy, or install behavior,
 │   └── TRUST_AND_PRIVACY.md
 ├── OPERATIONAL_STATE.md  # authoritative current state and verification evidence
 ├── ATTRIBUTION.md
+├── SECURITY.md
 ├── package.json
 └── README.md
 ```
@@ -371,7 +372,7 @@ The README explains the system. `OPERATIONAL_STATE.md` controls what is actually
 
 ## Known Limits
 
-- Bryan's actual physical machine has not been enrolled yet; second-node behavior is verified through a real isolated node process and real AI clients, not his hardware.
+- No second physical machine has been enrolled yet; second-node behavior is verified through a real isolated node process and real AI clients, not separate hardware.
 - Linux service installation is implemented but has not been run on a real Linux host.
 - Windows process execution and service installation are not implemented.
 - ADB discovery works through DEX//REACH, but real Android hardware control is not yet verified.
@@ -383,6 +384,7 @@ The README explains the system. `OPERATIONAL_STATE.md` controls what is actually
 
 - [Operational state / verification record](OPERATIONAL_STATE.md)
 - [Trust and privacy, plainly](docs/TRUST_AND_PRIVACY.md)
+- [Security policy and vulnerability reporting](SECURITY.md)
 - [Second-device quickstart](docs/SECOND_DEVICE_QUICKSTART.md)
 - [Third-party attribution](ATTRIBUTION.md)
 

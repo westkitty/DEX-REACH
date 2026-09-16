@@ -1,14 +1,14 @@
 # DEX//REACH Operational State
 
 <!-- operational-state:metadata
-{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":"/Users/andrew/DEX-REACH","artifact_path":"","state_revision":5,"last_updated":"2026-09-16T02:36:00Z","current_baseline":{"identity":"DEX//REACH 0.2.0 node-local-policy / second-device-ready baseline on main","state":"current-baseline","last_verified":"2026-09-16T02:36:00Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, project docs"],"linked_parent_state":null}
+{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":"/Users/andrew/DEX-REACH","artifact_path":"","state_revision":6,"last_updated":"2026-09-16T09:08:19Z","current_baseline":{"identity":"DEX//REACH 0.2.0 public-source / node-local-policy / second-device-ready baseline on main","state":"current-baseline","last_verified":"2026-09-16T02:36:00Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, project docs"],"linked_parent_state":null}
 -->
 
 ## 1. Project Identity and Scope
 DEX//REACH is a secure AI-native remote-computing control plane intended to replace the useful Remote Desktop Commander workflow without depending on its hosted relay.
 
 ## 2. Current Baseline
-Private repository at `/Users/andrew/DEX-REACH`. macOS gateway and node are installed as user `launchd` services. Public HTTPS ingress is active at `https://macbook-air.tailafb7e8.ts.net` through Tailscale Funnel. The Mac node uses its own mode-0600 credential file and gateway authentication is keyed by node ID with persisted token hashes. The ChatGPT Business workspace app `DEX//REACH` (`asdk_app_6aa9df5974b081918e1b66f8d1aad2d2`) is enabled, OAuth-linked, exposes all 12 MCP actions, and has passed real-client parity tests.
+Public source repository at `https://github.com/westkitty/DEX-REACH`; the active deployment remains rooted at `/Users/andrew/DEX-REACH`. macOS gateway and node are installed as user `launchd` services. Public HTTPS ingress is active at `https://macbook-air.tailafb7e8.ts.net` through Tailscale Funnel. The Mac node uses its own mode-0600 credential file and gateway authentication is keyed by node ID with persisted token hashes. The ChatGPT Business workspace app `DEX//REACH` (`asdk_app_6aa9df5974b081918e1b66f8d1aad2d2`) is enabled, OAuth-linked, exposes all 12 MCP actions, and has passed real-client parity tests.
 
 Every node now enforces a local AI access policy (`off` / `read-only` / `on`, timed windows, per-client caps) before executing any routed request; the gateway forwards a non-secret actor identity (client kind/id/name from the approved OAuth registration) and displays each node's policy. Local control CLI: `npm run dex -- status|enable|read-only|disable|client|audit|uninstall`. Second-device path: `npm run nodes -- enroll <id>` → private transfer → `npm run install:node -- --env <file> --service` (starts `off`).
 
@@ -25,6 +25,7 @@ Provide filesystem, search/edit, terminal/process, development/Git, multi-node r
 - INV-007: DEX-native operations must enforce the same allowed-root and command guardrails as compatibility calls.
 - INV-008: The node is the final authority. Node-local policy (off/read-only/on, timed windows, per-client caps) is evaluated on the node before every request; the gateway has no bypass. Absent or corrupt policy = off. A newly enrolled node starts off.
 - INV-009: Routing is explicit: every operation names a node_id; unknown, blank, offline, or revoked IDs fail; there is no default node and no fallback.
+- INV-010: Public source access grants no runtime authority. Gateway owner credentials, node enrollment files, tokens, policies, and deployment state remain outside Git; a node joins only with a separately generated per-node credential.
 ## 5. Verified Working Behavior
 - VER-001: Pinned Desktop Commander 0.2.50 is driven through the official MCP SDK and exposes 26 local tools.
 - VER-002: Gateway and node run persistently under `launchd`; health reports one online Mac node.
@@ -64,7 +65,7 @@ None in the verified local/public SDK path or the ChatGPT real-client path.
 - PND-005: Owner password is the bootstrap-generated 32-character value in `~/.dex-reach/secrets.env`; a user-chosen replacement must be ≥16 characters (gateway config enforces this) and requires a gateway restart plus re-linking any client whose refresh token has expired.
 - PND-006: Remote Desktop Commander: the EXTERNAL piece is a manually started `npx @wonderwhy-er/desktop-commander@latest remote` process (pid 33654 in a Terminal zsh since 2026-09-15 05:17, device registered in `~/.desktop-commander/device.json`) plus the ChatGPT app `asdk_app_6a057d…` pointing at the vendor's hosted relay `mcp.desktopcommander.app`. It is NOT a launchd service and DEX does not depend on it. The npm package `@wonderwhy-er/desktop-commander` remains a DEX compatibility dependency (spawned per node with telemetry off and an isolated HOME) for `reach_list_tools`/`reach_call` (26 tools: search, edit_block, interactive processes, etc.); native paths cover file read/write, process run, repo info, checkpoint, ADB. Decision left to Andrew; stopping the external process would not affect DEX.
 ## 10. Active Decisions, Defaults, and Prohibitions
-- Repository is private by default.
+- Repository source is public. Runtime access remains authenticated, explicitly enrolled, node-scoped, locally governed, and fail-closed.
 - Nodes connect outbound to a relay-first gateway; direct/P2P transport is optional future work.
 - Desktop Commander is a replaceable MIT compatibility adapter with isolated HOME/config state.
 - No force push, destructive Git reset/clean, public unauthenticated shell, plaintext credential logging, or silent path-scope widening.
@@ -97,6 +98,7 @@ None in the verified local/public SDK path or the ChatGPT real-client path.
 DEX//REACH repository, `~/.dex-reach` gateway state, per-node credential files, two user LaunchAgents, and the existing Tailscale Funnel HTTPS reverse proxy. Existing Remote Desktop Commander remains installed as fallback while ChatGPT/Claude host parity is incomplete.
 
 ## 13. Compact Revision Log
+- r6 — Reconciled public-source onboarding: HTTPS clone path, no repository-access prerequisite, generic public examples, explicit separation of public code from private enrollment/runtime authority, private vulnerability-reporting policy, and preserved node-local trust invariants.
 - r1 — Initialized authoritative state from the user contract and inspected machine/repository evidence.
 - r2 — Implemented, installed, and validated gateway/node/OAuth/MCP path; added public HTTPS ingress and recovery proof.
 - r3 — Added per-node credential enrollment/rotation, migrated and live-rotated the Mac credential, enforced scope on native operations, moved file/process primitives native, verified ADB discovery and dirty-worktree checkpoint over public MCP, and registered/authenticated Claude Code.

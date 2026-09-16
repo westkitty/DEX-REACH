@@ -4,14 +4,16 @@ You've decided to try it. Here is everything you do. Nothing runs remotely until
 
 ## 0. What you need
 - Node.js 22 or newer (`node -v`).
-- The enrollment file the gateway owner (Andrew) generated for you: `<your-node>.env`. It contains your
+- The enrollment file the gateway owner generated for you: `<your-node>.env`. It contains your
   node's private credential — receive it over a private channel (AirDrop, password-manager share), never
   chat or email. Nobody else needs a copy.
 - macOS or Linux. (Windows is not supported yet; see the note at the end.)
 
 ## 1. Install
+The source is public. Cloning it does not enroll your computer or grant anyone access; only the separately generated enrollment file can authenticate this node to a gateway.
+
 ```bash
-git clone git@github.com:westkitty/DEX-REACH.git
+git clone https://github.com/westkitty/DEX-REACH.git
 cd DEX-REACH
 npm ci
 npm run install:node -- --env /path/to/<your-node>.env --roots "$HOME/projects" --service
@@ -35,7 +37,7 @@ clients are blocked (all of them, for now).
 npm run dex -- enable --for 30m        # full configured access, then back to off automatically
 npm run dex -- read-only --for 2h      # inspection only (no writes, no mutating commands), then off
 ```
-Takes effect immediately; no internet, gateway, or Andrew involved. When the window ends the node refuses
+Takes effect immediately; no internet or gateway-owner involvement. When the window ends the node refuses
 again on its own.
 
 Prefer to keep one client out entirely?
@@ -71,5 +73,4 @@ credential is dead on their side too — but your machine is already unreachable
 - Windows: the node refuses to run shell commands on Windows (`dex.process.run is not supported on win32`),
   and there is no service installer. Not supported yet; don't expect it to work.
 - The node only ever connects *outbound* (WebSocket over HTTPS) to the gateway. It opens no listening port.
-- Read [TRUST_AND_PRIVACY.md](TRUST_AND_PRIVACY.md) if you want the honest version of what this can and
-  cannot do.
+- Read [TRUST_AND_PRIVACY.md](TRUST_AND_PRIVACY.md) for the full trust model and [../SECURITY.md](../SECURITY.md) for private vulnerability reporting.

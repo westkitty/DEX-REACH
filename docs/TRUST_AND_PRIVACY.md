@@ -5,7 +5,10 @@ Written for someone deciding whether to install a node on their own computer.
 ## The one-sentence model
 Installing a DEX//REACH node makes your machine *reachable for status*; it does not let any AI do anything
 until you flip a switch on the machine itself, and that switch is enforced by the node process on your
-machine — not by ChatGPT's settings, not by the gateway, not by Andrew.
+machine — not by ChatGPT's settings and not by the gateway owner.
+
+## Public source does not mean public access
+The code is public so anyone can inspect or clone it. The repository contains no live gateway credential, node credential, owner password, or automatic enrollment. A device joins a deployment only with a separately generated per-node environment file delivered privately by that deployment's gateway owner. Keep that file out of Git, issues, pull requests, chat, email, and public paste services.
 
 ## What can ChatGPT (or Claude, or any MCP client) do?
 Only what the node's local policy allows, and only inside the folders you listed as allowed roots:
@@ -32,9 +35,9 @@ Only what the node's local policy allows, and only inside the folders you listed
   IDs fail. There is no default node and no fallback.
 
 ## Does installing this expose a shell to the internet?
-No. The node opens **no listening port**. It makes one outbound WebSocket connection (TLS) to the
+No. Public availability of the source code does not change the network boundary. The node opens **no listening port**. It makes one outbound WebSocket connection (TLS) to the
 gateway and authenticates with its own per-node credential. The public HTTPS endpoint belongs to the
-gateway (Andrew's machine), which only accepts OAuth-authenticated MCP requests from clients Andrew
+gateway (the gateway owner's machine), which only accepts OAuth-authenticated MCP requests from clients Andrew
 approved.
 
 ## Who controls what
@@ -44,15 +47,15 @@ approved.
 | Timed windows (`--for 30m`) | You, locally |
 | Per-client limits (ChatGPT vs Claude) | You, locally |
 | Allowed roots and execution profile | You, in your node's `.env` file (restart the node to apply) |
-| Which AI clients may talk to the gateway at all | Andrew (gateway OAuth approval) |
-| Revoking your node's credential | Andrew (gateway) — *and* you can delete it locally |
+| Which AI clients may talk to the gateway at all | The gateway owner (gateway OAuth approval) |
+| Revoking your node's credential | The gateway owner (gateway) — *and* you can delete it locally |
 
 ## Can Andrew still access my machine?
-Not through DEX//REACH unless your node policy allows it. Andrew's access is via the same AI clients
+Not through DEX//REACH unless your node policy allows it. the gateway owner's access is via the same AI clients
 and hits the same node-side gate. He cannot change your policy file; it is on your disk. He *can*
 revoke your node (which only disconnects it).
 
-## Can I shut ChatGPT out without Andrew?
+## Can I shut ChatGPT out without the gateway owner?
 Yes. `npm run dex -- disable` (or `client chatgpt off`) is read by your node before every request. No
 network, gateway, or account is involved. It survives node/gateway restarts and reconnects.
 
@@ -70,7 +73,7 @@ folder. The gateway does not need to be online.
 - **my node credential leaks?** Someone could run a fake node claiming to be you (and receive requests
   meant for you). They could not reach *your* machine with it. Fix: `npm run nodes -- revoke` on the
   gateway and re-enroll. Credentials are stored mode 0600 and only hashes live on the gateway.
-- **Andrew's owner password leaks?** New AI clients could be approved at the gateway. Your node policy
+- **the gateway owner's owner password leaks?** New AI clients could be approved at the gateway. Your node policy
   still applies to all of them.
 
 ## Are commands logged? Where?
@@ -101,3 +104,6 @@ The compatibility adapter runs with telemetry disabled in an isolated home direc
 - No second physical device has been enrolled yet; multi-node behavior was proven with a second node
   process running under an isolated state directory on the same Mac, driven through the real gateway
   and real ChatGPT.
+
+## Reporting a security issue
+Do not disclose exploitable details, credentials, tokens, or sensitive logs in a public issue. Follow the private reporting process in [`../SECURITY.md`](../SECURITY.md).
