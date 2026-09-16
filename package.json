@@ -1,6 +1,6 @@
 {
   "name": "dex-reach",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Secure AI-native remote computing control plane and MCP gateway",
   "main": "index.js",
   "scripts": {

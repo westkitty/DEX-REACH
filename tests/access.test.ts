@@ -9,7 +9,7 @@ import type { RequestActor } from '../src/shared/protocol.js';
 
 const chatgpt: RequestActor = { kind: 'chatgpt', clientId: 'c1', clientName: 'ChatGPT' };
 const claude: RequestActor = { kind: 'claude', clientId: 'c2', clientName: 'Claude Code (dex-reach)' };
-const base = (mode: AccessState['mode'], extra: Partial<AccessState> = {}): AccessState => ({ version: 1, mode, until: null, revertTo: null, clients: {}, updatedAt: new Date(0).toISOString(), ...extra });
+const base = (mode: AccessState['mode'], extra: Partial<AccessState> = {}): AccessState => ({ version: 2, mode, until: null, revertTo: null, clients: {}, grantRequired: {}, grants: [], updatedAt: new Date(0).toISOString(), ...extra });
 
 test('disabled mode refuses every operation with an owner-attributed reason', () => {
   for (const op of ['dex.fingerprint', 'dex.file.read', 'dex.file.write', 'dex.process.run', 'dc.call', 'dex.checkpoint']) {
@@ -48,7 +48,7 @@ test('read-only access actually blocks non-inspection commands at the executor',
     assert.equal(ok.exitCode, 0);
     await assert.rejects(
       nativeCall('n', 'dex.process.run', { command: 'touch created.txt', cwd: root }, [root], profile),
-      /read-only profile permits only recognized inspection commands/
+      /read-only profile permits only .*inspection commands/
     );
     assert.equal(await fs.stat(path.join(root, 'created.txt')).catch(() => null), null);
     await assert.rejects(nativeCall('n', 'dex.file.write', { path: path.join(root, 'w.txt'), text: 'x' }, [root], profile), /read-only profile/);
@@ -120,4 +120,50 @@ test('client attribution is derived from registration names', () => {
   assert.equal(classifyClient('DEX REACH Smoke'), 'smoke');
   assert.equal(classifyClient('Some MCP Inspector'), 'other');
   assert.equal(classifyClient(undefined), 'other');
+});
+
+test('capability grants constrain enabled clients by operation, root, expiry, and use count', async () => {
+  const { createGrant, consumeGrant } = await import('../src/shared/access.js');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-grant-'));
+  const previousStateDir = process.env.DEX_REACH_STATE_DIR;
+  try {
+    process.env.DEX_REACH_STATE_DIR = root;
+    const resource = path.join(root, 'project');
+    let state = createGrant(base('on'), 'chatgpt', ['file.write'], [resource], 60_000, 1);
+    const allowed = authorizeOperation(state, chatgpt, 'dex.file.write', 'development', Date.now(), { path: path.join(resource, 'x.txt') });
+    assert.equal(allowed.allowed, true);
+    if (!allowed.allowed) return;
+    assert.ok(allowed.grantId);
+    assert.equal(authorizeOperation(state, chatgpt, 'dex.process.run', 'development', Date.now(), { cwd: resource, command: 'pwd' }).allowed, false);
+    assert.equal(authorizeOperation(state, chatgpt, 'dex.file.write', 'development', Date.now(), { path: '/etc/nope' }).allowed, false);
+    await saveAccessState('g', state);
+    await consumeGrant('g', allowed.grantId);
+    state = await loadAccessState('g');
+    assert.equal(authorizeOperation(state, chatgpt, 'dex.file.write', 'development', Date.now(), { path: path.join(resource, 'again.txt') }).allowed, false);
+    assert.equal(authorizeOperation({ ...state, mode: 'off' }, chatgpt, 'dex.file.write', 'development', Date.now(), { path: path.join(resource, 'x.txt') }).allowed, false);
+  } finally {
+    if (previousStateDir === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previousStateDir;
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test('max-use grants cannot be double-spent by concurrent reservations', async () => {
+  const { createGrant, consumeGrant } = await import('../src/shared/access.js');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-grant-race-'));
+  const previousStateDir = process.env.DEX_REACH_STATE_DIR;
+  try {
+    process.env.DEX_REACH_STATE_DIR = root;
+    const resource = path.join(root, 'project');
+    const state = createGrant(base('on'), 'chatgpt', ['file.write'], [resource], 60_000, 1);
+    await saveAccessState('race', state);
+    const id = state.grants[0]!.id;
+    const settled = await Promise.allSettled([consumeGrant('race', id), consumeGrant('race', id)]);
+    assert.equal(settled.filter(r => r.status === 'fulfilled').length, 1);
+    assert.equal(settled.filter(r => r.status === 'rejected').length, 1);
+    assert.equal((await loadAccessState('race')).grants[0]!.uses, 1);
+  } finally {
+    if (previousStateDir === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previousStateDir;
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });

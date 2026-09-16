@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { executionFingerprint } from '../shared/fingerprint.js';
-import { commandGuard, pathAllowed } from '../shared/security.js';
+import { commandGuard, pathAllowed, parseReadonlyCommand } from '../shared/security.js';
 import type { ReachProfile } from '../shared/protocol.js';
 import { stateDir } from '../shared/local-env.js';
 
@@ -105,13 +105,16 @@ export function nodeShell(): string {
   return process.platform === 'darwin' ? '/bin/zsh' : '/bin/sh';
 }
 
-export async function nativeProcess(command: string, cwd: string, profile: ReachProfile, timeoutMs: number): Promise<Record<string, unknown>> {
-  const blocked = commandGuard(command, profile);
+export async function nativeProcess(command: string, cwd: string, profile: ReachProfile, timeoutMs: number, roots: string[] = [cwd]): Promise<Record<string, unknown>> {
+  const blocked = commandGuard(command, profile, roots);
   if (blocked) throw new Error(blocked);
   const timeout = Math.max(100, Math.min(timeoutMs, 60_000));
-  const shell = nodeShell();
+  const readonly = profile === 'read-only' ? parseReadonlyCommand(command, roots) : null;
+  const shell = profile === 'read-only' ? null : nodeShell();
   try {
-    const { stdout, stderr } = await execFileAsync(shell, ['-lc', command], { cwd, timeout, maxBuffer: 2 * 1024 * 1024 });
+    const { stdout, stderr } = readonly
+      ? await execFileAsync(readonly.program, readonly.args, { cwd, timeout, maxBuffer: 2 * 1024 * 1024 })
+      : await execFileAsync(shell!, ['-lc', command], { cwd, timeout, maxBuffer: 2 * 1024 * 1024 });
     return { exitCode: 0, stdout, stderr };
   } catch (error) {
     const value = error as Error & { code?: number; stdout?: string; stderr?: string };
@@ -153,7 +156,7 @@ export async function nativeCall(nodeId: string, operation: string, args: Record
     }
     case 'dex.process.run': {
       const cwd = scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd');
-      return nativeProcess(String(args.command || ''), cwd, profile, Number(args.timeoutMs || 15000));
+      return nativeProcess(String(args.command || ''), cwd, profile, Number(args.timeoutMs || 15000), roots);
     }
     default:
       throw new Error(`unknown native operation: ${operation}`);

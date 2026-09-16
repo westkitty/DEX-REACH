@@ -80,7 +80,7 @@ async function connect(): Promise<void> {
 
 await connect();
 const tools = await client.listTools();
-const required = ['reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write', 'reach_process_run', 'reach_result_read', 'reach_revoke_node'];
+const required = ['reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write', 'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'];
 for (const name of required) {
   const tool = tools.tools.find(candidate => candidate.name === name);
   if (!tool) throw new Error(`missing MCP tool: ${name}`);

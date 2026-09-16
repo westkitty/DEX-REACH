@@ -14,7 +14,7 @@ function text(value: unknown) {
 }
 
 export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, clientId = 'unknown', actor?: RequestActor): McpServer {
-  const server = new McpServer({ name: 'DEX//REACH', version: '0.2.0' });
+  const server = new McpServer({ name: 'DEX//REACH', version: '0.3.0' });
 
   const routed = async (nodeId: string, operation: string, args: Record<string, unknown>) => {
     const started = Date.now();
@@ -116,6 +116,31 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
     },
     annotations: MUTATE
   }, async ({ node_id, command, cwd, timeout_ms }) => routed(node_id, 'dex.process.run', { command, ...(cwd ? { cwd } : {}), timeoutMs: timeout_ms }));
+
+  server.registerTool('reach_plan', {
+    title: 'Plan Exact Node Mutation',
+    description: 'Create a short-lived, one-use execution plan for an exact operation and arguments on one node. The node re-authorizes the target operation locally, records the current policy hash, and attempts a Git checkpoint when relevant. Planning does not execute the target operation.',
+    inputSchema: {
+      node_id: z.string().min(1).describe(NODE_ID_HINT),
+      operation: z.string().min(1).describe('Exact target operation such as dex.file.write or dex.process.run.'),
+      arguments: z.record(z.string(), z.unknown()).default({}).describe('Exact target arguments that must match the later commit.')
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+  }, async ({ node_id, operation, arguments: args }) => routed(node_id, 'dex.plan', { operation, arguments: args }));
+
+  server.registerTool('reach_commit_plan', {
+    title: 'Commit Exact Node Plan',
+    description: 'Execute one previously created DEX//REACH plan exactly once. The node refuses the commit if the plan expired, the client changed, the node policy changed, or current authorization no longer permits the target operation.',
+    inputSchema: { node_id: z.string().min(1).describe(NODE_ID_HINT), plan_id: z.string().uuid().describe('Plan ID returned by reach_plan.') },
+    annotations: MUTATE
+  }, async ({ node_id, plan_id }) => routed(node_id, 'dex.commitPlan', { planId: plan_id }));
+
+  server.registerTool('reach_receipts', {
+    title: 'Read Node Execution Receipts',
+    description: 'Read recent node-signed execution receipts. Receipts contain hashes, policy identity, actor identity, checkpoint linkage, a hash-chain predecessor, the node public key, and an Ed25519 signature; they omit file contents and credentials.',
+    inputSchema: { node_id: z.string().min(1).describe(NODE_ID_HINT), limit: z.number().int().positive().max(100).default(20) },
+    annotations: READ
+  }, async ({ node_id, limit }) => routed(node_id, 'dex.receipts.list', { limit }));
 
   server.registerTool('reach_result_read', {
     title: 'Read Large Result Segment',

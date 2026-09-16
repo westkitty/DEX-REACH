@@ -32,7 +32,10 @@ A fix must preserve DEX//REACH's core trust model:
 - the node is the final authority and enforces `off`, `read-only`, `on`, timed windows, and per-client caps locally;
 - missing or corrupt node policy fails closed;
 - every operation names an explicit `node_id`; there is no default target or fallback;
-- allowed roots and command guardrails are enforced on the node;
+- typed filesystem operations, checkpoints, read-only process arguments, and compatibility-tool path arguments are constrained to configured allowed roots;
+- DEX private state under `~/.dex-reach/` is excluded from path-scoped remote operations even if a broader allowed root contains it, and relative path arguments fail closed;
+- READ-ONLY native process execution is shell-free and compatibility execution uses an explicit inspection-tool allowlist; unknown compatibility tools fail closed;
+- ON-mode arbitrary shell execution is a high-authority capability: allowed roots constrain its working directory but are not an OS sandbox for arbitrary shell programs; use capability grants and OS isolation when stronger confinement is required;
 - nodes connect outbound and do not expose a raw shell listener;
 - node credentials are independent and revocable;
 - public source access grants no gateway, OAuth-client, or node authority;

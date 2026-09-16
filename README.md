@@ -52,6 +52,8 @@ A node can be locally set to `off`, `read-only`, or `on`; access can be temporar
 | Claude Code MCP client | **Verified** — real DEX//REACH calls completed |
 | Primary macOS node | **Verified** — persistent gateway/node services and live routing |
 | Node-local AI kill switch | **Verified** against real ChatGPT and Claude |
+| Capability grants + policy assertions | **Implemented and unit-verified in 0.3.0; deployed-client proof pending** |
+| Exact-action plan/commit + signed receipts | **Implemented and unit-verified in 0.3.0; deployed-client proof pending** |
 | Two-node routing and policy isolation | **Verified** with a live isolated second-node simulation |
 | Second physical device | **Ready for install, not yet hardware-verified** |
 | macOS node service install | **Implemented; node-only install still needs fresh-machine physical proof** |
@@ -115,7 +117,7 @@ Every remote operation names a `node_id`. Unknown, blank, offline, or revoked ID
 
 ## What It Can Do
 
-DEX//REACH currently exposes 12 first-class MCP actions:
+DEX//REACH currently exposes 15 first-class MCP actions:
 
 | Action | Purpose |
 | --- | --- |
@@ -129,6 +131,9 @@ DEX//REACH currently exposes 12 first-class MCP actions:
 | `reach_file_read` | Read a bounded UTF-8 file inside the node's allowed roots |
 | `reach_file_write` | Write or append UTF-8 text inside allowed roots |
 | `reach_process_run` | Run a bounded guarded shell command on the selected node |
+| `reach_plan` | Create a short-lived exact-action plan with current policy hash and checkpoint attempt |
+| `reach_commit_plan` | Commit one exact plan once; refuse stale, changed-client, changed-policy, or expired plans |
+| `reach_receipts` | Read recent node-signed execution receipts and their tamper-evident hash chain |
 | `reach_result_read` | Continue reading a large bounded result |
 | `reach_revoke_node` | Revoke one node credential and disconnect that node |
 
@@ -151,15 +156,21 @@ npm run dex -- client chatgpt off
 npm run dex -- client claude read-only
 npm run dex -- client chatgpt default
 npm run dex -- audit --limit 50
+npm run dex -- policy-check
+npm run dex -- grant chatgpt file.write --root "$HOME/projects" --for 20m --max-uses 6
+npm run dex -- explain chatgpt dex.file.write --path "$HOME/projects/example.txt"
+npm run dex -- grants
 ```
 
 ### Access modes
 
 - **OFF** — all remote AI execution is refused locally.
-- **READ-ONLY** — inspection is allowed; writes and mutating commands are refused.
+- **READ-ONLY** — inspection is allowed through typed native operations and a deliberately tiny shell-free command grammar; shell composition, redirection, substitution, compatibility shell processes, writes, and mutating commands are refused.
 - **ON** — the node's configured execution profile applies.
 - **Timed access** — access automatically returns to the prior safe state when the window expires.
 - **Per-client caps** — ChatGPT, Claude, or another client can be restricted independently. A client cap can only reduce access, never increase it.
+- **Capability grants** — an enabled client can be switched into grant-required mode and limited to specific capabilities, filesystem roots, expiration times, and optional use counts. Grants never override OFF, READ-ONLY, or a stricter client ceiling.
+- **Policy assertions** — `npm run dex -- policy-check` validates the local grant schema plus hard OFF and READ-ONLY invariants before owner-managed policy changes are accepted.
 
 Newly enrolled second devices start **OFF**. Missing or corrupt access policy also means **OFF**.
 
@@ -255,7 +266,12 @@ DEX//REACH is designed around the assumption that AI clients should **not** be t
 - Nodes connect outbound and open no remote shell listener.
 - Each node has an independent credential that can be rotated or revoked without affecting other nodes.
 - Every operation is explicitly node-scoped.
-- Filesystem access is constrained to configured allowed roots.
+- Typed file operations, checkpoints, read-only process arguments, and compatibility-tool path arguments are constrained to configured allowed roots.
+- DEX private state under `~/.dex-reach/` is explicitly excluded from path-scoped remote operations even when a broader allowed root contains it; relative path arguments are refused rather than ambiguously resolved.
+- READ-ONLY process execution is shell-free: accepted inspection commands are executed directly with argv rather than through `sh -lc`/`zsh -lc`, preventing command chaining, substitutions, and redirections from smuggling mutations through the read-only gate.
+- ON-mode `reach_process_run` is intentionally an arbitrary-shell capability. Allowed roots constrain its working directory but are **not an OS sandbox** for arbitrary shell programs; use capability grants, a restrictive execution profile, and OS isolation when stronger confinement is required.
+- Exact-action plans bind a mutation to a node, client, request hash, policy hash, short expiry, one-use state, and an attempted pre-mutation Git checkpoint.
+- Every node request produces a local Ed25519-signed receipt containing hashes and policy/actor metadata rather than file contents or credentials; receipts form a predecessor hash chain.
 - Destructive command patterns such as `sudo`, `rm -rf`, disk formatting, shutdown/reboot, destructive Git cleanup/reset, and force-push are blocked.
 - Results are bounded; large responses use continuation handles.
 - Credentials/tokens are redacted from audit logs.
@@ -275,8 +291,9 @@ A normal safe sequence is:
 1. `reach_list_nodes`
 2. choose the exact `node_id`
 3. `reach_fingerprint` if execution identity matters
-4. perform the requested read/write/process action
-5. inspect the returned result
+4. for consequential mutation, call `reach_plan` with the exact target operation and arguments
+5. commit that plan once with `reach_commit_plan` (or use a direct mutation only when transactional binding is unnecessary)
+6. inspect the returned result and, when proof matters, `reach_receipts`
 
 Example intent:
 
@@ -304,7 +321,7 @@ npm run probe:backend
 npm run smoke
 ```
 
-`npm run smoke` exercises the public OAuth/PKCE MCP path, compatibility routing, native file/process operations, ADB discovery, and reversible checkpoint behavior.
+`npm run smoke` exercises the public OAuth/PKCE MCP path, verifies all 15 first-class tools are advertised with metadata, and exercises compatibility routing, native file/process operations, ADB discovery, and reversible checkpoint behavior.
 
 `scripts/sim-two-nodes.ts` drives a second isolated node through the live gateway and verifies multi-node routing, roots, access modes, client caps, audit attribution, credential isolation, and no-fallback behavior.
 
@@ -376,6 +393,7 @@ The README explains the system. `OPERATIONAL_STATE.md` controls what is actually
 - Linux service installation is implemented but has not been run on a real Linux host.
 - Windows process execution and service installation are not implemented.
 - ADB discovery works through DEX//REACH, but real Android hardware control is not yet verified.
+- Capability grants, exact-action plan/commit, and signed receipts are implemented and unit-tested in 0.3.0; public deployed-client runtime proof is tracked separately in `OPERATIONAL_STATE.md`.
 - Some local capabilities still come from the pinned Desktop Commander npm package through the compatibility adapter. The external Desktop Commander relay/app is not required by DEX//REACH.
 
 ---

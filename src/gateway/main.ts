@@ -63,7 +63,7 @@ app.use((req, res, next) => {
 });
 
 app.get('/healthz', (_req, res) => {
-  res.json({ ok: true, service: 'DEX//REACH', version: '0.2.0', onlineNodes: registry.listNodes().length });
+  res.json({ ok: true, service: 'DEX//REACH', version: '0.3.0', onlineNodes: registry.listNodes().length });
 });
 
 app.post('/dex/approve', async (req, res) => {
