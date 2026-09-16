@@ -1,7 +1,7 @@
 # DEX//REACH Operational State
 
 <!-- operational-state:metadata
-{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":"/Users/andrew/DEX-REACH","artifact_path":"","state_revision":4,"last_updated":"2026-09-16T01:50:00Z","current_baseline":{"identity":"DEX//REACH 0.2.0 ChatGPT-parity-verified baseline on main","state":"current-baseline","last_verified":"2026-09-16T01:50:00Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, project docs"],"linked_parent_state":null}
+{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":"/Users/andrew/DEX-REACH","artifact_path":"","state_revision":5,"last_updated":"2026-09-16T02:36:00Z","current_baseline":{"identity":"DEX//REACH 0.2.0 node-local-policy / second-device-ready baseline on main","state":"current-baseline","last_verified":"2026-09-16T02:36:00Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, project docs"],"linked_parent_state":null}
 -->
 
 ## 1. Project Identity and Scope
@@ -9,6 +9,8 @@ DEX//REACH is a secure AI-native remote-computing control plane intended to repl
 
 ## 2. Current Baseline
 Private repository at `/Users/andrew/DEX-REACH`. macOS gateway and node are installed as user `launchd` services. Public HTTPS ingress is active at `https://macbook-air.tailafb7e8.ts.net` through Tailscale Funnel. The Mac node uses its own mode-0600 credential file and gateway authentication is keyed by node ID with persisted token hashes. The ChatGPT Business workspace app `DEX//REACH` (`asdk_app_6aa9df5974b081918e1b66f8d1aad2d2`) is enabled, OAuth-linked, exposes all 12 MCP actions, and has passed real-client parity tests.
+
+Every node now enforces a local AI access policy (`off` / `read-only` / `on`, timed windows, per-client caps) before executing any routed request; the gateway forwards a non-secret actor identity (client kind/id/name from the approved OAuth registration) and displays each node's policy. Local control CLI: `npm run dex -- status|enable|read-only|disable|client|audit|uninstall`. Second-device path: `npm run nodes -- enroll <id>` → private transfer → `npm run install:node -- --env <file> --service` (starts `off`).
 
 ## 3. Artifact Contract
 Provide filesystem, search/edit, terminal/process, development/Git, multi-node routing, MCP access, authentication/revocation, bounded output, auditability, ADB discovery, recovery primitives, and persistent local operation.
@@ -21,6 +23,8 @@ Provide filesystem, search/edit, terminal/process, development/Git, multi-node r
 - INV-005: Only the authenticated gateway is publicly proxied; raw shell and node sockets are not directly exposed.
 - INV-006: Node credentials are independent; rotating or revoking one node must not invalidate unrelated nodes.
 - INV-007: DEX-native operations must enforce the same allowed-root and command guardrails as compatibility calls.
+- INV-008: The node is the final authority. Node-local policy (off/read-only/on, timed windows, per-client caps) is evaluated on the node before every request; the gateway has no bypass. Absent or corrupt policy = off. A newly enrolled node starts off.
+- INV-009: Routing is explicit: every operation names a node_id; unknown, blank, offline, or revoked IDs fail; there is no default node and no fallback.
 ## 5. Verified Working Behavior
 - VER-001: Pinned Desktop Commander 0.2.50 is driven through the official MCP SDK and exposes 26 local tools.
 - VER-002: Gateway and node run persistently under `launchd`; health reports one online Mac node.
@@ -32,6 +36,11 @@ Provide filesystem, search/edit, terminal/process, development/Git, multi-node r
 - VER-008: Claude Code has DEX//REACH registered at user scope and completed DEX OAuth/PKCE authentication; `claude mcp get dex-reach` reports Connected.
 - VER-009: ChatGPT workspace app handshake observed end to end in gateway logs: DCR → `/authorize` (scope `mcp:tools`, PKCE S256, resource `/mcp`) → owner approval → `/token` 200 → `initialize` → `notifications/initialized` → `tools/list` (client `openai-mcp/1.0.0`, protocol 2025-11-25). ChatGPT's admin backend reports 12 actions with titles and read/write classification.
 - VER-010: Real ChatGPT parity (new normal chat, app invoked via `@DEX//REACH`, chat `6aa9f22d-f058-83ea-b723-0a1db1ca093b`): node discovery returned `macbook-air.local — online`; fingerprint returned this Mac's hostname/user/repo/branch/remote/Node version; file write produced `/tmp/dex-reach-gpt-test.txt` with exactly `GPT DEX REACH parity test` (25 bytes, audit `dex.file.write` by ChatGPT client `58e0d75f…`); file read echoed identical contents (audit `dex.file.read`); `pwd` returned `/Users/andrew/DEX-REACH`, exit 0 (audit `dex.process.run`). Writes prompted ChatGPT's Allow/Deny approval as configured (`ask_before_writes`); reads ran without prompts.
+- VER-012: Node-local policy enforced end to end through the REAL ChatGPT app against a second node (`test-bryan-node`, isolated `DEX_REACH_STATE_DIR`, real gateway, chats `6aa9fdc5…` and `6aa9ff82…`): OFF → ChatGPT's fingerprint refused with `NODE OWNER has disabled remote AI execution on this node; dex.fingerprint from ChatGPT (chatgpt) was refused locally`; READ-ONLY → fingerprint succeeded, `reach_file_write` refused as a mutation, while `macbook-air.local` (ON) served a file read in the same turn. Refusals recorded in the sim node's own audit with `actor.kind=chatgpt`.
+- VER-013: Same policy applied to Claude Code (this session's `dex-reach` MCP server): write to the read-only sim node refused with the owner-attributed error, fingerprint succeeded, `pwd` on `macbook-air.local` succeeded.
+- VER-014: Two-node simulation (`scripts/sim-two-nodes.ts`, 24 checks, public OAuth+MCP path): both nodes listed with distinct roots; OFF refuses all and creates nothing; READ-ONLY allows inspection commands and refuses writes/mutating commands; ON writes land only under the sim root and path escapes are refused; per-client cap (`smoke: off` / `read-only`) blocks/limits only that client kind; typo/unknown node IDs fail with no fallback; sim audit attributes the actor, omits file content, records refusals. Live rotate of the sim credential and CLI revoke left `macbook-air.local` connected and working; the revoked sim node was dropped by the gateway sweep and could not reconnect (502 on upgrade).
+- VER-015: Local CLI on the sim node: `enable --for 5s` reverted to off after expiry; `client chatgpt off` + `read-only` displayed as `ChatGPT blocked (limit: off)`; `audit` listed refusals with client attribution and no file contents. Absent-policy fail-closed and corrupt-policy fail-closed covered by unit tests.
+- VER-016: Gateway restart recovery with the new session handling: unknown MCP sessions now return 404, and Claude Code re-initialized transparently after a restart (previously a dead session persisted with 400).
 - VER-011: Claude-issued DEX tool invocation verified: a Claude Code session called `reach_list_nodes` through the public MCP endpoint and received the live node record.
 
 ## 6. Known Not Working
@@ -40,7 +49,9 @@ None in the verified local/public SDK path or the ChatGPT real-client path.
 ## 7. Implemented but Unverified
 - UNV-001: ADB discovery is verified through public MCP, but no Android hardware is currently attached or discoverable by mDNS, so device-control behavior remains unverified.
 - UNV-002: (resolved → VER-011) Claude-issued invocation verified from a Claude Code session.
-- UNV-003: Second-device enrollment is implemented (per-node `enroll`, env transfer, `DEX_REACH_ENV_FILE` node start, outbound WebSocket, explicit `node_id` routing with no fallback) and documented in README, but no second physical device has been enrolled yet. Linux/Windows persistent-service adapters do not exist; `dex.process.run` refuses win32.
+- UNV-003: No second PHYSICAL device has been enrolled. Everything multi-node was proven with a second node process under an isolated state dir on Andrew's Mac. Bryan's OS is unknown; nothing OS-specific is claimed for him.
+- UNV-004: Linux systemd user-unit generation (`install:node --service` on linux) is implemented and shape-tested but has never run on a Linux host. Windows: no installer, `dex.process.run` refuses win32.
+- UNV-005: `install:node --service` on macOS uses the same launchd template as the verified `install:macos`, but the node-only install path itself has not been executed on a fresh Mac.
 
 ## 8. Unknown or Evidence-Stale State
 - UNK-001: (resolved → VER-009/VER-010) ChatGPT workspace app deployed, linked, configured, and parity-tested.
@@ -49,9 +60,9 @@ None in the verified local/public SDK path or the ChatGPT real-client path.
 - PND-001: (done, r4) ChatGPT app deployed and parity-tested.
 - PND-002: (done, r4) Claude-issued DEX call verified.
 - PND-003: Attach or discover an Android device and exercise a harmless ADB identity call through DEX. Continue adapter replacement only where native paths have equivalent proof.
-- PND-004: Enroll a real second device (e.g. Bryan's machine) and verify explicit cross-node routing with two nodes online simultaneously.
+- PND-004: Enroll Bryan's real device and repeat the sim matrix (`scripts/sim-two-nodes.ts` with his node ID) plus one real ChatGPT OFF/READ-ONLY/ON check.
 - PND-005: Owner password is the bootstrap-generated 32-character value in `~/.dex-reach/secrets.env`; a user-chosen replacement must be ≥16 characters (gateway config enforces this) and requires a gateway restart plus re-linking any client whose refresh token has expired.
-- PND-006: Retire Remote Desktop Commander only after PND-004 or an explicit decision that single-node parity is sufficient; RDC remains installed and untouched.
+- PND-006: Remote Desktop Commander: the EXTERNAL piece is a manually started `npx @wonderwhy-er/desktop-commander@latest remote` process (pid 33654 in a Terminal zsh since 2026-09-15 05:17, device registered in `~/.desktop-commander/device.json`) plus the ChatGPT app `asdk_app_6a057d…` pointing at the vendor's hosted relay `mcp.desktopcommander.app`. It is NOT a launchd service and DEX does not depend on it. The npm package `@wonderwhy-er/desktop-commander` remains a DEX compatibility dependency (spawned per node with telemetry off and an isolated HOME) for `reach_list_tools`/`reach_call` (26 tools: search, edit_block, interactive processes, etc.); native paths cover file read/write, process run, repo info, checkpoint, ADB. Decision left to Andrew; stopping the external process would not affect DEX.
 ## 10. Active Decisions, Defaults, and Prohibitions
 - Repository is private by default.
 - Nodes connect outbound to a relay-first gateway; direct/P2P transport is optional future work.
@@ -73,7 +84,14 @@ None in the verified local/public SDK path or the ChatGPT real-client path.
 | VER-009 | ChatGPT OAuth/MCP handshake | verified | Gateway log sequence DCR/authorize/token/initialize/initialized/tools-list from openai-mcp/1.0.0 |
 | VER-010 | ChatGPT real-client parity (5 tests) | verified | Live chat responses + audit.jsonl entries for fingerprint, file write, file read, process run |
 | VER-011 | Claude-issued tool invocation | verified | Claude Code session called reach_list_nodes over public MCP |
-| UNV-003 | Second-device enrollment | implemented-unverified | Workflow documented; no second device enrolled yet |
+| VER-012 | Node policy vs real ChatGPT | verified | OFF refusal + READ-ONLY write refusal from real ChatGPT chat; sim audit attribution |
+| VER-013 | Node policy vs Claude Code | verified | Read-only sim node refused Claude write, allowed fingerprint |
+| VER-014 | Two-node simulation (24 checks) | verified | `scripts/sim-two-nodes.ts` PASS against live gateway |
+| VER-015 | Local kill switch / timed / per-client / audit CLI | verified | Sim-node CLI session + unit tests |
+| VER-016 | Gateway restart session recovery | verified | 404 on unknown session; Claude re-initialized |
+| UNV-003 | Bryan's physical device | implemented-unverified | Not available; simulated only |
+| UNV-004 | Linux systemd install | implemented-unverified | Unit generated/tested for shape only |
+| UNV-005 | macOS node-only service install | implemented-unverified | Same template as verified install:macos; not run on a fresh Mac |
 
 ## 12. Current Change Scope and Impact Radius
 DEX//REACH repository, `~/.dex-reach` gateway state, per-node credential files, two user LaunchAgents, and the existing Tailscale Funnel HTTPS reverse proxy. Existing Remote Desktop Commander remains installed as fallback while ChatGPT/Claude host parity is incomplete.
@@ -82,4 +100,5 @@ DEX//REACH repository, `~/.dex-reach` gateway state, per-node credential files, 
 - r1 — Initialized authoritative state from the user contract and inspected machine/repository evidence.
 - r2 — Implemented, installed, and validated gateway/node/OAuth/MCP path; added public HTTPS ingress and recovery proof.
 - r3 — Added per-node credential enrollment/rotation, migrated and live-rotated the Mac credential, enforced scope on native operations, moved file/process primitives native, verified ADB discovery and dirty-worktree checkpoint over public MCP, and registered/authenticated Claude Code.
+- r5 — Second-device trust model: node-local access policy (`src/shared/access.ts`; off/read-only/on, timed windows with deterministic expiry, per-client caps, fail-closed defaults), enforced in the node before every request; gateway forwards non-secret actor identity and displays node policy; audit records actor and never file contents; local CLI (`npm run dex`: status/enable/read-only/disable/client/audit/uninstall) working offline; `install:node` second-device installer (starts off; macOS launchd; Linux unit generated) and `enroll` default `DEX_REACH_INITIAL_ACCESS=off`; routing hardened (blank/unknown/revoked IDs fail, gateway sweep enforces CLI revocation on connected nodes, revoke bookkeeping, `forget` tombstone cleanup); default cwd confined to allowed roots; unknown MCP session → 404 for client recovery; docs/TRUST_AND_PRIVACY.md and docs/SECOND_DEVICE_QUICKSTART.md; two-node simulation and real ChatGPT/Claude cross-policy checks.
 - r4 — Root cause of the "0 actions" ChatGPT app: the app existed (created 00:14Z, DCR succeeded) but no OAuth authorization was ever completed, so ChatGPT had no link and never fetched `tools/list`; creating a replacement failed with HTTP 409 (duplicate name) because the disabled app still existed. Repair: re-enabled/published the existing app, completed the owner OAuth approval, refreshed actions, set approval mode `ask_before_writes`, saved. Gateway changes: `trust proxy loopback` (fixes express-rate-limit X-Forwarded-For validation errors behind Funnel), secret-free handshake logging, empty-scope → `mcp:tools` defaulting with unsupported-scope rejection, MCP tool titles/descriptions/annotations (readOnlyHint etc.) so ChatGPT classifies reads vs writes, platform-aware node shell (`DEX_REACH_SHELL`), smoke checkpoint fixture inside an advertised allowed root, smoke gate for tool metadata. Documented second-device enrollment and ChatGPT app procedure.

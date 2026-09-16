@@ -42,3 +42,16 @@ test('node shell selection is platform-aware and overridable', async () => {
     else process.env.DEX_REACH_SHELL = previous;
   }
 });
+
+test('operations without cwd default into the allowed roots, never the process working directory', async () => {
+  const { defaultCwd } = await import('../src/node/native.js');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-cwd-'));
+  try {
+    assert.equal(defaultCwd([root]), root);
+    assert.equal(defaultCwd([process.cwd()]), process.cwd());
+    const fp = await nativeCall('n', 'dex.fingerprint', {}, [root], 'development') as { cwd: string };
+    assert.equal(fp.cwd, root);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

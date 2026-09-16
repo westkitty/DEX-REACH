@@ -108,6 +108,23 @@ export class NodeAuthStore {
     return true;
   }
 
+  /** Deletes a revoked node's record entirely (tombstone cleanup). Active nodes must be revoked first. */
+  async forget(nodeId: string): Promise<boolean> {
+    const record = this.state.nodes[nodeId];
+    if (!record) return false;
+    if (!record.revoked) throw new Error(`node is still active; revoke it first: ${nodeId}`);
+    delete this.state.nodes[nodeId];
+    await this.persist();
+    return true;
+  }
+
+  /** Re-reads persisted state so an out-of-process CLI revoke is honored by the running gateway. */
+  async isRevoked(nodeId: string): Promise<boolean> {
+    await this.reload();
+    const record = this.state.nodes[nodeId];
+    return !record || record.revoked;
+  }
+
   list(): Record<string, unknown>[] {
     this.prune();
     return Object.entries(this.state.nodes).sort(([a], [b]) => a.localeCompare(b)).map(([nodeId, record]) => ({

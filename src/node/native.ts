@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { executionFingerprint } from '../shared/fingerprint.js';
 import { commandGuard, pathAllowed } from '../shared/security.js';
 import type { ReachProfile } from '../shared/protocol.js';
+import { stateDir } from '../shared/local-env.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -44,7 +45,7 @@ export async function adbDevices(): Promise<Record<string, unknown>> {
 export async function createCheckpoint(cwd: string): Promise<Record<string, unknown>> {
   const root = (await run('git', ['rev-parse', '--show-toplevel'], cwd)).trim();
   const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(3).toString('hex')}`;
-  const dir = path.join(os.homedir(), '.dex-reach', 'checkpoints', id);
+  const dir = path.join(stateDir(), 'checkpoints', id);
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   const [patch, status, untrackedRaw] = await Promise.all([
     run('git', ['diff', '--binary', 'HEAD'], root, 16 * 1024 * 1024),
@@ -118,16 +119,26 @@ export async function nativeProcess(command: string, cwd: string, profile: Reach
   }
 }
 
+/**
+ * Where an operation runs when the client gives no cwd. The node process is often launched from the
+ * DEX checkout, which may sit outside the owner's allowed roots; never default to a disallowed directory.
+ */
+export function defaultCwd(roots: string[]): string {
+  const cwd = process.cwd();
+  if (pathAllowed(cwd, roots)) return cwd;
+  return roots[0] ?? cwd;
+}
+
 export async function nativeCall(nodeId: string, operation: string, args: Record<string, unknown>, roots: string[], profile: ReachProfile): Promise<unknown> {
   switch (operation) {
     case 'dex.fingerprint':
-      return executionFingerprint(nodeId, scopedPath(typeof args.cwd === 'string' ? args.cwd : process.cwd(), roots, 'cwd'));
+      return executionFingerprint(nodeId, scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd'));
     case 'dex.repoInfo':
-      return repoInfo(scopedPath(typeof args.cwd === 'string' ? args.cwd : process.cwd(), roots, 'cwd'));
+      return repoInfo(scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd'));
     case 'dex.adbDevices':
       return adbDevices();
     case 'dex.checkpoint': {
-      const cwd = scopedPath(typeof args.cwd === 'string' ? args.cwd : process.cwd(), roots, 'cwd');
+      const cwd = scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd');
       return createCheckpoint(cwd);
     }
     case 'dex.file.read': {
@@ -141,7 +152,7 @@ export async function nativeCall(nodeId: string, operation: string, args: Record
       return nativeWriteFile(file, String(args.text ?? ''), mode);
     }
     case 'dex.process.run': {
-      const cwd = scopedPath(typeof args.cwd === 'string' ? args.cwd : process.cwd(), roots, 'cwd');
+      const cwd = scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd');
       return nativeProcess(String(args.command || ''), cwd, profile, Number(args.timeoutMs || 15000));
     }
     default:

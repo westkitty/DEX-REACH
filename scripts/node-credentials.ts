@@ -35,7 +35,7 @@ async function writeNodeEnv(file: string, nodeId: string, token: string, default
       current[key] = rest.join('=');
     }
   } catch {}
-  const values = {
+  const values: Record<string, string> = {
     DEX_REACH_ALLOWED_ROOTS: process.env.DEX_REACH_ALLOWED_ROOTS || os.homedir(),
     DEX_REACH_PROFILE: process.env.DEX_REACH_PROFILE || 'development',
     DEX_REACH_GATEWAY_WS: publicNodeWs(),
@@ -44,6 +44,8 @@ async function writeNodeEnv(file: string, nodeId: string, token: string, default
     DEX_REACH_NODE_ID: nodeId,
     DEX_REACH_NODE_TOKEN: token
   };
+  // A freshly enrolled device starts with AI access OFF; its owner turns it on locally.
+  if (!('DEX_REACH_INITIAL_ACCESS' in values)) values.DEX_REACH_INITIAL_ACCESS = 'off';
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const text = Object.entries(values).map(([key, value]) => `${key}=${value}`).join('\n') + '\n';
   await fs.writeFile(file, text, { mode: 0o600 });
@@ -74,7 +76,10 @@ if (command === 'list') {
     DEX_REACH_ALLOWED_ROOTS: arg('--roots') || os.homedir(),
     DEX_REACH_GATEWAY_WS: arg('--gateway-ws') || publicNodeWs()
   });
-  console.log(`Enrolled ${nodeId}; credential written to ${output}`);
+  console.log(`Enrolled ${nodeId}; credential written to ${output} (mode 0600, token not shown).`);
+  console.log('Send that file to the device owner over a private channel, then on that device run:');
+  console.log(`  npm run install:node -- --env ${path.basename(output)} --service`);
+  console.log('The new node starts with AI access OFF until its owner runs: npm run dex -- enable');
 } else if (command === 'rotate') {
   if (!nodeId) throw new Error('rotate requires a node id');
   const graceSeconds = Number(arg('--grace-seconds') || 600);
@@ -86,6 +91,15 @@ if (command === 'list') {
   if (!nodeId) throw new Error('revoke requires a node id');
   const changed = await store.revoke(nodeId);
   console.log(changed ? `Revoked ${nodeId}` : `No enrolled node named ${nodeId}`);
+} else if (command === 'forget') {
+  if (!nodeId) throw new Error('forget requires a node id');
+  const removed = await store.forget(nodeId);
+  const revokedFile = path.join(stateDir, 'revoked-nodes.json');
+  try {
+    const list = (JSON.parse(await fs.readFile(revokedFile, 'utf8')) as string[]).filter(id => id !== nodeId);
+    await fs.writeFile(revokedFile, JSON.stringify(list, null, 2), { mode: 0o600 });
+  } catch {}
+  console.log(removed ? `Forgot revoked node ${nodeId}` : `No enrolled node named ${nodeId}`);
 } else {
-  throw new Error('usage: node-credentials.ts list | migrate-local | enroll <node> | rotate <node> | revoke <node>');
+  throw new Error('usage: node-credentials.ts list | migrate-local | enroll <node> | rotate <node> | revoke <node> | forget <revoked node>');
 }

@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { ToolDescriptor } from '../shared/protocol.js';
+import { stateDir } from '../shared/local-env.js';
 
 export class DesktopCommanderBackend {
   private client: Client | null = null;
@@ -15,7 +16,7 @@ export class DesktopCommanderBackend {
     const require = createRequire(import.meta.url);
     const packageRoot = path.dirname(require.resolve('@wonderwhy-er/desktop-commander/package.json'));
     const entry = path.join(packageRoot, 'dist/index.js');
-    const isolatedHome = path.join(os.homedir(), '.dex-reach', 'compat-home');
+    const isolatedHome = path.join(stateDir(), 'compat-home');
     await fs.mkdir(isolatedHome, { recursive: true, mode: 0o700 });
     this.transport = new StdioClientTransport({
       command: process.execPath,

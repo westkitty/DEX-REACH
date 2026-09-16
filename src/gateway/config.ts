@@ -1,5 +1,5 @@
 import os from 'node:os';
-import path from 'node:path';
+import { stateDir } from '../shared/local-env.js';
 
 export type GatewayConfig = {
   host: string;
@@ -34,6 +34,6 @@ export function loadGatewayConfig(): GatewayConfig {
     legacyNodeId,
     ownerUser,
     ownerPassword,
-    stateDir: path.join(os.homedir(), '.dex-reach')
+    stateDir: stateDir()
   };
 }

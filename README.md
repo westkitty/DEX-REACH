@@ -63,46 +63,44 @@ npm run nodes -- revoke bigmac
 
 `rotate` keeps the prior credential valid only for the requested grace window, allowing a node to reload the new credential without restarting the gateway. The gateway refreshes persisted credential state on new node connections, so rotation is node-local rather than fleet-wide.
 
+## Node-local AI access control (the owner's switch)
+
+Every node enforces its own policy file (`~/.dex-reach/nodes/<node>.access.json`) before running any
+request, regardless of which AI client or gateway asked. Modes: `off` (everything refused), `read-only`
+(inspection only), `on` (configured profile). Timed windows (`--for 30m`) revert automatically; per-client
+caps can block or limit ChatGPT, Claude, or other clients individually. A freshly enrolled node starts
+`off`; a missing or corrupt policy file also means `off`.
+
+```bash
+npm run dex -- status
+npm run dex -- enable --for 30m
+npm run dex -- read-only
+npm run dex -- client chatgpt off
+npm run dex -- disable
+npm run dex -- audit --limit 50
+npm run dex -- uninstall [--purge-state --yes-delete-state]
+```
+
+None of these need the gateway or the internet. See `docs/TRUST_AND_PRIVACY.md`.
+
 ## Enrolling a second device (another person's machine)
 
-Every node is an independent identity: its own node ID, its own credential, its own allowed roots, its own
-profile, and its own locally detected fingerprint. Nothing in routing assumes a particular machine; every
-MCP action takes an explicit `node_id` and the gateway refuses to route to a node that is not online under
-that exact ID, so a command aimed at one machine never silently runs on another.
+Every node is an independent identity: its own node ID, credential, allowed roots, profile, policy file,
+and locally detected fingerprint. Every MCP action names a `node_id`; unknown, offline, or revoked IDs fail
+and nothing ever falls back to another node.
 
-Workflow (gateway owner = Andrew; new device owner = e.g. Bryan):
+1. **Gateway owner enrolls the node:** `npm run nodes -- enroll bryan-laptop --profile development`
+   → writes `~/.dex-reach/nodes/bryan-laptop.env` (mode 0600, `DEX_REACH_INITIAL_ACCESS=off`). Only the
+   token hash stays in `node-auth.json`.
+2. **Transfer that file privately** to the device owner (never Git/chat/email).
+3. **Device owner installs:** `npm ci && npm run install:node -- --env bryan-laptop.env --roots ~/projects --service`
+   (macOS launchd verified; Linux systemd unit generated but unverified; Windows unsupported). The node
+   discovers its own hostname/user/platform and connects outbound. AI access starts **off**.
+4. **Device owner enables when wanted:** `npm run dex -- enable --for 30m`.
+5. **Revocation is independent:** gateway-side `npm run nodes -- revoke bryan-laptop` (connected nodes are
+   dropped within seconds) or the `reach_revoke_node` action; device-side `npm run dex -- uninstall`.
 
-1. **Gateway owner enrolls the node** (on the gateway machine):
-   ```bash
-   npm run nodes -- enroll bryan-laptop --profile development --roots /Users/bryan
-   ```
-   This writes `~/.dex-reach/nodes/bryan-laptop.env` (mode 0600) containing the node ID, the freshly
-   generated token, the profile, the allowed roots, and the public `wss://…/node` gateway URL. Only the
-   SHA-256 hash of the token is kept in `node-auth.json`; the plaintext exists only in that env file.
-2. **Transfer the env file securely** to the new device (AirDrop, password manager share, an encrypted
-   channel — never Git, chat, or email). Delete the copy on the gateway machine afterwards if desired; the
-   gateway does not need it. Adjust `DEX_REACH_ALLOWED_ROOTS` to that machine's real paths.
-3. **Install the node on the new device** (Node.js 22+):
-   ```bash
-   git clone git@github.com:westkitty/DEX-REACH.git && cd DEX-REACH && npm ci && npm run build
-   mkdir -p ~/.dex-reach/nodes && mv /path/to/bryan-laptop.env ~/.dex-reach/nodes/ && chmod 600 ~/.dex-reach/nodes/bryan-laptop.env
-   DEX_REACH_ENV_FILE=~/.dex-reach/nodes/bryan-laptop.env node dist/src/node/main.js
-   ```
-   The node detects its own hostname, user, platform, architecture, and runtime, and connects **outbound**
-   over WebSocket to the gateway. No inbound port, SSH exposure, or shell listener is required on the new
-   device.
-4. **Verify from the gateway side**: `curl https://<gateway>/healthz` reports the new online node count, and
-   `reach_list_nodes` from ChatGPT or Claude lists `bryan-laptop` separately with its own fingerprint.
-5. **Select it explicitly** in the AI client (`node_id: "bryan-laptop"`). Revocation (`npm run nodes -- revoke bryan-laptop`
-   or the `reach_revoke_node` action) affects only that credential.
-
-Platform status (honest): the node runtime is portable Node/TypeScript and the protocol is OS-agnostic.
-Persistent service installation is implemented and verified only for macOS `launchd`
-(`npm run install:macos`). Linux (systemd) and Windows (Task Scheduler / service) adapters are not yet
-written; on those platforms run the node manually or under your own supervisor. Bounded process execution
-uses a POSIX login shell (`/bin/zsh` on macOS, `/bin/sh` elsewhere, override with `DEX_REACH_SHELL`) and
-refuses to run on Windows until a Windows executor exists. The compatibility adapter is a Node package and
-starts wherever Node runs, but has only been exercised on macOS.
+Short version for the device owner: `docs/SECOND_DEVICE_QUICKSTART.md`.
 
 ## Public HTTPS for ChatGPT / Claude
 
@@ -128,6 +126,8 @@ npm run smoke
 ```
 
 `npm run smoke` performs OAuth/PKCE over the public MCP endpoint, verifies fallback compatibility routing, exercises DEX-native file and process operations, invokes ADB discovery, and creates a recoverable checkpoint from a deliberately dirty disposable Git repository.
+
+`scripts/sim-two-nodes.ts` runs a second node under an isolated `DEX_REACH_STATE_DIR` against the live gateway and proves explicit routing, per-node roots, node-local off/read-only/on enforcement, per-client caps, audit attribution, and no-fallback behavior (24 checks).
 
 ## Client state
 

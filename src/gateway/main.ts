@@ -12,6 +12,8 @@ import { ReachOAuthProvider } from './auth.js';
 import { NodeRegistry } from './registry.js';
 import { NodeAuthStore } from './node-auth.js';
 import { createReachMcpServer } from './mcp.js';
+import { classifyClient } from '../shared/access.js';
+import type { RequestActor } from '../shared/protocol.js';
 
 loadLocalSecrets();
 const config = loadGatewayConfig();
@@ -99,13 +101,18 @@ app.post('/mcp', bearer, async (req, res) => {
   try {
     if (sessionId) {
       const session = sessions.get(sessionId);
-      if (!session || session.clientId !== clientId) return void res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Invalid MCP session' }, id: null });
+      // MCP Streamable HTTP: an unknown/expired session is 404 so well-behaved clients re-initialize
+      // transparently (e.g. after a gateway restart) instead of surfacing a dead session forever.
+      if (!session || session.clientId !== clientId) return void res.status(404).json({ jsonrpc: '2.0', error: { code: -32001, message: 'MCP session not found; send a new initialize request' }, id: null });
       await session.transport.handleRequest(req, res, req.body);
       return;
     }
     if (!isInitializeRequest(req.body)) return void res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Initialization request required' }, id: null });
     let transport!: StreamableHTTPServerTransport;
-    const mcp = createReachMcpServer(registry, audit, clientId);
+    // Actor identity comes from the OAuth client registration the owner approved; no token material is forwarded.
+    const clientName = oauth.getClient(clientId)?.client_name || clientId;
+    const actor: RequestActor = { kind: classifyClient(clientName), clientId, clientName };
+    const mcp = createReachMcpServer(registry, audit, clientId, actor);
     transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       enableJsonResponse: true,
@@ -130,7 +137,7 @@ async function handleSessionRequest(req: express.Request, res: express.Response)
   const clientId = req.auth?.clientId || 'unknown';
   const session = sessions.get(sessionId);
   if (!session || session.clientId !== clientId) {
-    res.status(400).send('Invalid or missing MCP session');
+    res.status(404).json({ jsonrpc: '2.0', error: { code: -32001, message: 'MCP session not found; send a new initialize request' }, id: null });
     return;
   }
   await session.transport.handleRequest(req, res);
@@ -144,6 +151,7 @@ const httpServer = app.listen(config.port, config.host, () => {
   console.log(`DEX//REACH public MCP resource: ${resourceUrl}`);
 });
 registry.attach(httpServer);
+registry.startRevocationSweep();
 
 async function shutdown(): Promise<void> {
   for (const session of sessions.values()) await session.transport.close().catch(() => undefined);

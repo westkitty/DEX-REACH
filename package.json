@@ -14,7 +14,9 @@
     "smoke": "tsx scripts/smoke.ts",
     "install:macos": "npm run build && tsx scripts/install-macos.ts",
     "uninstall:macos": "tsx scripts/uninstall-macos.ts",
-    "nodes": "tsx scripts/node-credentials.ts"
+    "nodes": "tsx scripts/node-credentials.ts",
+    "dex": "tsx scripts/dex-reach.ts",
+    "install:node": "npm run build && tsx scripts/install-node.ts"
   },
   "keywords": [],
   "author": "",
@@ -38,5 +40,8 @@
   "overrides": {
     "sharp": "0.35.4",
     "uuid": "11.1.1"
+  },
+  "bin": {
+    "dex-reach": "dist/scripts/dex-reach.js"
   }
 }

@@ -2,6 +2,7 @@ import * as z from 'zod/v4';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { NodeRegistry } from './registry.js';
 import type { AuditLog } from '../shared/audit.js';
+import type { RequestActor } from '../shared/protocol.js';
 
 const NODE_ID_HINT = 'Target node ID exactly as returned by reach_list_nodes (for example "macbook-air.local"). Never guess; each node is a different machine.';
 
@@ -12,25 +13,25 @@ function text(value: unknown) {
   return { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
 }
 
-export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, clientId = 'unknown'): McpServer {
+export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, clientId = 'unknown', actor?: RequestActor): McpServer {
   const server = new McpServer({ name: 'DEX//REACH', version: '0.2.0' });
 
   const routed = async (nodeId: string, operation: string, args: Record<string, unknown>) => {
     const started = Date.now();
     try {
-      const result = await registry.request(nodeId, operation, args);
-      await audit.append({ at: new Date().toISOString(), nodeId, client: clientId, operation, ok: true, durationMs: Date.now() - started, args });
+      const result = await registry.request(nodeId, operation, args, actor);
+      await audit.append({ at: new Date().toISOString(), source: 'gateway', nodeId, client: clientId, actor, operation, ok: true, durationMs: Date.now() - started, args });
       return text(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await audit.append({ at: new Date().toISOString(), nodeId, client: clientId, operation, ok: false, durationMs: Date.now() - started, args, error: message });
+      await audit.append({ at: new Date().toISOString(), source: 'gateway', nodeId, client: clientId, actor, operation, ok: false, durationMs: Date.now() - started, args, error: message });
       throw error;
     }
   };
 
   server.registerTool('reach_list_nodes', {
     title: 'List DEX Nodes',
-    description: 'List every enrolled DEX//REACH node (machine) with its node ID, online state, identity fingerprint, execution profile, allowed filesystem roots, and capability counts. Call this first and pick the node_id explicitly before any other DEX//REACH action.',
+    description: 'List every online DEX//REACH node (machine) with its node ID, identity fingerprint, execution profile, allowed filesystem roots, the owner-controlled aiAccess mode (off / read-only / on, plus any per-client limits), and capability counts. Call this first and pick the node_id explicitly before any other DEX//REACH action; a node whose aiAccess is off or read-only will refuse operations locally regardless of what you request.',
     inputSchema: {},
     annotations: READ
   }, async () => text(registry.listNodes()));
@@ -136,7 +137,7 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
   }, async ({ node_id, confirm_node_id }) => {
     if (node_id !== confirm_node_id) throw new Error('node revocation confirmation mismatch');
     const wasOnline = await registry.revoke(node_id);
-    await audit.append({ at: new Date().toISOString(), nodeId: node_id, client: clientId, operation: 'dex.revokeNode', ok: true, args: { nodeId: node_id } });
+    await audit.append({ at: new Date().toISOString(), source: 'gateway', nodeId: node_id, client: clientId, actor, operation: 'dex.revokeNode', ok: true, args: { nodeId: node_id } });
     return text({ revoked: true, wasOnline });
   });
 

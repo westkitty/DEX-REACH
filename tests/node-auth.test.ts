@@ -23,6 +23,9 @@ test('node credentials are isolated, rotatable, and revocable', async () => {
     assert.equal(await store.authenticate('node-a', rotatedA), false);
     assert.equal(await store.authenticate('node-a', tokenA), false);
     assert.equal(await store.authenticate('node-b', tokenB), true);
+    await assert.rejects(store.forget('node-b'), /revoke it first/);
+    assert.equal(await store.forget('node-a'), true);
+    assert.equal(store.list().map(n => n.nodeId).join(','), 'node-b');
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
