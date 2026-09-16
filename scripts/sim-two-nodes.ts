@@ -1,7 +1,7 @@
 /**
  * Two-node routing/policy proof against the LIVE gateway through the public OAuth + MCP path.
  * Requires: the real node online, and a second node enrolled and running with an isolated state dir:
- *   SIM_NODE_ID=test-bryan-node SIM_STATE_DIR=/tmp/dex-sim-bryan/state SIM_ROOT=/tmp/dex-sim-bryan/home npx tsx scripts/sim-two-nodes.ts
+ *   SIM_NODE_ID=test-second-node SIM_STATE_DIR=/tmp/dex-sim-second/state SIM_ROOT=/tmp/dex-sim-second/home npx tsx scripts/sim-two-nodes.ts
  * It flips the simulated node's LOCAL policy file (as its owner would) and proves the node, not the gateway
  * or the client, decides. It never touches the real node's policy.
  */
@@ -11,16 +11,17 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { OAuthClientInformationFull, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
-import { loadLocalSecrets } from '../src/shared/local-env.js';
+import { loadOwnerSecrets } from '../src/shared/local-env.js';
 import { loadAccessState, saveAccessState } from '../src/shared/access.js';
+import { DEX_REACH_VERSION } from '../src/shared/version.js';
 
-loadLocalSecrets();
+loadOwnerSecrets();
 const base = new URL(process.env.DEX_REACH_PUBLIC_BASE_URL || 'http://127.0.0.1:8787');
 const resource = new URL('/mcp', base);
 const realNode = process.env.DEX_REACH_NODE_ID || '';
-const simNode = process.env.SIM_NODE_ID || 'test-bryan-node';
-const simState = process.env.SIM_STATE_DIR || '/tmp/dex-sim-bryan/state';
-const simRoot = process.env.SIM_ROOT || '/tmp/dex-sim-bryan/home';
+const simNode = process.env.SIM_NODE_ID || 'test-second-node';
+const simState = process.env.SIM_STATE_DIR || '/tmp/dex-sim-second/state';
+const simRoot = process.env.SIM_ROOT || '/tmp/dex-sim-second/home';
 const callbackUrl = 'http://127.0.0.1:49153/callback';
 
 class Provider implements OAuthClientProvider {
@@ -44,7 +45,7 @@ async function authorize(url: URL): Promise<string> {
 }
 
 const provider = new Provider();
-const client = new Client({ name: 'dex-reach-two-node-sim', version: '0.2.0' }, { capabilities: {} });
+const client = new Client({ name: 'dex-reach-two-node-sim', version: DEX_REACH_VERSION }, { capabilities: {} });
 async function connect(): Promise<void> {
   const transport = new StreamableHTTPClientTransport(resource, { authProvider: provider });
   try { await client.connect(transport); } catch (error) {
@@ -119,7 +120,7 @@ const ceilingWrite = await call('reach_file_write', { node_id: simNode, path: pa
 expect('sim ON + smoke read-only: write refused', !ceilingWrite.ok, ceilingWrite.text);
 
 // 5. Explicit routing: unknown and typo'd IDs fail; nothing falls back.
-const typo = await call('reach_fingerprint', { node_id: 'test-bryan-nod' });
+const typo = await call('reach_fingerprint', { node_id: 'test-second-nod' });
 expect('typo node id fails, no fallback', !typo.ok && /not enrolled or not online/.test(typo.text), typo.text);
 const unknown = await call('reach_process_run', { node_id: 'does-not-exist', command: 'pwd' });
 expect('unknown node id fails', !unknown.ok, unknown.text);

@@ -13,7 +13,7 @@ Use GitHub's **Security** tab for this repository and choose **Report a vulnerab
 Include only what is needed to reproduce and assess the issue:
 
 - affected commit or version;
-- affected component (gateway, OAuth/MCP, node transport, local policy, installer, audit, or compatibility adapter);
+- affected component (gateway, OAuth/MCP, node transport, local policy, installer, audit, native executor, or compatibility adapter);
 - prerequisites and realistic impact;
 - minimal reproduction steps or proof of concept;
 - whether credentials or personal data may have been exposed;
@@ -29,19 +29,34 @@ Public issues are appropriate for non-sensitive hardening ideas, documentation e
 
 A fix must preserve DEX//REACH's core trust model:
 
-- the node is the final authority and enforces `off`, `read-only`, `on`, timed windows, and per-client caps locally;
-- missing or corrupt node policy fails closed;
-- every operation names an explicit `node_id`; there is no default target or fallback;
+- the node is the final authority and enforces `off`, `read-only`, `on`, timed windows, per-client caps, and capability grants locally before execution;
+- missing or corrupt node policy fails closed, and a newly enrolled node starts `off`;
+- every operation names an explicit `node_id`; blank, unknown, offline, disabled, or revoked nodes fail and there is no default target or fallback;
 - typed filesystem operations, checkpoints, read-only process arguments, and compatibility-tool path arguments are constrained to configured allowed roots;
-- DEX private state under `~/.dex-reach/` is excluded from path-scoped remote operations even if a broader allowed root contains it, and relative path arguments fail closed;
+- scope checks canonicalize existing symlinks and inspect singular, plural, nested, snake_case, and camelCase path-bearing compatibility arguments before execution;
+- DEX private state under `~/.dex-reach/` or `DEX_REACH_STATE_DIR` is excluded from path-scoped remote operations even if a broader allowed root contains it; relative path arguments fail closed;
 - READ-ONLY native process execution is shell-free and compatibility execution uses an explicit inspection-tool allowlist; unknown compatibility tools fail closed;
-- ON-mode arbitrary shell execution is a high-authority capability: allowed roots constrain its working directory but are not an OS sandbox for arbitrary shell programs; use capability grants and OS isolation when stronger confinement is required;
+- compatibility safety configuration is node-owned. Remote clients cannot change `allowedDirectories`/telemetry configuration, recover Desktop Commander call history, invoke vendor feedback/onboarding surfaces, or use compatibility URL-fetch mode;
+- ON-mode arbitrary shell execution is a high-authority capability: allowed roots constrain its working directory but are **not** an OS filesystem sandbox for arbitrary shell programs. Child processes nevertheless do not inherit DEX credential variables or obvious secret-bearing environment variables, and known parent secret values are redacted from returned stdout/stderr;
+- capability grants can only narrow authority. They cannot override OFF, READ-ONLY, a stricter client ceiling, or configured node roots;
+- exact-action plans bind the node, client, operation/arguments, policy hash, expiry, and one-use state; concurrent claims admit at most one executor and raw plan arguments are scrubbed after claim or expiry;
+- execution receipts are node-local Ed25519-signed records containing hashes rather than raw request/result contents and are appended as one predecessor-linked chain;
+- bootstrap, owner-policy, grant-use, plan-claim, receipt-chain, node-auth, revocation, and OAuth persistence use atomic or locked state transitions where concurrent writers could otherwise weaken authority or corrupt state;
 - nodes connect outbound and do not expose a raw shell listener;
+- a non-loopback public MCP identity must use HTTPS; a node may use `ws://` only to loopback and must use `wss://` for a remote gateway;
 - node credentials are independent and revocable;
-- public source access grants no gateway, OAuth-client, or node authority;
-- credentials, enrollment files, tokens, and sensitive file contents do not enter Git or audit logs.
+- public source access grants no gateway, OAuth-client, node, or filesystem authority;
+- credentials, enrollment files, tokens, private keys, policies, and sensitive file contents do not enter Git, public documentation, or the redacted audit trail;
+- persistent-service installation and convenience launchers may restore already-installed services but must not silently widen access mode, client ceilings, capability grants, credentials, roots, profiles, or trust boundaries;
+- simulation evidence is never represented as proof of separate physical hardware.
 
-Public visibility of this repository is not a security boundary. Authentication, explicit enrollment, least authority, local policy, and revocation are.
+Public visibility of this repository is not a security boundary. Authentication, explicit enrollment, least authority, local policy, revocation, and runtime proof are.
+
+## Important limitation of ON/full-local shell access
+
+`reach_process_run` in an enabled high-authority profile intentionally permits a bounded shell command. DEX removes credential-bearing environment variables, blocks direct DEX-private-state targeting, applies command guardrails, and constrains the requested working directory, but it is **not** a kernel/VM filesystem sandbox. A program started by the device owner's user account may have whatever filesystem access that operating-system account has.
+
+Use OFF/READ-ONLY, capability grants, narrower node profiles, narrower OS permissions, separate accounts, containers/VMs, or other OS isolation when that distinction matters. Do not advertise DEX allowed roots as equivalent to mandatory OS confinement for arbitrary ON-mode shell programs.
 
 ## Response and disclosure
 

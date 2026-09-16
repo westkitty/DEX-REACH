@@ -32,48 +32,48 @@ test('routing is explicit: unknown, blank, offline, and revoked nodes fail and n
   try {
     const auth = new NodeAuthStore(dir);
     await auth.initialize();
-    await auth.enroll('andrew-mac');
-    await auth.enroll('bryan-laptop');
+    await auth.enroll('primary-mac');
+    await auth.enroll('second-laptop');
     const registry = new NodeRegistry(auth, dir);
     await registry.initialize();
-    const andrew = new FakeSocket();
-    const bryan = new FakeSocket();
-    registry.registerForTest(hello('andrew-mac'), andrew as unknown as WebSocket);
-    registry.registerForTest(hello('bryan-laptop'), bryan as unknown as WebSocket);
-    assert.deepEqual(registry.listNodes().map(n => n.nodeId).sort(), ['andrew-mac', 'bryan-laptop']);
+    const primary = new FakeSocket();
+    const second = new FakeSocket();
+    registry.registerForTest(hello('primary-mac'), primary as unknown as WebSocket);
+    registry.registerForTest(hello('second-laptop'), second as unknown as WebSocket);
+    assert.deepEqual(registry.listNodes().map(n => n.nodeId).sort(), ['primary-mac', 'second-laptop']);
 
     // Explicit routing reaches exactly the named node, carrying the actor identity.
-    const pending = registry.request('bryan-laptop', 'dex.file.write', { path: '/x' }, { kind: 'chatgpt', clientId: 'c', clientName: 'ChatGPT' });
-    assert.equal(bryan.sent.length, 1);
-    assert.equal(andrew.sent.length, 0);
-    assert.equal(bryan.sent[0]!.actor?.kind, 'chatgpt');
-    registry.deliverForTest({ type: 'response', id: bryan.sent[0]!.id, ok: true, result: 'done-on-bryan' });
-    assert.equal(await pending, 'done-on-bryan');
+    const pending = registry.request('second-laptop', 'dex.file.write', { path: '/x' }, { kind: 'chatgpt', clientId: 'c', clientName: 'ChatGPT' });
+    assert.equal(second.sent.length, 1);
+    assert.equal(primary.sent.length, 0);
+    assert.equal(second.sent[0]!.actor?.kind, 'chatgpt');
+    registry.deliverForTest({ type: 'response', id: second.sent[0]!.id, ok: true, result: 'done-on-second' });
+    assert.equal(await pending, 'done-on-second');
 
     // Unknown / blank IDs fail without touching any socket.
-    await assert.rejects(registry.request('bryan-laptp', 'dex.fingerprint', {}), /not enrolled or not online: bryan-laptp/);
+    await assert.rejects(registry.request('second-laptp', 'dex.fingerprint', {}), /not enrolled or not online: second-laptp/);
     await assert.rejects(registry.request('', 'dex.fingerprint', {}), /node_id is required/);
     await assert.rejects(registry.request(undefined as unknown as string, 'dex.fingerprint', {}), /node_id is required/);
-    assert.equal(andrew.sent.length, 0);
+    assert.equal(primary.sent.length, 0);
 
-    // Bryan going offline does not redirect his work to Andrew.
-    bryan.readyState = WebSocket.CLOSED;
-    await assert.rejects(registry.request('bryan-laptop', 'dex.process.run', { command: 'pwd' }), /not online: bryan-laptop/);
-    assert.equal(andrew.sent.length, 0);
+    // Second node going offline does not redirect his work to Primary node.
+    second.readyState = WebSocket.CLOSED;
+    await assert.rejects(registry.request('second-laptop', 'dex.process.run', { command: 'pwd' }), /not online: second-laptop/);
+    assert.equal(primary.sent.length, 0);
 
-    // Revoking Bryan disconnects only Bryan; Andrew keeps working and Bryan can no longer authenticate.
-    const bryanToken = await auth.rotate('bryan-laptop', 0);
-    bryan.readyState = WebSocket.OPEN;
-    assert.equal(await registry.revoke('bryan-laptop'), true);
-    assert.equal(bryan.closed?.code, 4001);
-    assert.equal(andrew.closed, null);
-    await assert.rejects(registry.request('bryan-laptop', 'dex.fingerprint', {}), /revoked: bryan-laptop/);
-    assert.equal(await auth.authenticate('bryan-laptop', bryanToken), false);
-    const again = registry.request('andrew-mac', 'dex.fingerprint', {});
-    assert.equal(andrew.sent.length, 1);
-    registry.deliverForTest({ type: 'response', id: andrew.sent[0]!.id, ok: true, result: 'andrew-ok' });
-    assert.equal(await again, 'andrew-ok');
-    // An out-of-process CLI revoke (credential store only) is enforced by the sweep, without touching Andrew.
+    // Revoking Second node disconnects only Second node; Primary node keeps working and Second node can no longer authenticate.
+    const secondToken = await auth.rotate('second-laptop', 0);
+    second.readyState = WebSocket.OPEN;
+    assert.equal(await registry.revoke('second-laptop'), true);
+    assert.equal(second.closed?.code, 4001);
+    assert.equal(primary.closed, null);
+    await assert.rejects(registry.request('second-laptop', 'dex.fingerprint', {}), /revoked: second-laptop/);
+    assert.equal(await auth.authenticate('second-laptop', secondToken), false);
+    const again = registry.request('primary-mac', 'dex.fingerprint', {});
+    assert.equal(primary.sent.length, 1);
+    registry.deliverForTest({ type: 'response', id: primary.sent[0]!.id, ok: true, result: 'primary-ok' });
+    assert.equal(await again, 'primary-ok');
+    // An out-of-process CLI revoke (credential store only) is enforced by the sweep, without touching Primary node.
     const carol = new FakeSocket();
     await auth.enroll('carol-pc');
     registry.registerForTest(hello('carol-pc'), carol as unknown as WebSocket);
@@ -82,7 +82,7 @@ test('routing is explicit: unknown, blank, offline, and revoked nodes fail and n
     await cli.revoke('carol-pc');
     assert.equal(await registry.sweepRevoked(), 1);
     assert.equal(carol.closed?.code, 4001);
-    assert.equal(andrew.closed, null);
+    assert.equal(primary.closed, null);
     await assert.rejects(registry.request('carol-pc', 'dex.fingerprint', {}), /revoked: carol-pc/);
     registry.shutdown();
   } finally {

@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { authorizeOperation, classifyClient, defaultAccessState, loadAccessState, modeForActor, parseDuration, resolveMode, saveAccessState, type AccessState } from '../src/shared/access.js';
+import { authorizeOperation, classifyClient, createGrant, defaultAccessState, loadAccessState, modeForActor, parseDuration, reserveOperation, resolveMode, saveAccessState, updateAccessState, type AccessState } from '../src/shared/access.js';
 import { nativeCall } from '../src/node/native.js';
 import type { RequestActor } from '../src/shared/protocol.js';
 
 const chatgpt: RequestActor = { kind: 'chatgpt', clientId: 'c1', clientName: 'ChatGPT' };
 const claude: RequestActor = { kind: 'claude', clientId: 'c2', clientName: 'Claude Code (dex-reach)' };
-const base = (mode: AccessState['mode'], extra: Partial<AccessState> = {}): AccessState => ({ version: 2, mode, until: null, revertTo: null, clients: {}, grantRequired: {}, grants: [], updatedAt: new Date(0).toISOString(), ...extra });
+const base = (mode: AccessState['mode'], extra: Partial<AccessState> = {}): AccessState => ({ version: 3, revision: 0, mode, until: null, revertTo: null, clients: {}, grantRequired: {}, grants: [], updatedAt: new Date(0).toISOString(), ...extra });
 
 test('disabled mode refuses every operation with an owner-attributed reason', () => {
   for (const op of ['dex.fingerprint', 'dex.file.read', 'dex.file.write', 'dex.process.run', 'dc.call', 'dex.checkpoint']) {
@@ -127,8 +127,9 @@ test('capability grants constrain enabled clients by operation, root, expiry, an
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-grant-'));
   const previousStateDir = process.env.DEX_REACH_STATE_DIR;
   try {
-    process.env.DEX_REACH_STATE_DIR = root;
+    process.env.DEX_REACH_STATE_DIR = path.join(root, 'state');
     const resource = path.join(root, 'project');
+    await fs.mkdir(resource);
     let state = createGrant(base('on'), 'chatgpt', ['file.write'], [resource], 60_000, 1);
     const allowed = authorizeOperation(state, chatgpt, 'dex.file.write', 'development', Date.now(), { path: path.join(resource, 'x.txt') });
     assert.equal(allowed.allowed, true);
@@ -165,5 +166,39 @@ test('max-use grants cannot be double-spent by concurrent reservations', async (
   } finally {
     if (previousStateDir === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previousStateDir;
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test('stale policy writers cannot overwrite a newer local owner decision', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-policy-cas-'));
+  try {
+    await saveAccessState('n', base('on'), dir);
+    const stale = await loadAccessState('n', dir);
+    await updateAccessState('n', current => ({ ...current, mode: 'off' }), dir);
+    await assert.rejects(saveAccessState('n', { ...stale, grants: [...stale.grants] }, dir), /changed since it was loaded/);
+    assert.equal((await loadAccessState('n', dir)).mode, 'off');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('final authorization reservation honors the latest owner policy and atomically consumes a grant', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-reserve-'));
+  try {
+    const resource = path.join(dir, 'project');
+    await fs.mkdir(resource);
+    await saveAccessState('n', base('on'), dir);
+    await updateAccessState('n', current => createGrant(current, 'chatgpt', ['file.write'], [resource], 60_000, 1), dir);
+    const reserved = await reserveOperation('n', chatgpt, 'dex.file.write', 'development', { path: path.join(resource, 'x.txt') }, { dir });
+    assert.equal(reserved.decision.allowed, true);
+    assert.equal((await loadAccessState('n', dir)).grants[0]!.uses, 1);
+    await updateAccessState('n', current => ({ ...current, mode: 'off' }), dir);
+    await assert.rejects(
+      reserveOperation('n', chatgpt, 'dex.file.read', 'development', { path: path.join(resource, 'x.txt') }, { dir }),
+      /NODE OWNER has disabled/
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });

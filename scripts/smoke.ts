@@ -7,11 +7,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { OAuthClientInformationFull, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
-import { loadLocalSecrets } from '../src/shared/local-env.js';
+import { loadOwnerSecrets } from '../src/shared/local-env.js';
+import { DEX_REACH_VERSION } from '../src/shared/version.js';
 
 const execFileAsync = promisify(execFile);
-
-loadLocalSecrets();
+loadOwnerSecrets();
 const base = new URL(process.env.DEX_REACH_PUBLIC_BASE_URL || 'http://127.0.0.1:8787');
 const resource = new URL('/mcp', base);
 const ownerUser = process.env.DEX_REACH_OWNER_USER || '';
@@ -23,16 +23,9 @@ class SmokeOAuthProvider implements OAuthClientProvider {
   private savedTokens?: OAuthTokens;
   private verifier?: string;
   authorizationUrl?: URL;
-
   get redirectUrl(): string | URL { return callbackUrl; }
   get clientMetadata(): OAuthClientMetadata {
-    return {
-      client_name: 'DEX REACH Smoke',
-      redirect_uris: [callbackUrl],
-      grant_types: ['authorization_code', 'refresh_token'],
-      response_types: ['code'],
-      token_endpoint_auth_method: 'none'
-    };
+    return { client_name: 'DEX REACH Smoke', redirect_uris: [callbackUrl], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' };
   }
   clientInformation(): OAuthClientInformationFull | undefined { return this.info; }
   saveClientInformation(value: OAuthClientInformationFull): void { this.info = value; }
@@ -50,10 +43,8 @@ async function authorize(url: URL): Promise<string> {
   const ticket = html.match(/name="ticket" value="([^"]+)"/)?.[1];
   if (!ticket) throw new Error('authorization ticket was not rendered');
   const approval = await fetch(new URL('/dex/approve', base), {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ ticket, username: ownerUser, password: ownerPassword }),
-    redirect: 'manual'
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ ticket, username: ownerUser, password: ownerPassword }), redirect: 'manual'
   });
   if (approval.status < 300 || approval.status >= 400) throw new Error(`approval failed: ${approval.status}`);
   const location = approval.headers.get('location');
@@ -63,14 +54,24 @@ async function authorize(url: URL): Promise<string> {
   return code;
 }
 
-const provider = new SmokeOAuthProvider();
-const client = new Client({ name: 'dex-reach-smoke', version: '0.2.0' }, { capabilities: {} });
+function textContent(result: Awaited<ReturnType<Client['callTool']>>): string {
+  const pieces = Array.isArray(result.content)
+    ? result.content.filter((item): item is { type: 'text'; text: string } => item.type === 'text' && typeof item.text === 'string').map(item => item.text)
+    : [];
+  return pieces.join('\n');
+}
+function jsonContent<T>(result: Awaited<ReturnType<Client['callTool']>>, label: string): T {
+  if (result.isError) throw new Error(`${label} returned an MCP error: ${textContent(result)}`);
+  const text = textContent(result);
+  try { return JSON.parse(text) as T; } catch { throw new Error(`${label} did not return JSON: ${text.slice(0, 300)}`); }
+}
 
+const provider = new SmokeOAuthProvider();
+const client = new Client({ name: 'dex-reach-smoke', version: DEX_REACH_VERSION }, { capabilities: {} });
 async function connect(): Promise<void> {
   const transport = new StreamableHTTPClientTransport(resource, { authProvider: provider });
-  try {
-    await client.connect(transport);
-  } catch (error) {
+  try { await client.connect(transport); }
+  catch (error) {
     if (!(error instanceof UnauthorizedError) || !provider.authorizationUrl) throw error;
     const code = await authorize(provider.authorizationUrl);
     await transport.finishAuth(code);
@@ -78,53 +79,106 @@ async function connect(): Promise<void> {
   }
 }
 
-await connect();
-const tools = await client.listTools();
-const required = ['reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write', 'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'];
-for (const name of required) {
-  const tool = tools.tools.find(candidate => candidate.name === name);
-  if (!tool) throw new Error(`missing MCP tool: ${name}`);
-  // ChatGPT derives action titles and read/write classification from these; keep them mandatory.
-  if (!tool.title || !tool.description || typeof tool.annotations?.readOnlyHint !== 'boolean') {
-    throw new Error(`MCP tool ${name} is missing title, description, or readOnlyHint annotation`);
+const cleanupFiles: string[] = [];
+let fixture = '';
+try {
+  await connect();
+  const tools = await client.listTools();
+  const required = ['reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write', 'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'];
+  for (const name of required) {
+    const tool = tools.tools.find(candidate => candidate.name === name);
+    if (!tool) throw new Error(`missing MCP tool: ${name}`);
+    if (!tool.title || !tool.description || typeof tool.annotations?.readOnlyHint !== 'boolean') throw new Error(`MCP tool ${name} is missing title, description, or readOnlyHint annotation`);
   }
+  if (tools.tools.length < required.length) throw new Error(`tool count ${tools.tools.length} is below required ${required.length}`);
+
+  const nodeId = process.env.DEX_REACH_NODE_ID || '';
+  if (!nodeId) throw new Error('DEX_REACH_NODE_ID missing');
+  type NodeRecord = { nodeId: string; online: boolean; allowedRoots: string[]; agentVersion: string; aiAccess?: { mode?: string } };
+  const nodes = jsonContent<NodeRecord[]>(await client.callTool({ name: 'reach_list_nodes', arguments: {} }), 'reach_list_nodes');
+  const nodeRecord = nodes.find(entry => entry.nodeId === nodeId);
+  if (!nodeRecord?.online) throw new Error(`target node is not online: ${nodeId}`);
+  if (nodeRecord.agentVersion !== DEX_REACH_VERSION) throw new Error(`deployed node version mismatch: expected ${DEX_REACH_VERSION}, got ${nodeRecord.agentVersion}`);
+
+  const fingerprint = jsonContent<{ nodeId: string }>(await client.callTool({ name: 'reach_fingerprint', arguments: { node_id: nodeId } }), 'reach_fingerprint');
+  if (fingerprint.nodeId !== nodeId) throw new Error('reach_fingerprint returned the wrong node');
+
+  type CompatTool = { name: string };
+  const compatTools = jsonContent<CompatTool[]>(await client.callTool({ name: 'reach_list_tools', arguments: { node_id: nodeId } }), 'reach_list_tools');
+  const compatNames = new Set(compatTools.map(tool => tool.name));
+  const blockedCompat = ['set_config_value', 'get_recent_tool_calls', 'give_feedback_to_desktop_commander', 'get_prompts'];
+  for (const name of blockedCompat) if (compatNames.has(name)) throw new Error(`node exposed node-owned/vendor-only compatibility tool ${name}`);
+  const expectedCompat = ['get_config', 'read_file', 'read_multiple_files', 'write_file', 'write_pdf', 'create_directory', 'list_directory', 'move_file', 'start_search', 'get_more_search_results', 'stop_search', 'list_searches', 'get_file_info', 'edit_block', 'start_process', 'read_process_output', 'interact_with_process', 'force_terminate', 'list_sessions', 'list_processes', 'kill_process', 'get_usage_stats'];
+  for (const name of expectedCompat) if (!compatNames.has(name)) throw new Error(`missing safe compatibility tool ${name}`);
+  if (compatTools.length !== expectedCompat.length) throw new Error(`unexpected remote compatibility tool count ${compatTools.length}; expected ${expectedCompat.length}`);
+
+  const configMutation = await client.callTool({ name: 'reach_call', arguments: { node_id: nodeId, tool: 'set_config_value', arguments: { key: 'allowedDirectories', value: [] } } });
+  if (!configMutation.isError) throw new Error('node-owned compatibility configuration was remotely mutable');
+  const urlProxy = await client.callTool({ name: 'reach_call', arguments: { node_id: nodeId, tool: 'read_file', arguments: { path: 'http://127.0.0.1:8787/healthz', isUrl: true } } });
+  if (!urlProxy.isError) throw new Error('compatibility URL proxy reads were remotely permitted');
+
+  const configResult = await client.callTool({ name: 'reach_call', arguments: { node_id: nodeId, tool: 'get_config', arguments: {} } });
+  if (configResult.isError) throw new Error(`routed get_config returned an error: ${textContent(configResult)}`);
+  const configText = textContent(configResult);
+  if (!configText.includes('"telemetryEnabled":false') && !configText.includes('"telemetryEnabled": false')) throw new Error('compatibility backend telemetry is not proven disabled');
+  for (const root of nodeRecord.allowedRoots) if (!configText.includes(root)) throw new Error(`compatibility backend did not report allowed root ${root}`);
+
+  const adb = jsonContent<{ available: boolean; devices?: unknown[]; error?: string }>(await client.callTool({ name: 'reach_adb_devices', arguments: { node_id: nodeId } }), 'reach_adb_devices');
+  if (adb.available !== true) throw new Error(`ADB binary is unavailable to the deployed node: ${adb.error || 'unknown error'}`);
+
+  const tempPath = `/tmp/dex-reach-smoke-${process.pid}.txt`;
+  cleanupFiles.push(tempPath);
+  const marker = `DEX-REACH-SMOKE-${Date.now()}`;
+  const writeResult = await client.callTool({ name: 'reach_file_write', arguments: { node_id: nodeId, path: tempPath, text: marker, mode: 'rewrite' } });
+  if (writeResult.isError) throw new Error(`DEX-native file write returned an error: ${textContent(writeResult)}`);
+  const readResult = await client.callTool({ name: 'reach_file_read', arguments: { node_id: nodeId, path: tempPath } });
+  if (readResult.isError || !textContent(readResult).includes(marker)) throw new Error('DEX-native file roundtrip did not preserve content');
+
+  const processResult = await client.callTool({ name: 'reach_process_run', arguments: { node_id: nodeId, command: 'pwd', cwd: '/tmp', timeout_ms: 4000 } });
+  if (processResult.isError) throw new Error(`DEX-native process execution failed: ${textContent(processResult)}`);
+  const environmentResult = await client.callTool({ name: 'reach_process_run', arguments: { node_id: nodeId, command: 'env', cwd: '/tmp', timeout_ms: 4000 } });
+  const environmentText = textContent(environmentResult);
+  if (environmentResult.isError) throw new Error(`DEX-native sanitized environment probe failed: ${environmentText}`);
+  if (/DEX_REACH_(?:NODE_TOKEN|OWNER_PASSWORD|ENV_FILE)=/i.test(environmentText) || /(?:TOKEN|PASSWORD|SECRET|API_KEY)=/i.test(environmentText)) {
+    throw new Error('remote process environment exposed a credential-bearing variable');
+  }
+
+  const plannedPath = `/tmp/dex-reach-plan-smoke-${process.pid}.txt`;
+  cleanupFiles.push(plannedPath);
+  const plannedMarker = `DEX-REACH-PLANNED-${Date.now()}`;
+  const plan = jsonContent<{ id: string; requestHash: string }>(await client.callTool({
+    name: 'reach_plan', arguments: { node_id: nodeId, operation: 'dex.file.write', arguments: { path: plannedPath, text: plannedMarker, mode: 'rewrite' } }
+  }), 'reach_plan');
+  if (!plan.id || !plan.requestHash) throw new Error('reach_plan did not return an exact plan identity');
+  const commit = await client.callTool({ name: 'reach_commit_plan', arguments: { node_id: nodeId, plan_id: plan.id } });
+  if (commit.isError || !textContent(commit).includes(plan.requestHash)) throw new Error(`reach_commit_plan failed: ${textContent(commit)}`);
+  const plannedRead = await client.callTool({ name: 'reach_file_read', arguments: { node_id: nodeId, path: plannedPath } });
+  if (plannedRead.isError || !textContent(plannedRead).includes(plannedMarker)) throw new Error('planned write was not executed exactly');
+  const receipts = await client.callTool({ name: 'reach_receipts', arguments: { node_id: nodeId, limit: 30 } });
+  if (receipts.isError || !textContent(receipts).includes('dex.commitPlan')) throw new Error('signed receipt path did not expose the committed plan evidence');
+
+  const roots = nodeRecord.allowedRoots ?? [];
+  const fixtureBase = roots.find(root => path.resolve(os.tmpdir()).startsWith(root)) ?? roots.find(root => root === '/tmp' || root === '/private/tmp') ?? roots[0];
+  if (!fixtureBase) throw new Error('node advertises no allowed roots for the checkpoint fixture');
+  fixture = await fs.mkdtemp(path.join(fixtureBase, 'dex-reach-checkpoint-smoke-'));
+  await execFileAsync('git', ['init', '-q'], { cwd: fixture });
+  await execFileAsync('git', ['config', 'user.email', 'smoke@dex-reach.invalid'], { cwd: fixture });
+  await execFileAsync('git', ['config', 'user.name', 'DEX REACH Smoke'], { cwd: fixture });
+  await fs.writeFile(path.join(fixture, 'tracked.txt'), 'baseline\n');
+  await execFileAsync('git', ['add', 'tracked.txt'], { cwd: fixture });
+  await execFileAsync('git', ['commit', '-q', '-m', 'baseline'], { cwd: fixture });
+  await fs.writeFile(path.join(fixture, 'tracked.txt'), 'changed\n');
+  await fs.writeFile(path.join(fixture, 'untracked.txt'), 'recover me\n');
+  const checkpoint = await client.callTool({ name: 'reach_checkpoint', arguments: { node_id: nodeId, cwd: fixture } });
+  if (checkpoint.isError || !textContent(checkpoint).includes('untracked.txt') || !textContent(checkpoint).includes('patchBytes')) throw new Error('DEX checkpoint proof failed');
+
+  console.log(JSON.stringify({
+    ok: true, version: DEX_REACH_VERSION, oauth: true, mcpTools: tools.tools.length, nodeId,
+    compatibilityPolicyVerified: true, remoteCompatibilityTools: expectedCompat.length, compatibilityMutationBlocked: true, urlProxyBlocked: true, nativeFileRoundTrip: true, nativeProcessExecution: true, childEnvironmentSanitized: true,
+    adbBinaryAvailable: true, transactionalPlanCommit: true, signedReceiptsVisible: true, checkpoint: true
+  }, null, 2));
+} finally {
+  for (const file of cleanupFiles) await fs.unlink(file).catch(() => undefined);
+  if (fixture) await fs.rm(fixture, { recursive: true, force: true }).catch(() => undefined);
+  await client.close().catch(() => undefined);
 }
-const nodeId = process.env.DEX_REACH_NODE_ID || '';
-if (!nodeId) throw new Error('DEX_REACH_NODE_ID missing');
-const nodes = await client.callTool({ name: 'reach_list_nodes', arguments: {} });
-if (nodes.isError || !JSON.stringify(nodes).includes(nodeId)) throw new Error('reach_list_nodes did not contain the local node');
-const fingerprint = await client.callTool({ name: 'reach_fingerprint', arguments: { node_id: nodeId } });
-if (fingerprint.isError || !JSON.stringify(fingerprint).includes(nodeId)) throw new Error('reach_fingerprint returned an invalid result');
-const config = await client.callTool({ name: 'reach_call', arguments: { node_id: nodeId, tool: 'get_config', arguments: {} } });
-if (config.isError) throw new Error('routed get_config returned an error');
-const adbResult = await client.callTool({ name: 'reach_adb_devices', arguments: { node_id: nodeId } });
-if (adbResult.isError || !JSON.stringify(adbResult).includes('available')) throw new Error('DEX-native ADB discovery failed');
-const tempPath = `/tmp/dex-reach-smoke-${process.pid}.txt`;
-const marker = `DEX-REACH-SMOKE-${Date.now()}`;
-const writeResult = await client.callTool({ name: 'reach_file_write', arguments: { node_id: nodeId, path: tempPath, text: marker, mode: 'rewrite' } });
-if (writeResult.isError) throw new Error('DEX-native file write returned an error');
-const readResult = await client.callTool({ name: 'reach_file_read', arguments: { node_id: nodeId, path: tempPath } });
-if (readResult.isError || !JSON.stringify(readResult).includes(marker)) throw new Error('DEX-native file roundtrip did not preserve content');
-const processResult = await client.callTool({ name: 'reach_process_run', arguments: { node_id: nodeId, command: 'pwd', cwd: '/tmp', timeout_ms: 4000 } });
-if (processResult.isError) throw new Error('DEX-native process execution failed');
-// The checkpoint fixture must live inside a root the node actually advertises; os.tmpdir() may be a
-// per-session /var/folders path outside every allowed root.
-const nodeRecord = (JSON.parse((nodes.content as { text: string }[])[0]!.text) as { nodeId: string; allowedRoots: string[] }[]).find(entry => entry.nodeId === nodeId);
-const roots = nodeRecord?.allowedRoots ?? [];
-const fixtureBase = roots.find(root => path.resolve(os.tmpdir()).startsWith(root)) ?? roots.find(root => root === '/tmp' || root === '/private/tmp') ?? roots[0];
-if (!fixtureBase) throw new Error('node advertises no allowed roots for the checkpoint fixture');
-const fixture = await fs.mkdtemp(path.join(fixtureBase, 'dex-reach-checkpoint-smoke-'));
-await execFileAsync('git', ['init', '-q'], { cwd: fixture });
-await execFileAsync('git', ['config', 'user.email', 'smoke@dex-reach.invalid'], { cwd: fixture });
-await execFileAsync('git', ['config', 'user.name', 'DEX REACH Smoke'], { cwd: fixture });
-await fs.writeFile(path.join(fixture, 'tracked.txt'), 'baseline\n');
-await execFileAsync('git', ['add', 'tracked.txt'], { cwd: fixture });
-await execFileAsync('git', ['commit', '-q', '-m', 'baseline'], { cwd: fixture });
-await fs.writeFile(path.join(fixture, 'tracked.txt'), 'changed\n');
-await fs.writeFile(path.join(fixture, 'untracked.txt'), 'recover me\n');
-const checkpoint = await client.callTool({ name: 'reach_checkpoint', arguments: { node_id: nodeId, cwd: fixture } });
-if (checkpoint.isError || !JSON.stringify(checkpoint).includes('untracked.txt') || !JSON.stringify(checkpoint).includes('patchBytes')) throw new Error('DEX checkpoint proof failed');
-await fs.unlink(tempPath).catch(() => undefined);
-await fs.rm(fixture, { recursive: true, force: true });
-await client.close();
-console.log(JSON.stringify({ ok: true, oauth: true, mcpTools: tools.tools.length, nodeId, compatibilityToolCall: true, nativeFileRoundTrip: true, nativeProcessExecution: true, adbDiscovery: true, checkpoint: true }, null, 2));

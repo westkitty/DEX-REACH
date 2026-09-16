@@ -7,12 +7,22 @@ import { nativeCall, createCheckpoint, defaultCwd } from './native.js';
 import { executionFingerprint } from '../shared/fingerprint.js';
 import { toolGuard, pathAllowed } from '../shared/security.js';
 import { AuditLog } from '../shared/audit.js';
-import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor, type ReachProfile } from '../shared/protocol.js';
+import {
+  REACH_PROTOCOL_VERSION,
+  type AccessSnapshot,
+  type GatewayRequest,
+  type GatewayResponse,
+  type NodeHello,
+  type NodeStatus,
+  type RequestActor,
+  type ReachProfile
+} from '../shared/protocol.js';
 import { loadLocalSecrets, stateDir } from '../shared/local-env.js';
-import { authorizeOperation, consumeGrant, loadAccessState, snapshot } from '../shared/access.js';
+import { authorizeOperation, loadAccessState, reserveOperation, snapshot } from '../shared/access.js';
 import { appendReceipt, listReceipts } from '../shared/receipts.js';
-import { consumePlan, createPlan, hashValue } from '../shared/plans.js';
+import { consumePlan, createPlan, hashValue, sweepExpiredPlans } from '../shared/plans.js';
 import { writeRuntimeStatus } from './runtime-status.js';
+import { DEX_REACH_VERSION } from '../shared/version.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -25,55 +35,97 @@ let activeSocket: WebSocket | null = null;
 let lastAccessJson = '';
 
 await backend.start(config.allowedRoots);
+await sweepExpiredPlans();
 console.log(`DEX//REACH node ${config.nodeId} started with ${backend.listTools().length} compatibility tools (state dir ${stateDir()})`);
 
-async function currentAccess(): Promise<AccessSnapshot> { return snapshot(await loadAccessState(config.nodeId)); }
+async function currentAccess(): Promise<AccessSnapshot> {
+  return snapshot(await loadAccessState(config.nodeId));
+}
 
 async function executeOperation(operation: string, args: Record<string, unknown>, actor: RequestActor | undefined, profile: ReachProfile): Promise<unknown> {
   if (operation === 'dc.call') {
     const tool = String(args.tool || '');
     const toolArgs = (args.arguments || {}) as Record<string, unknown>;
     if (!backend.listTools().some(candidate => candidate.name === tool)) throw new Error(`unknown backend tool: ${tool}`);
-    if (tool === 'set_config_value' && profile !== 'full-local') throw new Error('remote mutation of Desktop Commander safety configuration requires full-local profile');
+    if (tool === 'set_config_value' && profile !== 'full-local') {
+      throw new Error('remote mutation of Desktop Commander safety configuration requires full-local profile');
+    }
     const blocked = toolGuard(tool, toolArgs, profile, config.allowedRoots);
     if (blocked) throw new Error(blocked);
     return backend.callTool(tool, toolArgs);
   }
-  if (operation === 'dex.result.read') return results.read(String(args.handle || ''), Number(args.offset || 0), Number(args.length || 65536));
+  if (operation === 'dex.result.read') {
+    return results.read(String(args.handle || ''), Number(args.offset || 0), Number(args.length || 65536));
+  }
   if (operation === 'dex.receipts.list') return listReceipts(config.nodeId, Number(args.limit || 20));
   return nativeCall(config.nodeId, operation, args, config.allowedRoots, profile);
 }
 
 async function checkpointForPlan(operation: string, args: Record<string, unknown>): Promise<string | null> {
   if (!['dex.file.write', 'dex.process.run', 'dc.call'].includes(operation)) return null;
-  const cwdCandidate = typeof args.cwd === 'string' ? args.cwd : typeof args.path === 'string' ? path.dirname(args.path) : defaultCwd(config.allowedRoots);
+  const cwdCandidate = typeof args.cwd === 'string'
+    ? args.cwd
+    : typeof args.path === 'string'
+      ? path.dirname(args.path)
+      : defaultCwd(config.allowedRoots);
   if (!path.isAbsolute(cwdCandidate) || !pathAllowed(cwdCandidate, config.allowedRoots)) return null;
-  try { return String((await createCheckpoint(cwdCandidate) as { id: string }).id); } catch { return null; }
+  try {
+    return String((await createCheckpoint(cwdCandidate) as { id: string }).id);
+  } catch {
+    return null;
+  }
 }
 
 async function buildPlan(actor: RequestActor | undefined, args: Record<string, unknown>): Promise<unknown> {
   const operation = String(args.operation || '');
   const targetArgs = (args.arguments || {}) as Record<string, unknown>;
-  if (!operation || ['dex.plan', 'dex.commitPlan', 'dex.receipts.list'].includes(operation)) throw new Error('invalid plan target operation');
+  if (!['dex.file.write', 'dex.process.run', 'dex.checkpoint', 'dc.call'].includes(operation)) throw new Error('plan target must be dex.file.write, dex.process.run, dex.checkpoint, or dc.call');
   const state = await loadAccessState(config.nodeId);
   const decision = authorizeOperation(state, actor, operation, config.profile, Date.now(), targetArgs);
   if (!decision.allowed) throw new Error(decision.reason);
   const checkpointId = await checkpointForPlan(operation, targetArgs);
-  const plan = await createPlan({ nodeId: config.nodeId, actor: actor ?? null, operation, args: targetArgs, policyHash: hashValue(state), checkpointId });
-  return { id: plan.id, nodeId: plan.nodeId, operation: plan.operation, requestHash: plan.requestHash, policyHash: plan.policyHash, checkpointId: plan.checkpointId, expiresAt: plan.expiresAt };
+  const plan = await createPlan({
+    nodeId: config.nodeId,
+    actor: actor ?? null,
+    operation,
+    args: targetArgs,
+    policyHash: hashValue(state),
+    checkpointId
+  });
+  return {
+    id: plan.id,
+    nodeId: plan.nodeId,
+    operation: plan.operation,
+    requestHash: plan.requestHash,
+    policyHash: plan.policyHash,
+    checkpointId: plan.checkpointId,
+    expiresAt: plan.expiresAt
+  };
 }
 
 async function commitPlan(actor: RequestActor | undefined, args: Record<string, unknown>): Promise<unknown> {
   const plan = await consumePlan(String(args.planId || ''));
   if (plan.nodeId !== config.nodeId) throw new Error('execution plan targets a different node');
-  if ((plan.actor?.clientId || null) !== (actor?.clientId || null) || (plan.actor?.kind || null) !== (actor?.kind || null)) throw new Error('execution plan belongs to a different client');
-  const state = await loadAccessState(config.nodeId);
-  if (hashValue(state) !== plan.policyHash) throw new Error('node policy changed after planning; create a new plan');
-  const decision = authorizeOperation(state, actor, plan.operation, config.profile, Date.now(), plan.args);
-  if (!decision.allowed) throw new Error(decision.reason);
-  await consumeGrant(config.nodeId, decision.grantId);
-  const value = await executeOperation(plan.operation, plan.args, actor, decision.effectiveProfile);
-  return { planId: plan.id, operation: plan.operation, checkpointId: plan.checkpointId, result: value };
+  if ((plan.actor?.clientId || null) !== (actor?.clientId || null) || (plan.actor?.kind || null) !== (actor?.kind || null)) {
+    throw new Error('execution plan belongs to a different client');
+  }
+  const reservation = await reserveOperation(
+    config.nodeId,
+    actor,
+    plan.operation,
+    config.profile,
+    plan.args,
+    { expectedPolicyHash: plan.policyHash }
+  );
+  const value = await executeOperation(plan.operation, plan.args, actor, reservation.decision.effectiveProfile);
+  return {
+    planId: plan.id,
+    operation: plan.operation,
+    requestHash: plan.requestHash,
+    policyHash: plan.policyHash,
+    checkpointId: plan.checkpointId,
+    result: value
+  };
 }
 
 async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> {
@@ -82,10 +134,10 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
   let policy: unknown = null;
   let receiptCheckpoint: string | null = null;
   try {
-    const state = await loadAccessState(config.nodeId);
-    policy = state;
-    const decision = authorizeOperation(state, actor, request.operation, config.profile, Date.now(), request.args);
-    if (!decision.allowed) throw new Error(decision.reason);
+    // The final authorization reservation happens immediately before execution and is serialized with
+    // owner policy updates. OFF therefore wins over stale remote state instead of being overwritten.
+    const reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args);
+    policy = reservation.policy;
     let value: unknown;
     if (request.operation === 'dex.plan') {
       value = await buildPlan(actor, request.args);
@@ -94,17 +146,30 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       value = await commitPlan(actor, request.args);
       receiptCheckpoint = (value as { checkpointId?: string | null }).checkpointId ?? null;
     } else {
-      await consumeGrant(config.nodeId, decision.grantId);
-      value = await executeOperation(request.operation, request.args, actor, decision.effectiveProfile);
+      value = await executeOperation(request.operation, request.args, actor, reservation.decision.effectiveProfile);
     }
     const result = results.bound(value);
-    await audit.append({ at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor, operation: request.operation, ok: true, durationMs: Date.now() - started, args: request.args });
-    await appendReceipt({ nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: true, result: value, durationMs: Date.now() - started, policy, checkpointId: receiptCheckpoint });
+    const durationMs = Date.now() - started;
+    await audit.append({
+      at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor,
+      operation: request.operation, ok: true, durationMs, args: request.args
+    });
+    await appendReceipt({
+      nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: true,
+      result: value, durationMs, policy, checkpointId: receiptCheckpoint
+    });
     return { type: 'response', id: request.id, ok: true, result };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await audit.append({ at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor, operation: request.operation, ok: false, durationMs: Date.now() - started, args: request.args, error: message });
-    await appendReceipt({ nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: false, error: message, durationMs: Date.now() - started, policy: policy ?? { unavailable: true }, checkpointId: receiptCheckpoint }).catch(() => undefined);
+    const durationMs = Date.now() - started;
+    await audit.append({
+      at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor,
+      operation: request.operation, ok: false, durationMs, args: request.args, error: message
+    });
+    await appendReceipt({
+      nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: false,
+      error: message, durationMs, policy: policy ?? { unavailable: true }, checkpointId: receiptCheckpoint
+    }).catch(() => undefined);
     return { type: 'response', id: request.id, ok: false, error: message };
   }
 }
@@ -113,30 +178,95 @@ async function publishStatus(): Promise<void> {
   const access = await currentAccess();
   const json = JSON.stringify(access);
   const connected = activeSocket?.readyState === WebSocket.OPEN;
-  await writeRuntimeStatus(config.nodeId, { pid: process.pid, connected, gateway: new URL(config.gatewayWs).origin, access, updatedAt: new Date().toISOString() });
-  if (json !== lastAccessJson && connected && activeSocket) { const status: NodeStatus = { type: 'status', access }; activeSocket.send(JSON.stringify(status)); }
+  await writeRuntimeStatus(config.nodeId, {
+    pid: process.pid,
+    connected,
+    gateway: new URL(config.gatewayWs).origin,
+    access,
+    updatedAt: new Date().toISOString()
+  });
+  if (json !== lastAccessJson && connected && activeSocket) {
+    const status: NodeStatus = { type: 'status', access };
+    activeSocket.send(JSON.stringify(status));
+  }
   lastAccessJson = json;
 }
-const statusTimer = setInterval(() => void publishStatus().catch(() => undefined), 2000); statusTimer.unref();
+
+const statusTimer = setInterval(() => void publishStatus().catch(() => undefined), 2000);
+statusTimer.unref();
+const planSweepTimer = setInterval(() => void sweepExpiredPlans().catch(() => undefined), 60_000);
+planSweepTimer.unref();
 
 async function connect(): Promise<void> {
   if (stopped) return;
-  const url = new URL(config.gatewayWs); url.searchParams.set('nodeId', config.nodeId);
-  const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${config.token}` } }); let lastAliveAt = Date.now(); ws.on('pong', () => { lastAliveAt = Date.now(); });
+  const url = new URL(config.gatewayWs);
+  url.searchParams.set('nodeId', config.nodeId);
+  const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${config.token}` } });
+  let lastAliveAt = Date.now();
+  ws.on('pong', () => { lastAliveAt = Date.now(); });
+
   ws.on('open', async () => {
-    reconnectMs = 1000; lastAliveAt = Date.now(); activeSocket = ws; lastAccessJson = '';
-    const hello: NodeHello = { type: 'hello', protocolVersion: REACH_PROTOCOL_VERSION, nodeId: config.nodeId, profile: config.profile, fingerprint: await executionFingerprint(config.nodeId), tools: backend.listTools(), allowedRoots: config.allowedRoots, agentVersion: '0.3.0', access: await currentAccess() };
-    ws.send(JSON.stringify(hello)); void publishStatus().catch(() => undefined); console.log(`DEX//REACH node connected to ${url.origin}`);
+    reconnectMs = 1000;
+    lastAliveAt = Date.now();
+    activeSocket = ws;
+    lastAccessJson = '';
+    const hello: NodeHello = {
+      type: 'hello',
+      protocolVersion: REACH_PROTOCOL_VERSION,
+      nodeId: config.nodeId,
+      profile: config.profile,
+      fingerprint: await executionFingerprint(config.nodeId),
+      tools: backend.listTools(),
+      allowedRoots: config.allowedRoots,
+      agentVersion: DEX_REACH_VERSION,
+      access: await currentAccess()
+    };
+    ws.send(JSON.stringify(hello));
+    void publishStatus().catch(() => undefined);
+    console.log(`DEX//REACH node connected to ${url.origin}`);
   });
+
   ws.on('message', async data => {
-    lastAliveAt = Date.now(); let parsed: unknown; try { parsed = JSON.parse(data.toString()); } catch { return; }
+    lastAliveAt = Date.now();
+    let parsed: unknown;
+    try { parsed = JSON.parse(data.toString()); } catch { return; }
     if (!parsed || typeof parsed !== 'object' || (parsed as { type?: string }).type !== 'request') return;
-    const response = await handleRequest(parsed as GatewayRequest); if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(response));
+    const response = await handleRequest(parsed as GatewayRequest);
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(response));
   });
-  const heartbeat = setInterval(() => { if (ws.readyState !== WebSocket.OPEN) return; if (Date.now() - lastAliveAt > 12000) { ws.terminate(); return; } ws.ping(); ws.send(JSON.stringify({ type: 'heartbeat', at: Date.now() })); }, 5000); heartbeat.unref();
-  ws.on('close', () => { clearInterval(heartbeat); if (activeSocket === ws) activeSocket = null; void publishStatus().catch(() => undefined); if (stopped) return; const delay = reconnectMs; reconnectMs = Math.min(reconnectMs * 2, 30000); console.warn(`DEX//REACH gateway disconnected; reconnecting in ${delay}ms`); setTimeout(() => void connect(), delay).unref(); });
+
+  const heartbeat = setInterval(() => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    if (Date.now() - lastAliveAt > 12000) {
+      ws.terminate();
+      return;
+    }
+    ws.ping();
+    ws.send(JSON.stringify({ type: 'heartbeat', at: Date.now() }));
+  }, 5000);
+  heartbeat.unref();
+
+  ws.on('close', () => {
+    clearInterval(heartbeat);
+    if (activeSocket === ws) activeSocket = null;
+    void publishStatus().catch(() => undefined);
+    if (stopped) return;
+    const delay = reconnectMs;
+    reconnectMs = Math.min(reconnectMs * 2, 30000);
+    console.warn(`DEX//REACH gateway disconnected; reconnecting in ${delay}ms`);
+    setTimeout(() => void connect(), delay).unref();
+  });
   ws.on('error', error => { console.error('DEX//REACH node websocket error:', error.message); });
 }
 
-async function shutdown(): Promise<void> { if (stopped) return; stopped = true; await backend.close(); process.exit(0); }
-process.on('SIGINT', () => void shutdown()); process.on('SIGTERM', () => void shutdown()); await connect();
+async function shutdown(): Promise<void> {
+  if (stopped) return;
+  stopped = true;
+  clearInterval(statusTimer);
+  clearInterval(planSweepTimer);
+  await backend.close();
+  process.exit(0);
+}
+process.on('SIGINT', () => void shutdown());
+process.on('SIGTERM', () => void shutdown());
+await connect();

@@ -2,51 +2,28 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { timingSafeEqualText } from '../shared/security.js';
+import { atomicWriteFile, withFileLock } from '../shared/state-io.js';
 
-type CredentialSlot = {
-  hash: string;
-  createdAt: number;
-  validUntil?: number;
-};
-
-type NodeCredentialRecord = {
-  active: CredentialSlot;
-  previous: CredentialSlot[];
-  revoked: boolean;
-  updatedAt: number;
-};
-
-type PersistedNodeAuth = {
-  version: 1;
-  nodes: Record<string, NodeCredentialRecord>;
-};
+type CredentialSlot = { hash: string; createdAt: number; validUntil?: number };
+type NodeCredentialRecord = { active: CredentialSlot; previous: CredentialSlot[]; revoked: boolean; updatedAt: number };
+type PersistedNodeAuth = { version: 1; nodes: Record<string, NodeCredentialRecord> };
 
 const EMPTY_STATE: PersistedNodeAuth = { version: 1, nodes: {} };
+function tokenHash(token: string): string { return crypto.createHash('sha256').update(token).digest('hex'); }
+function issueToken(): string { return crypto.randomBytes(32).toString('base64url'); }
 
-function tokenHash(token: string): string {
-  return crypto.createHash('sha256').update(token).digest('hex');
-}
-
-function issueToken(): string {
-  return crypto.randomBytes(32).toString('base64url');
-}
 export class NodeAuthStore {
   private state: PersistedNodeAuth = structuredClone(EMPTY_STATE);
   private readonly stateFile: string;
+  private readonly lockFile: string;
 
   constructor(stateDir: string) {
     this.stateFile = path.join(stateDir, 'node-auth.json');
+    this.lockFile = `${this.stateFile}.lock`;
   }
 
   async initialize(): Promise<void> {
-    try {
-      const parsed = JSON.parse(await fs.readFile(this.stateFile, 'utf8')) as PersistedNodeAuth;
-      if (parsed.version !== 1 || !parsed.nodes) throw new Error('unsupported node auth state');
-      this.state = parsed;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      this.state = structuredClone(EMPTY_STATE);
-    }
+    await this.reload();
     this.prune();
   }
 
@@ -63,62 +40,62 @@ export class NodeAuthStore {
 
   async importLegacy(nodeId: string, token: string): Promise<boolean> {
     if (!nodeId || token.length < 24) throw new Error('legacy node credential is invalid');
-    if (this.state.nodes[nodeId]) return false;
-    const now = Date.now();
-    this.state.nodes[nodeId] = {
-      active: { hash: tokenHash(token), createdAt: now }, previous: [], revoked: false, updatedAt: now
-    };
-    await this.persist();
-    return true;
+    return this.mutate(async () => {
+      if (this.state.nodes[nodeId]) return false;
+      const now = Date.now();
+      this.state.nodes[nodeId] = { active: { hash: tokenHash(token), createdAt: now }, previous: [], revoked: false, updatedAt: now };
+      return true;
+    });
   }
+
   async enroll(nodeId: string): Promise<string> {
     if (!nodeId) throw new Error('node id is required');
-    const existing = this.state.nodes[nodeId];
-    if (existing && !existing.revoked) throw new Error(`node already enrolled: ${nodeId}`);
-    const token = issueToken();
-    const now = Date.now();
-    this.state.nodes[nodeId] = {
-      active: { hash: tokenHash(token), createdAt: now }, previous: [], revoked: false, updatedAt: now
-    };
-    await this.persist();
-    return token;
+    return this.mutate(async () => {
+      const existing = this.state.nodes[nodeId];
+      if (existing && !existing.revoked) throw new Error(`node already enrolled: ${nodeId}`);
+      const token = issueToken();
+      const now = Date.now();
+      this.state.nodes[nodeId] = { active: { hash: tokenHash(token), createdAt: now }, previous: [], revoked: false, updatedAt: now };
+      return token;
+    });
   }
 
   async rotate(nodeId: string, graceMs = 10 * 60 * 1000): Promise<string> {
-    const record = this.state.nodes[nodeId];
-    if (!record || record.revoked) throw new Error(`node is not actively enrolled: ${nodeId}`);
     if (!Number.isFinite(graceMs) || graceMs < 0) throw new Error('grace period must be non-negative');
-    const now = Date.now();
-    const token = issueToken();
-    record.previous.push({ ...record.active, validUntil: now + graceMs });
-    record.active = { hash: tokenHash(token), createdAt: now };
-    record.updatedAt = now;
-    this.prune();
-    await this.persist();
-    return token;
+    return this.mutate(async () => {
+      const record = this.state.nodes[nodeId];
+      if (!record || record.revoked) throw new Error(`node is not actively enrolled: ${nodeId}`);
+      const now = Date.now();
+      const token = issueToken();
+      record.previous.push({ ...record.active, validUntil: now + graceMs });
+      record.active = { hash: tokenHash(token), createdAt: now };
+      record.updatedAt = now;
+      this.prune();
+      return token;
+    });
   }
 
   async revoke(nodeId: string): Promise<boolean> {
-    const record = this.state.nodes[nodeId];
-    if (!record) return false;
-    record.revoked = true;
-    record.previous = [];
-    record.updatedAt = Date.now();
-    await this.persist();
-    return true;
+    return this.mutate(async () => {
+      const record = this.state.nodes[nodeId];
+      if (!record) return false;
+      record.revoked = true;
+      record.previous = [];
+      record.updatedAt = Date.now();
+      return true;
+    });
   }
 
-  /** Deletes a revoked node's record entirely (tombstone cleanup). Active nodes must be revoked first. */
   async forget(nodeId: string): Promise<boolean> {
-    const record = this.state.nodes[nodeId];
-    if (!record) return false;
-    if (!record.revoked) throw new Error(`node is still active; revoke it first: ${nodeId}`);
-    delete this.state.nodes[nodeId];
-    await this.persist();
-    return true;
+    return this.mutate(async () => {
+      const record = this.state.nodes[nodeId];
+      if (!record) return false;
+      if (!record.revoked) throw new Error(`node is still active; revoke it first: ${nodeId}`);
+      delete this.state.nodes[nodeId];
+      return true;
+    });
   }
 
-  /** Re-reads persisted state so an out-of-process CLI revoke is honored by the running gateway. */
   async isRevoked(nodeId: string): Promise<boolean> {
     await this.reload();
     const record = this.state.nodes[nodeId];
@@ -136,12 +113,23 @@ export class NodeAuthStore {
     }));
   }
 
+  private async mutate<T>(fn: () => Promise<T>): Promise<T> {
+    return withFileLock(this.lockFile, async () => {
+      await this.reload();
+      const result = await fn();
+      await this.persistUnlocked();
+      return result;
+    });
+  }
+
   private async reload(): Promise<void> {
     try {
       const parsed = JSON.parse(await fs.readFile(this.stateFile, 'utf8')) as PersistedNodeAuth;
-      if (parsed.version === 1 && parsed.nodes) this.state = parsed;
+      if (parsed.version !== 1 || !parsed.nodes) throw new Error('unsupported node auth state');
+      this.state = parsed;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      this.state = structuredClone(EMPTY_STATE);
     }
   }
 
@@ -152,11 +140,8 @@ export class NodeAuthStore {
     }
   }
 
-  private async persist(): Promise<void> {
+  private async persistUnlocked(): Promise<void> {
     this.prune();
-    await fs.mkdir(path.dirname(this.stateFile), { recursive: true, mode: 0o700 });
-    const temp = `${this.stateFile}.${process.pid}.tmp`;
-    await fs.writeFile(temp, JSON.stringify(this.state, null, 2) + '\n', { mode: 0o600 });
-    await fs.rename(temp, this.stateFile);
+    await atomicWriteFile(this.stateFile, JSON.stringify(this.state, null, 2) + '\n', 0o600);
   }
 }

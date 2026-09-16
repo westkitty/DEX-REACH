@@ -30,3 +30,42 @@ test('node credentials are isolated, rotatable, and revocable', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('concurrent credential writers preserve independent nodes and allow clean re-enrollment after forget', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-node-auth-race-'));
+  try {
+    const a = new NodeAuthStore(dir);
+    const b = new NodeAuthStore(dir);
+    await Promise.all([a.initialize(), b.initialize()]);
+    const [tokenA, tokenB] = await Promise.all([a.enroll('node-a'), b.enroll('node-b')]);
+    const verify = new NodeAuthStore(dir);
+    await verify.initialize();
+    assert.equal(await verify.authenticate('node-a', tokenA), true);
+    assert.equal(await verify.authenticate('node-b', tokenB), true);
+    await verify.revoke('node-a');
+    await verify.forget('node-a');
+    const replacement = await verify.enroll('node-a');
+    assert.equal(await verify.authenticate('node-a', replacement), true);
+    assert.equal(await verify.isRevoked('node-a'), false);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+import { addRevokedNode, loadRevokedNodes, removeRevokedNode } from '../src/shared/revoked-nodes.js';
+
+test('revocation tombstone mutations are atomic across concurrent processes', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-revoked-race-'));
+  try {
+    await addRevokedNode(dir, 'keep');
+    await addRevokedNode(dir, 'remove-me');
+    await Promise.all([
+      addRevokedNode(dir, 'node-a'),
+      addRevokedNode(dir, 'node-b'),
+      removeRevokedNode(dir, 'remove-me')
+    ]);
+    assert.deepEqual([...await loadRevokedNodes(dir)].sort(), ['keep', 'node-a', 'node-b']);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

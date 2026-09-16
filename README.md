@@ -52,14 +52,14 @@ A node can be locally set to `off`, `read-only`, or `on`; access can be temporar
 | Claude Code MCP client | **Verified** — real DEX//REACH calls completed |
 | Primary macOS node | **Verified** — persistent gateway/node services and live routing |
 | Node-local AI kill switch | **Verified** against real ChatGPT and Claude |
-| Capability grants + policy assertions | **Implemented and unit-verified in 0.3.0; deployed-client proof pending** |
-| Exact-action plan/commit + signed receipts | **Implemented and unit-verified in 0.3.0; deployed-client proof pending** |
+| Capability grants + policy assertions | **Verified in 0.3.1** — unit/concurrency coverage plus deployed public-MCP smoke |
+| Exact-action plan/commit + signed receipts | **Verified in 0.3.1** — deployed plan→commit execution and signed-receipt visibility |
 | Two-node routing and policy isolation | **Verified** with a live isolated second-node simulation |
 | Second physical device | **Ready for install, not yet hardware-verified** |
-| macOS node service install | **Implemented; node-only install still needs fresh-machine physical proof** |
+| Primary macOS service install/reload | **Verified in 0.3.1** — self-hosted install returns before a one-shot launchd reloader replaces gateway/node; node-only fresh-Mac proof remains pending |
 | Linux systemd path | **Implemented, not yet tested on a real Linux host** |
 | Windows process execution | **Not supported yet** |
-| Android ADB discovery | **Verified**; real device-control proof still pending |
+| Android ADB discovery | **Verified** — deployed node sees the ADB binary; no Android hardware is currently attached, so device-control proof remains pending |
 
 For the detailed evidence, current limitations, and exact verification matrix, read [`OPERATIONAL_STATE.md`](OPERATIONAL_STATE.md).
 
@@ -137,7 +137,7 @@ DEX//REACH currently exposes 15 first-class MCP actions:
 | `reach_result_read` | Continue reading a large bounded result |
 | `reach_revoke_node` | Revoke one node credential and disconnect that node |
 
-The compatibility path currently contributes 26 additional local tools for search, edits, filesystem operations, and interactive process sessions. DEX//REACH owns the gateway, authentication, routing, node policy, audit, native operations, and safety boundaries; `@wonderwhy-er/desktop-commander` remains a pinned local compatibility dependency while those remaining primitives are replaced incrementally.
+The pinned compatibility package currently exposes 26 raw local tools to the node internally. DEX//REACH deliberately advertises only **22** of them to remote clients: safety-configuration mutation, compatibility call-history recovery, vendor feedback, and vendor onboarding/prompt tools are withheld. URL-fetch mode is also blocked, so `reach_call` cannot turn the node into a generic HTTP/SSRF proxy. DEX//REACH owns the gateway, authentication, routing, node policy, audit, native operations, and safety boundaries; `@wonderwhy-er/desktop-commander` remains a pinned local compatibility dependency while the remaining primitives are replaced incrementally.
 
 ---
 
@@ -206,6 +206,18 @@ Persistent gateway/primary-node installation on macOS:
 npm run install:macos
 ```
 
+The installer stages and syntax-checks both LaunchAgents first, then hands their replacement to a separate one-shot launchd helper. This makes `install:macos` safe to invoke through DEX//REACH itself: the command returns before the gateway/node transport is deliberately cycled. A brief disconnect while the services restart is expected; the helper records its final result at `~/.dex-reach/install-macos.status.json`.
+
+### macOS Dock launcher
+
+On the primary Mac, install the one-click Dock launcher with:
+
+```bash
+npm run install:dock
+```
+
+This builds and ad-hoc signs `~/Applications/DEX REACH.app`, verifies the exact Dock tile, and launches it once. The app is a tiny local shell bundle—not an AppleScript automation shim—so it needs no Terminal-control permission. Each click opens a **new Terminal instance** running the DEX//REACH control console. The console shows service health and local policy, can non-destructively restore already-installed LaunchAgents, and exposes the kill switch, timed READ-ONLY/ON windows, policy check, audit, signed receipts, grants, and a DEX-CLI prompt. Opening the launcher never changes OFF / READ-ONLY / ON, client ceilings, grants, credentials, roots, or profile by itself.
+
 Gateway owner credentials and node credentials are kept outside the repository under `~/.dex-reach/` with mode `0600` files.
 
 For ChatGPT or Claude, keep the gateway bound to localhost and place HTTPS in front of it. The current deployment uses Tailscale Funnel. Expose only the authenticated MCP gateway — never a raw shell port.
@@ -232,6 +244,8 @@ cd DEX-REACH
 npm ci
 npm run install:node -- --env /path/to/second-laptop.env --roots "$HOME/projects" --service
 ```
+
+On macOS, the node-only service installer also stages and validates its LaunchAgent before handing replacement to a one-shot helper, so an already-running node can update itself without depending on the request it is about to replace. Remote node gateway URLs must use `wss://`; only loopback may use cleartext `ws://`.
 
 The source repository is public, so no repository invitation is required. Public source access does **not** enroll a device or grant access to any gateway: the separately generated node environment file is still a secret and must be transferred privately.
 
@@ -266,15 +280,17 @@ DEX//REACH is designed around the assumption that AI clients should **not** be t
 - Nodes connect outbound and open no remote shell listener.
 - Each node has an independent credential that can be rotated or revoked without affecting other nodes.
 - Every operation is explicitly node-scoped.
-- Typed file operations, checkpoints, read-only process arguments, and compatibility-tool path arguments are constrained to configured allowed roots.
-- DEX private state under `~/.dex-reach/` is explicitly excluded from path-scoped remote operations even when a broader allowed root contains it; relative path arguments are refused rather than ambiguously resolved.
+- Typed file operations, checkpoints, read-only process arguments, and compatibility-tool path arguments are constrained to configured allowed roots. Existing symlinks are canonicalized before the scope decision, and plural/nested compatibility path arguments are inspected rather than silently skipped.
+- DEX private state under `~/.dex-reach/` (or a configured state directory) is explicitly excluded from path-scoped remote operations even when a broader allowed root contains it; relative path arguments are refused rather than ambiguously resolved.
+- Compatibility safety configuration is node-owned. Remote clients cannot call `set_config_value`, recover Desktop Commander call history, invoke vendor feedback/onboarding tools, or use compatibility URL-fetch mode.
 - READ-ONLY process execution is shell-free: accepted inspection commands are executed directly with argv rather than through `sh -lc`/`zsh -lc`, preventing command chaining, substitutions, and redirections from smuggling mutations through the read-only gate.
-- ON-mode `reach_process_run` is intentionally an arbitrary-shell capability. Allowed roots constrain its working directory but are **not an OS sandbox** for arbitrary shell programs; use capability grants, a restrictive execution profile, and OS isolation when stronger confinement is required.
-- Exact-action plans bind a mutation to a node, client, request hash, policy hash, short expiry, one-use state, and an attempted pre-mutation Git checkpoint.
+- ON-mode `reach_process_run` is intentionally an arbitrary-shell capability. Allowed roots constrain its working directory but are **not an OS sandbox** for arbitrary shell programs; use capability grants, a restrictive execution profile, and OS isolation when stronger confinement is required. Child processes do not inherit DEX credential variables or other obvious secret-bearing environment variables, and known parent secret values are redacted from returned stdout/stderr.
+- Exact-action plans bind a mutation to a node, client, request hash, policy hash, short expiry, one-use state, and an attempted pre-mutation Git checkpoint. Concurrent claims admit only one executor; raw plan arguments are scrubbed after claim or expiry.
 - Every node request produces a local Ed25519-signed receipt containing hashes and policy/actor metadata rather than file contents or credentials; receipts form a predecessor hash chain.
 - Destructive command patterns such as `sudo`, `rm -rf`, disk formatting, shutdown/reboot, destructive Git cleanup/reset, and force-push are blocked.
 - Results are bounded; large responses use continuation handles.
-- Credentials/tokens are redacted from audit logs.
+- Credentials/tokens are redacted from audit logs. Bootstrap, revocation, policy, plan, receipt, OAuth, and credential state writes use bounded atomic/locked update paths where concurrent writers could otherwise corrupt authority state.
+- A non-loopback public MCP identity must use HTTPS. A node may use `ws://` only to loopback; a remote gateway WebSocket must use `wss://`.
 - File contents are not copied into the local audit trail; operations are summarized instead.
 - AI-client attribution is recorded when available from the approved OAuth client identity.
 
@@ -310,18 +326,19 @@ If the target node is OFF, read-only for a mutation, offline, unknown, or revoke
 
 ## Verification
 
-Primary quality gate:
+Primary deterministic source/build gate:
 
 ```bash
-npm run typecheck
-npm test
-npm run build
-npm audit --omit=dev --audit-level=high
-npm run probe:backend
-npm run smoke
+npm run verify
 ```
 
-`npm run smoke` exercises the public OAuth/PKCE MCP path, verifies all 15 first-class tools are advertised with metadata, and exercises compatibility routing, native file/process operations, ADB discovery, and reversible checkpoint behavior.
+Full deployed golden-worker gate:
+
+```bash
+npm run verify:golden
+```
+
+`npm run verify` runs typecheck, the complete regression suite, production build, production dependency audit, and the raw compatibility-backend probe. `npm run verify:golden` adds the live public OAuth/PKCE MCP smoke. The smoke verifies all 15 first-class tools and metadata, deployed node version, the exact 22-tool safe compatibility surface, blocked safety/history/vendor/URL-proxy paths, telemetry/allowed-root policy, child-process credential-environment sanitization, ADB availability, native file/process execution, exact plan→commit, signed receipts, and reversible checkpoint behavior. See [`docs/GOLDEN_WORKER.md`](docs/GOLDEN_WORKER.md) for the end-to-end release path including persistent install and Dock proof.
 
 `scripts/sim-two-nodes.ts` drives a second isolated node through the live gateway and verifies multi-node routing, roots, access modes, client caps, audit attribution, credential isolation, and no-fallback behavior.
 
@@ -334,11 +351,10 @@ Real ChatGPT and Claude policy-refusal paths have also been exercised; the autho
 Useful commands:
 
 ```bash
-npm run typecheck
-npm test
-npm run build
-npm run smoke
-npm run probe:backend
+npm run verify
+npm run verify:golden
+npm run install:macos
+npm run install:dock
 npm run gateway
 npm run node
 npm run nodes -- list
@@ -360,6 +376,10 @@ Before changing execution, routing, authentication, policy, or install behavior,
 ├── scripts/              # bootstrap, install, credentials, smoke, simulations, local CLI
 ├── tests/                # access, auth, routing, security, native, audit, result-store tests
 ├── docs/
+│   ├── GOLDEN_WORKER.md
+│   ├── INVARIANTS.md
+│   ├── INCIDENT_PREVENTION.md
+│   ├── TERMINAL_COMMANDS.md
 │   ├── SECOND_DEVICE_QUICKSTART.md
 │   └── TRUST_AND_PRIVACY.md
 ├── OPERATIONAL_STATE.md  # authoritative current state and verification evidence
@@ -393,18 +413,27 @@ The README explains the system. `OPERATIONAL_STATE.md` controls what is actually
 - Linux service installation is implemented but has not been run on a real Linux host.
 - Windows process execution and service installation are not implemented.
 - ADB discovery works through DEX//REACH, but real Android hardware control is not yet verified.
-- Capability grants, exact-action plan/commit, and signed receipts are implemented and unit-tested in 0.3.0; public deployed-client runtime proof is tracked separately in `OPERATIONAL_STATE.md`.
-- Some local capabilities still come from the pinned Desktop Commander npm package through the compatibility adapter. The external Desktop Commander relay/app is not required by DEX//REACH.
+- Some local capabilities still come from the pinned Desktop Commander npm package through the compatibility adapter. The package has 26 raw internal tools; DEX currently exposes 22 remotely after withholding node-owned/vendor/history surfaces. The external Desktop Commander relay/app is not required by DEX//REACH.
 
 ---
 
 ## Additional Documentation
 
 - [Operational state / verification record](OPERATIONAL_STATE.md)
+- [Golden-worker verification and release proof](docs/GOLDEN_WORKER.md)
+- [Protected capability invariants](docs/INVARIANTS.md)
+- [Incident prevention notes](docs/INCIDENT_PREVENTION.md)
+- [Terminal command reference](docs/TERMINAL_COMMANDS.md)
 - [Trust and privacy, plainly](docs/TRUST_AND_PRIVACY.md)
 - [Security policy and vulnerability reporting](SECURITY.md)
 - [Second-device quickstart](docs/SECOND_DEVICE_QUICKSTART.md)
 - [Third-party attribution](ATTRIBUTION.md)
+
+---
+
+## License status
+
+The repository is publicly readable, but no open-source license file is currently declared. Package metadata is therefore marked `UNLICENSED`; public source visibility by itself is not treated as a license grant.
 
 ---
 

@@ -5,14 +5,29 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { executionFingerprint } from '../shared/fingerprint.js';
-import { commandGuard, pathAllowed, parseReadonlyCommand } from '../shared/security.js';
+import { canonicalPathForScope, commandGuard, pathAllowed, parseReadonlyCommand } from '../shared/security.js';
 import type { ReachProfile } from '../shared/protocol.js';
 import { stateDir } from '../shared/local-env.js';
 
 const execFileAsync = promisify(execFile);
+const SENSITIVE_ENV_KEY = /(^DEX_REACH_(?:NODE_TOKEN|OWNER_PASSWORD|ENV_FILE)$|TOKEN|PASSWORD|PASSWD|SECRET|AUTHORIZATION|COOKIE|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)/i;
+
+export function safeChildEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(source).filter(([key, value]) => value !== undefined && !SENSITIVE_ENV_KEY.test(key)));
+}
+
+function redactKnownEnvironmentSecrets(text: string, source: NodeJS.ProcessEnv = process.env): string {
+  let output = text;
+  const values = Object.entries(source)
+    .filter(([key, value]) => Boolean(value && value.length >= 4 && SENSITIVE_ENV_KEY.test(key)))
+    .map(([, value]) => value!)
+    .sort((a, b) => b.length - a.length);
+  for (const value of values) output = output.split(value).join('[REDACTED]');
+  return output;
+}
 
 async function run(command: string, args: string[], cwd?: string, maxBuffer = 4 * 1024 * 1024): Promise<string> {
-  const { stdout } = await execFileAsync(command, args, { cwd, timeout: 15000, maxBuffer });
+  const { stdout } = await execFileAsync(command, args, { cwd, timeout: 15000, maxBuffer, env: safeChildEnvironment() });
   return stdout;
 }
 
@@ -76,9 +91,9 @@ export async function createCheckpoint(cwd: string): Promise<Record<string, unkn
 
 function scopedPath(value: unknown, roots: string[], label: string): string {
   if (typeof value !== 'string' || !path.isAbsolute(value)) throw new Error(`${label} must be an absolute path`);
-  const resolved = path.resolve(value);
-  if (!pathAllowed(resolved, roots)) throw new Error(`path outside allowed roots: ${resolved}`);
-  return resolved;
+  const canonical = canonicalPathForScope(value);
+  if (!canonical || !pathAllowed(canonical, roots)) throw new Error(`path outside allowed roots: ${path.resolve(value)}`);
+  return canonical;
 }
 
 export async function nativeReadFile(file: string, maxBytes = 1024 * 1024): Promise<Record<string, unknown>> {
@@ -113,12 +128,16 @@ export async function nativeProcess(command: string, cwd: string, profile: Reach
   const shell = profile === 'read-only' ? null : nodeShell();
   try {
     const { stdout, stderr } = readonly
-      ? await execFileAsync(readonly.program, readonly.args, { cwd, timeout, maxBuffer: 2 * 1024 * 1024 })
-      : await execFileAsync(shell!, ['-lc', command], { cwd, timeout, maxBuffer: 2 * 1024 * 1024 });
-    return { exitCode: 0, stdout, stderr };
+      ? await execFileAsync(readonly.program, readonly.args, { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env: safeChildEnvironment() })
+      : await execFileAsync(shell!, ['-lc', command], { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env: safeChildEnvironment() });
+    return { exitCode: 0, stdout: redactKnownEnvironmentSecrets(stdout), stderr: redactKnownEnvironmentSecrets(stderr) };
   } catch (error) {
     const value = error as Error & { code?: number; stdout?: string; stderr?: string };
-    return { exitCode: typeof value.code === 'number' ? value.code : 1, stdout: value.stdout || '', stderr: value.stderr || value.message };
+    return {
+      exitCode: typeof value.code === 'number' ? value.code : 1,
+      stdout: redactKnownEnvironmentSecrets(value.stdout || ''),
+      stderr: redactKnownEnvironmentSecrets(value.stderr || value.message)
+    };
   }
 }
 

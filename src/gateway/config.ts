@@ -23,8 +23,10 @@ export function loadGatewayConfig(): GatewayConfig {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('invalid DEX_REACH_GATEWAY_PORT');
   if (legacyNodeToken && legacyNodeToken.length < 24) throw new Error('legacy DEX_REACH_NODE_TOKEN must contain at least 24 characters');
   if (!ownerPassword || ownerPassword.length < 16) throw new Error('DEX_REACH_OWNER_PASSWORD must contain at least 16 characters');
-  if (host !== '127.0.0.1' && host !== 'localhost' && publicBaseUrl.protocol !== 'https:') {
-    throw new Error('non-local DEX//REACH gateway requires an https DEX_REACH_PUBLIC_BASE_URL');
+  const publicHost = publicBaseUrl.hostname.toLowerCase();
+  const publicIsLoopback = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(publicHost);
+  if (!publicIsLoopback && publicBaseUrl.protocol !== 'https:') {
+    throw new Error('non-local DEX_REACH_PUBLIC_BASE_URL must use https');
   }
   return {
     host,

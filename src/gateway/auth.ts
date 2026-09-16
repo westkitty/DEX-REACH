@@ -6,6 +6,7 @@ import type { OAuthServerProvider, AuthorizationParams } from '@modelcontextprot
 import type { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { timingSafeEqualText } from '../shared/security.js';
+import { atomicWriteFile } from '../shared/state-io.js';
 
 type TokenRecord = {
   clientId: string;
@@ -52,10 +53,13 @@ class PersistentClientsStore {
   async registerClient(client: Omit<OAuthClientInformationFull, 'client_id' | 'client_id_issued_at'>): Promise<OAuthClientInformationFull> {
     const incoming = client as OAuthClientInformationFull;
     const now = Math.floor(Date.now() / 1000);
+    // Dynamic registration identifiers are server authority. Do not honor extra runtime fields that
+    // try to smuggle a chosen client_id/client_id_issued_at through the structurally typed input.
+    const { client_id: _ignoredClientId, client_id_issued_at: _ignoredIssuedAt, ...metadata } = incoming;
     const full: OAuthClientInformationFull = {
-      ...incoming,
-      client_id: incoming.client_id || crypto.randomUUID(),
-      client_id_issued_at: incoming.client_id_issued_at || now
+      ...metadata,
+      client_id: crypto.randomUUID(),
+      client_id_issued_at: now
     };
     await this.owner.saveClient(full);
     return full;
@@ -68,6 +72,7 @@ export class ReachOAuthProvider implements OAuthServerProvider {
   private readonly codes = new Map<string, CodeRecord>();
   private readonly pending = new Map<string, PendingApproval>();
   private readonly stateFile: string;
+  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(
     stateDir: string,
@@ -194,9 +199,9 @@ export class ReachOAuthProvider implements OAuthServerProvider {
 
   private async persist(): Promise<void> {
     this.sweep();
-    await fs.mkdir(path.dirname(this.stateFile), { recursive: true, mode: 0o700 });
-    const temp = `${this.stateFile}.${process.pid}.tmp`;
-    await fs.writeFile(temp, JSON.stringify(this.state, null, 2), { mode: 0o600 });
-    await fs.rename(temp, this.stateFile);
+    const snapshot = JSON.stringify(this.state, null, 2) + '\n';
+    const next = this.persistQueue.catch(() => undefined).then(() => atomicWriteFile(this.stateFile, snapshot, 0o600));
+    this.persistQueue = next;
+    await next;
   }
 }

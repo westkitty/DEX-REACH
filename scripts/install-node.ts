@@ -2,7 +2,7 @@
  * Second-device node installer. Run on the machine that will become a node, after the gateway owner
  * has enrolled it and handed over the generated <node>.env file:
  *
- *   npm run install:node -- --env /path/to/bryan-laptop.env [--roots /home/bryan/projects] [--profile development]
+ *   npm run install:node -- --env /path/to/second-laptop.env [--roots /home/device-owner/projects] [--profile development]
  *                          [--access off|read-only|on] [--service] [--node-id override]
  *
  * Default initial AI access is OFF: installing a node never grants any AI client execution by itself.
@@ -16,7 +16,8 @@ import { promisify } from 'node:util';
 import { stateDir } from '../src/shared/local-env.js';
 import { isAccessMode, saveAccessState, loadAccessState, defaultAccessState } from '../src/shared/access.js';
 import { arg, cleanNodeId, flag, nodeEnvFile, readEnvFile, writeEnvFile } from './lib/node-files.js';
-import { launchAgentsDir, launchdPlist, systemdUnit, systemdUserDir } from './lib/service.js';
+import { launchAgentsDir, launchdOneShotPlist, launchdPlist, servicePath, systemdUnit, systemdUserDir } from './lib/service.js';
+import { atomicWriteFile } from '../src/shared/state-io.js';
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -60,21 +61,38 @@ console.log(`AI access: ${access.mode.toUpperCase()}${access.mode === 'off' ? ' 
 if (flag('--service')) {
   const logsDir = path.join(stateDir(), 'logs');
   await fs.mkdir(logsDir, { recursive: true, mode: 0o700 });
-  const spec = { label: 'com.stinkyweasel.dex-reach.node', entry: 'dist/src/node/main.js', envFile: target, stateDir: process.env.DEX_REACH_STATE_DIR, root, nodeBin: process.execPath, logsDir };
+  const spec = { label: 'com.stinkyweasel.dex-reach.node', entry: 'dist/src/node/main.js', envFile: target, stateDir: stateDir(), pathEnv: servicePath(process.execPath), root, nodeBin: process.execPath, logsDir };
   if (process.platform === 'darwin') {
     const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
     const plist = path.join(launchAgentsDir(), `${spec.label}.plist`);
+    const helperLabel = 'com.stinkyweasel.dex-reach.node-install-reloader-once';
+    const helperTarget = path.join(launchAgentsDir(), `${helperLabel}.plist`);
+    const helperEntry = path.join(root, 'dist', 'scripts', 'reload-launchagents.js');
+    const installStatus = path.join(stateDir(), 'install-node.status.json');
     await fs.mkdir(launchAgentsDir(), { recursive: true });
-    try { await execFileAsync('launchctl', ['bootout', domain, plist]); } catch {}
-    await fs.writeFile(plist, launchdPlist(spec), { mode: 0o600 });
-    await execFileAsync('launchctl', ['bootstrap', domain, plist]);
-    await execFileAsync('launchctl', ['enable', `${domain}/${spec.label}`]);
-    await execFileAsync('launchctl', ['kickstart', '-k', `${domain}/${spec.label}`]);
-    console.log(`Installed and started launchd service ${spec.label}.`);
+
+    // Stage and lint the node definition before touching a running service. A node may be updating
+    // itself through DEX//REACH, so inline bootout/kickstart would destroy the request doing the update.
+    await atomicWriteFile(plist, launchdPlist(spec), 0o600);
+    await execFileAsync('/usr/bin/plutil', ['-lint', plist]);
+    try { await execFileAsync('/bin/launchctl', ['bootout', `${domain}/${helperLabel}`]); } catch {}
+    await atomicWriteFile(installStatus, JSON.stringify({
+      state: 'scheduled', scheduledAt: new Date().toISOString(), domain,
+      services: [{ label: spec.label, target: plist }]
+    }, null, 2) + '\n', 0o600);
+    await atomicWriteFile(helperTarget, launchdOneShotPlist({
+      label: helperLabel,
+      programArguments: [process.execPath, helperEntry, '--domain', domain, '--status', installStatus, '--delay-ms', '3000', '--cleanup-plist', helperTarget, '--service', spec.label, plist],
+      workingDirectory: root,
+      logsDir
+    }), 0o600);
+    await execFileAsync('/usr/bin/plutil', ['-lint', helperTarget]);
+    await execFileAsync('/bin/launchctl', ['bootstrap', domain, helperTarget]);
+    console.log(`Staged launchd service ${spec.label}; one-shot reload scheduled. Status: ${installStatus}`);
   } else if (process.platform === 'linux') {
     const unit = path.join(systemdUserDir(), 'dex-reach-node.service');
     await fs.mkdir(systemdUserDir(), { recursive: true });
-    await fs.writeFile(unit, systemdUnit(spec), { mode: 0o600 });
+    await atomicWriteFile(unit, systemdUnit(spec), 0o600);
     console.log(`Wrote ${unit} (systemd user unit; not yet verified on real Linux hardware).`);
     try {
       await execFileAsync('systemctl', ['--user', 'daemon-reload']);

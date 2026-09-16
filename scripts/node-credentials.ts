@@ -2,10 +2,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { NodeAuthStore } from '../src/gateway/node-auth.js';
-import { loadLocalSecrets } from '../src/shared/local-env.js';
+import { loadOwnerSecrets, stateDir as configuredStateDir } from '../src/shared/local-env.js';
+import { removeRevokedNode } from '../src/shared/revoked-nodes.js';
+import { atomicWriteFile } from '../src/shared/state-io.js';
 
-loadLocalSecrets();
-const stateDir = path.join(os.homedir(), '.dex-reach');
+loadOwnerSecrets();
+const stateDir = configuredStateDir();
 const store = new NodeAuthStore(stateDir);
 await store.initialize();
 
@@ -48,7 +50,7 @@ async function writeNodeEnv(file: string, nodeId: string, token: string, default
   if (!('DEX_REACH_INITIAL_ACCESS' in values)) values.DEX_REACH_INITIAL_ACCESS = 'off';
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const text = Object.entries(values).map(([key, value]) => `${key}=${value}`).join('\n') + '\n';
-  await fs.writeFile(file, text, { mode: 0o600 });
+  await atomicWriteFile(file, text, 0o600);
 }
 
 const command = process.argv[2] || 'list';
@@ -94,11 +96,7 @@ if (command === 'list') {
 } else if (command === 'forget') {
   if (!nodeId) throw new Error('forget requires a node id');
   const removed = await store.forget(nodeId);
-  const revokedFile = path.join(stateDir, 'revoked-nodes.json');
-  try {
-    const list = (JSON.parse(await fs.readFile(revokedFile, 'utf8')) as string[]).filter(id => id !== nodeId);
-    await fs.writeFile(revokedFile, JSON.stringify(list, null, 2), { mode: 0o600 });
-  } catch {}
+  await removeRevokedNode(stateDir, nodeId);
   console.log(removed ? `Forgot revoked node ${nodeId}` : `No enrolled node named ${nodeId}`);
 } else {
   throw new Error('usage: node-credentials.ts list | migrate-local | enroll <node> | rotate <node> | revoke <node> | forget <revoked node>');

@@ -1,127 +1,158 @@
 # DEX//REACH Operational State
 
 <!-- operational-state:metadata
-{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":8,"last_updated":"2026-09-16T11:10:55Z","current_baseline":{"identity":"DEX//REACH 0.3.0 source-security / capability-grants / exact-plan / signed-receipts candidate on main","state":"implemented-unit-verified","last_verified":"2026-09-16T11:10:55Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, project docs"],"linked_parent_state":null}
+{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":12,"last_updated":"2026-09-16T20:50:30Z","current_baseline":{"identity":"DEX//REACH 0.3.1 hardened golden-worker baseline on main","state":"verified-local-and-public-runtime","last_verified":"2026-09-16T20:50:30Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, Dock control terminal, project docs"],"linked_parent_state":null}
 -->
 
 ## 1. Project Identity and Scope
-DEX//REACH is a secure AI-native remote-computing control plane intended to replace the useful Remote Desktop Commander workflow without depending on its hosted relay.
+
+DEX//REACH is a secure AI-native remote-computing control plane. It provides useful AI access while preserving device-owner authority, explicit machine selection, bounded operations, revocability, auditability, and fail-closed behavior.
+
+Canonical public repository: `https://github.com/westkitty/DEX-REACH`.
 
 ## 2. Current Baseline
-Public source repository at `https://github.com/westkitty/DEX-REACH`. A macOS gateway and primary node are installed as user `launchd` services in the verified deployment. Public HTTPS ingress is active through Tailscale Funnel; the exact deployment hostname and client identifiers are intentionally kept outside the public repository. The primary node uses its own mode-0600 credential file, gateway authentication is keyed by node ID with persisted token hashes, and the ChatGPT Business workspace app is OAuth-linked, exposes all 12 MCP actions, and has passed real-client parity tests.
 
-Every node now enforces a local AI access policy (`off` / `read-only` / `on`, timed windows, per-client caps) before executing any routed request; the gateway forwards a non-secret actor identity (client kind/id/name from the approved OAuth registration) and displays each node's policy. Local control CLI: `npm run dex -- status|enable|read-only|disable|client|audit|uninstall`. Second-device path: `npm run nodes -- enroll <id>` → private transfer → `npm run install:node -- --env <file> --service` (starts `off`).
+The primary macOS deployment is running DEX//REACH **0.3.1** as persistent user `launchd` gateway/node services. The node reports `full-local`, the configured owner roots, and 0.3.1 agent identity. Public OAuth/PKCE MCP smoke passes through the deployed HTTPS gateway.
 
-Repository version 0.3.0 adds a stricter source-level control plane without changing the owner-authority model: READ-ONLY native process execution is shell-free and compatibility calls use an explicit inspection allowlist; capability grants can require a client to hold a capability/root/expiry/use-bounded lease; owner policy writes run built-in assertions; `reach_plan` / `reach_commit_plan` bind consequential work to an exact node, client, request, policy hash, expiry, one-use state, and checkpoint attempt; and nodes create local Ed25519-signed hash-chained execution receipts containing hashes rather than request/result contents. These 0.3.0 paths are source/unit verified in this revision but have not yet replaced the currently installed 0.2.0 public services, so the existing 12-tool real-client proof remains historical deployment evidence rather than proof of the new 15-tool surface.
+Current public server surface:
+
+- **15 first-class DEX MCP actions**;
+- **22 remotely exposed compatibility tools**;
+- the pinned compatibility dependency still has **26 raw local tools internally**, but safety-configuration mutation, local compatibility call history, vendor feedback, and vendor onboarding/prompt tools are withheld from remote clients;
+- compatibility URL-fetch mode is blocked;
+- native child processes and the isolated compatibility backend do not inherit DEX credential variables or obvious secret-bearing environment variables.
+
+`npm run verify:golden` passes on the deployed 0.3.1 build: typecheck, **48/48 regression tests**, production build, production dependency audit with **0 vulnerabilities**, raw 26-tool compatibility probe, and live public smoke covering OAuth, 15 DEX tools, the exact 22-tool safe compatibility surface, blocked configuration/URL-proxy paths, ADB executable availability, native file/process execution, sanitized child environment, exact plan→commit, signed receipts, and checkpoint creation.
+
+The primary macOS installer is self-host safe: it stages and validates service definitions, returns the invoking DEX request, then a separate no-`KeepAlive` one-shot LaunchAgent replaces gateway/node. The expected brief disconnect is followed by node re-registration; repeated restart loops are not accepted as success.
+
+The Dock launcher is installed as a signed local shell-app bundle with a custom icon and exact Dock entry. A click opens a **new Terminal instance** running the DEX control console. Final proof on the 0.3.1 build showed the node PID unchanged across launcher invocation and the same access mode, profile, and per-client ceilings before and after launch.
+
+This record describes the verified 0.3.1 source/runtime baseline but intentionally does not encode the hash or publication status of the Git commit that contains it. Git itself is authoritative for the containing commit, push state, and hosted checks; a commit cannot truthfully record the result of CI that only runs after that same commit is pushed.
 
 ## 3. Artifact Contract
-Provide filesystem, search/edit, terminal/process, development/Git, multi-node routing, MCP access, authentication/revocation, bounded output, auditability, ADB discovery, recovery primitives, and persistent local operation.
+
+Provide explicit-node remote access for filesystem, search/edit, process/terminal, Git/development, ADB discovery, multi-node routing, MCP/OAuth, local policy, authentication/revocation, capability grants, exact-action planning, signed receipts, bounded results, reversible checkpoints, persistent local operation, owner-visible recovery, and public-source documentation without granting public runtime authority.
 
 ## 4. Active Invariants
-- INV-001: Do not disable the incumbent Remote Desktop Commander before actual ChatGPT/Claude parity proof.
-- INV-002: DEX//REACH owns its gateway, node protocol, routing, authorization, and audit architecture.
-- INV-003: Telemetry is off in the isolated compatibility backend; credentials and secrets never enter Git or audit logs.
-- INV-004: Remote operations are explicitly node-scoped and path/capability bounded.
-- INV-005: Only the authenticated gateway is publicly proxied; raw shell and node sockets are not directly exposed.
-- INV-006: Node credentials are independent; rotating or revoking one node must not invalidate unrelated nodes.
-- INV-007: DEX-native operations must enforce the same allowed-root and command guardrails as compatibility calls.
-- INV-008: The node is the final authority. Node-local policy (off/read-only/on, timed windows, per-client caps) is evaluated on the node before every request; the gateway has no bypass. Absent or corrupt policy = off. A newly enrolled node starts off.
-- INV-009: Routing is explicit: every operation names a node_id; unknown, blank, offline, or revoked IDs fail; there is no default node and no fallback.
-- INV-010: Public source access grants no runtime authority. Gateway owner credentials, node enrollment files, tokens, policies, and deployment state remain outside Git; a node joins only with a separately generated per-node credential.
-- INV-011: READ-ONLY never interprets an arbitrary shell program. Native inspection uses a strict shell-free argv grammar; compatibility calls use an explicit read-only allowlist and unknown compatibility tools fail closed.
-- INV-012: Capability grants can only narrow an enabled client. They never override OFF, READ-ONLY, a stricter per-client ceiling, or the node's configured allowed roots.
-- INV-013: Transactional execution plans bind node, client identity, exact operation/arguments, policy hash, expiry, and one-use state; a changed policy or client invalidates the commit path.
-- INV-014: Execution receipts are signed by a node-local key and omit raw request/result contents and credentials. Gateway or client claims do not substitute for node receipt evidence.
-- INV-015: DEX private state (`~/.dex-reach/` or the configured state directory) is never an addressable path-scoped remote resource merely because a broader allowed root contains it; relative path arguments fail closed.
+
+The detailed proof obligations live in [`docs/INVARIANTS.md`](docs/INVARIANTS.md). Release-blocking invariants include:
+
+- **INV-001 — Node final authority:** OFF / READ-ONLY / ON, timed windows, per-client ceilings, and grants are enforced on the node immediately before execution.
+- **INV-002 — Explicit routing:** every remote operation names a `node_id`; blank, unknown, offline, disabled, or revoked nodes fail with no fallback.
+- **INV-003 — Fail closed:** missing/corrupt policy means OFF; a newly enrolled node starts OFF.
+- **INV-004 — Scope:** typed/native/compatibility paths must remain within canonicalized allowed roots and outside DEX private state; symlink, plural/nested, and camelCase path fields are covered.
+- **INV-005 — Compatibility safety ownership:** remote clients cannot change compatibility safety configuration, recover local call history, invoke vendor-only surfaces, or use the node as a URL proxy.
+- **INV-006 — READ-ONLY is shell-free:** no arbitrary shell interpretation or unknown compatibility execution.
+- **INV-007 — ON shell honesty:** ON/full-local shell is high authority and is not represented as an OS filesystem sandbox.
+- **INV-008 — Secret boundary:** credential-bearing environment variables are stripped from child processes; known parent secret values are redacted from returned process output; secrets/private state remain outside Git and public output.
+- **INV-009 — Transport:** non-loopback public MCP identity uses HTTPS; remote node WebSocket transport uses WSS.
+- **INV-010 — Exact plans:** one exact plan has at most one claimant and binds node/client/request/policy/expiry; raw args are scrubbed after claim/expiry.
+- **INV-011 — Signed receipts:** node receipts verify and form one predecessor-linked chain without raw request/result content.
+- **INV-012 — Concurrent state safety:** policy/grant/plan/receipt/auth/revocation/bootstrap/OAuth mutations use atomic or locked transitions; stale writers do not roll back newer authority.
+- **INV-013 — Credential independence:** node credentials rotate/revoke independently.
+- **INV-014 — Public source ≠ authority:** cloning the repository provides no runtime credential, enrollment, or node authority.
+- **INV-015 — Self-update survival:** persistent installation can replace the running gateway/node without depending on the request transport it is replacing.
+- **INV-016 — Launcher non-escalation:** opening/recovering through the Dock launcher does not silently change policy, ceilings, grants, credentials, roots, or profile.
+- **INV-017 — Evidence honesty:** simulation is never described as separate physical-hardware verification.
+
 ## 5. Verified Working Behavior
-- VER-001: Pinned Desktop Commander 0.2.50 is driven through the official MCP SDK and exposes 26 local tools.
-- VER-002: Gateway and node run persistently under `launchd`; health reports one online Mac node.
-- VER-003: OAuth dynamic registration, owner approval, PKCE, token exchange, stateful MCP, node routing, file roundtrip, and process execution pass through the public HTTPS endpoint.
-- VER-004: Gateway restart terminates node sockets and the node automatically re-registers with the replacement gateway.
-- VER-005: Strict typecheck, production build, regression tests, and npm audit with 0 vulnerabilities pass.
-- VER-006: Per-node credential migration and live rotation are verified; the Mac reconnects with a new token without restarting the gateway, and the prior token expires after the grace window.
-- VER-007: Public MCP smoke verifies 12 tools including DEX-native file read/write, guarded process execution, ADB discovery, and checkpoint creation from tracked plus untracked dirty Git state.
-- VER-008: Claude Code has DEX//REACH registered at user scope and completed DEX OAuth/PKCE authentication; `claude mcp get dex-reach` reports Connected.
-- VER-009: ChatGPT workspace app handshake observed end to end in gateway logs: DCR → `/authorize` (scope `mcp:tools`, PKCE S256, resource `/mcp`) → owner approval → `/token` 200 → `initialize` → `notifications/initialized` → `tools/list` (client `openai-mcp/1.0.0`, protocol 2025-11-25). ChatGPT's admin backend reports 12 actions with titles and read/write classification.
-- VER-010: Real ChatGPT parity: node discovery, fingerprint, bounded file write/read, and guarded process execution completed through the deployed app. Writes prompted ChatGPT's Allow/Deny approval as configured (`ask_before_writes`); reads ran without prompts. Exact deployment identifiers and local paths are retained outside the public repository.
-- VER-012: Node-local policy enforced end to end through the real ChatGPT app against an isolated second node: OFF refused fingerprinting; READ-ONLY allowed fingerprinting and refused a write; the enabled primary node still served an allowed read in the same turn. Refusals were recorded in the simulated node's audit with `actor.kind=chatgpt`.
-- VER-013: Same policy applied to Claude Code (this session's `dex-reach` MCP server): write to the read-only sim node refused with the owner-attributed error, fingerprint succeeded, `pwd` on `macbook-air.local` succeeded.
-- VER-014: Two-node simulation (`scripts/sim-two-nodes.ts`, 24 checks, public OAuth+MCP path): both nodes listed with distinct roots; OFF refuses all and creates nothing; READ-ONLY allows inspection commands and refuses writes/mutating commands; ON writes land only under the sim root and path escapes are refused; per-client cap (`smoke: off` / `read-only`) blocks/limits only that client kind; typo/unknown node IDs fail with no fallback; sim audit attributes the actor, omits file content, records refusals. Live rotate of the sim credential and CLI revoke left `macbook-air.local` connected and working; the revoked sim node was dropped by the gateway sweep and could not reconnect (502 on upgrade).
-- VER-015: Local CLI on the sim node: `enable --for 5s` reverted to off after expiry; `client chatgpt off` + `read-only` displayed as `ChatGPT blocked (limit: off)`; `audit` listed refusals with client attribution and no file contents. Absent-policy fail-closed and corrupt-policy fail-closed covered by unit tests.
-- VER-016: Gateway restart recovery with the new session handling: unknown MCP sessions now return 404, and Claude Code re-initialized transparently after a restart (previously a dead session persisted with 400).
-- VER-011: Claude-issued DEX tool invocation verified: a Claude Code session called `reach_list_nodes` through the public MCP endpoint and received the live node record.
-- VER-017: 0.3.0 source/unit verification covers the prior READ-ONLY shell-composition/root-escape class: shell operators/substitution, absolute paths outside configured roots, relative traversal, unknown compatibility tools, and interactive compatibility mutation paths are refused; approved direct inspection remains allowed.
-- VER-018: 0.3.0 source/unit verification covers capability grants by client, capability, root, expiry/use budget, OFF precedence, and transactional policy validation before local policy writes.
-- VER-019: 0.3.0 source/unit verification covers exact one-use execution-plan records plus Ed25519-signed receipt verification, predecessor hash chaining, and omission of raw request contents from receipt storage.
+
+- **VER-001 — Persistent primary Mac services:** gateway/node run under launchd and the node re-registers after service replacement.
+- **VER-002 — Public OAuth/MCP path:** dynamic registration, owner approval, PKCE, token exchange, initialization, tool listing, routing, and live execution pass through the deployed HTTPS gateway.
+- **VER-003 — 15-tool DEX surface:** the deployed smoke sees all 15 first-class actions with expected metadata.
+- **VER-004 — Safe compatibility surface:** raw pinned backend probe reports 26 tools; the deployed node exposes exactly 22 remotely. `set_config_value` is not remotely callable, and compatibility URL reads are refused.
+- **VER-005 — Compatibility safety configuration:** isolated backend telemetry is disabled and configured allowed roots are verified at startup.
+- **VER-006 — Native scope/security:** file/process paths, symlink escapes, plural/nested/camelCase compatibility paths, private-state targeting, destructive command classes, and READ-ONLY shell composition are regression-covered.
+- **VER-007 — Child environment sanitization:** native and compatibility child environments exclude DEX credential variables/obvious secret-bearing variables; public smoke verifies no credential-bearing variable appears in native `env` output.
+- **VER-008 — Policy concurrency:** stale owner-policy writers cannot overwrite newer local decisions; final reservations honor latest policy and atomically consume use-bounded grants.
+- **VER-009 — Exact plans:** expiration, policy/client/request binding, single-claim concurrency, argument scrubbing, and deployed plan→commit execution pass.
+- **VER-010 — Signed receipts:** signature/tamper/content-omission/chain tests pass; deployed receipts show committed work. A reproduced stale-lock TOCTOU that could fork concurrent chains was repaired; post-fix proof includes five focused lock/receipt stress runs, three complete regression runs, and the final golden worker.
+- **VER-011 — Shared state locking:** stale-lock recovery uses ownership/inode identity plus a serialized recovery guard; a 40-contender stale-lock fixture never enters the critical section concurrently.
+- **VER-012 — Node authentication/revocation:** concurrent credential writers preserve independent nodes; revocation tombstone mutations are locked/atomic; prior live rotation/revocation proof left unrelated nodes working.
+- **VER-013 — Bootstrap concurrency:** two concurrent first-boot processes produce one coherent credential set; exactly one creates state and the other preserves it.
+- **VER-014 — OAuth hardening:** approval HTML escapes untrusted dynamic client names; dynamic registration always assigns client identity server-side; OAuth persistence is serialized/atomic.
+- **VER-015 — Transport configuration:** non-loopback HTTP public identity and non-loopback cleartext node WebSocket configuration are rejected by tests.
+- **VER-016 — ADB executable:** deployed DEX reports `available:true`; no Android device is currently attached, so hardware control is not claimed.
+- **VER-017 — Self-hosted macOS install:** `npm run install:macos` invoked through DEX returns before service replacement, node reconnects on 0.3.1, and the helper does not enter a restart loop.
+- **VER-018 — Dock control terminal:** final bundle signature verifies, exact Dock tile is present, clicking opens a new Terminal instance showing DEX status/kill-switch/timed-mode/audit/receipt/grant controls, and launcher invocation preserves node PID and owner authority state.
+- **VER-019 — Local quality gate:** `npm run verify` passes with 48/48 tests, build success, production audit 0 vulnerabilities, and raw compatibility probe.
+- **VER-020 — Deployed golden worker:** `npm run verify:golden` passes on the installed 0.3.1 runtime with the complete smoke evidence listed in the baseline above.
+- **VER-021 — Prior hosted workflows:** GitHub validation and CodeQL completed successfully for prior commit `0084650`; this proves the workflows themselves execute, not yet that the current unpushed 0.3.1 candidate is green remotely.
+- **VER-022 — Multi-node policy simulation:** the isolated second-node simulation previously verified explicit routing/no-fallback, OFF/READ-ONLY/ON, roots, client ceilings, audit attribution, rotation/revocation, and primary-node isolation through the public MCP path.
+- **VER-023 — Real-client historical proof:** ChatGPT and Claude previously completed OAuth/PKCE and live DEX calls/policy refusals against the deployed project. Those historical client proofs remain valid for the tested behavior; the current 15-action server surface still needs client-side action-cache refresh proof if the ChatGPT UI is expected to expose the three newer actions immediately.
 
 ## 6. Known Not Working
-None in the verified local/public SDK path or the ChatGPT real-client path.
+
+No unresolved confirmed primary-Mac/runtime bug remains in the inspected 0.3.1 scope after the current repair/resweep cycle.
+
+Directly issuing `launchctl kickstart -k` **from the DEX request being killed** is intentionally not a supported self-update mechanism: destroying a transport can destroy its own response. The supported path is `npm run install:macos`, which delegates replacement to the one-shot helper. This is a lifecycle constraint, not an invitation to retry the self-killing path.
 
 ## 7. Implemented but Unverified
-- UNV-001: ADB discovery is verified through public MCP, but no Android hardware is currently attached or discoverable by mDNS, so device-control behavior remains unverified.
-- UNV-002: (resolved → VER-011) Claude-issued invocation verified from a Claude Code session.
-- UNV-003: No second physical device has been enrolled. Everything multi-node was proven with a second node process under an isolated state directory on the primary Mac. No operating-system-specific claim is made for an untested second device.
-- UNV-004: Linux systemd user-unit generation (`install:node --service` on linux) is implemented and shape-tested but has never run on a Linux host. Windows: no installer, `dex.process.run` refuses win32.
-- UNV-005: `install:node --service` on macOS uses the same launchd template as the verified `install:macos`, but the node-only install path itself has not been executed on a fresh Mac.
-- UNV-006: The 0.3.0 MCP surface exposes 15 first-class tools including `reach_plan`, `reach_commit_plan`, and `reach_receipts`; source/type/unit/build evidence exists, but the persistent public gateway/node are still the verified 0.2.0 deployment until separately installed and smoked.
-- UNV-007: GitHub Actions validation and CodeQL workflow definitions are present in the repository candidate; their first hosted runs are pending the push of this revision.
+
+- **UNV-001 — Android hardware control:** ADB executable/discovery is verified; no USB/network Android device is currently attached, so real device-control behavior is unverified.
+- **UNV-002 — Second physical device:** no independent second machine has completed the full enrollment/policy matrix. Multi-node evidence is simulation on the primary Mac.
+- **UNV-003 — Linux service runtime:** systemd user-unit generation is implemented/shape-tested but has not run on a real Linux host.
+- **UNV-004 — macOS node-only fresh-machine install:** the node-only installer uses the same staged one-shot replacement design but has not been exercised on a fresh second Mac.
+- **UNV-006 — Current ChatGPT client action refresh:** the public MCP server proves 15 actions, but the currently connected ChatGPT app/client cache has not been independently shown exposing the three newer plan/commit/receipt actions in its UI after this deployment.
 
 ## 8. Unknown or Evidence-Stale State
-- UNK-001: (resolved → VER-009/VER-010) ChatGPT workspace app deployed, linked, configured, and parity-tested.
+
+None that blocks the primary-Mac 0.3.1 release candidate. External client caches and untested hardware/platform paths remain explicitly separated above.
 
 ## 9. Pending Work
-- PND-001: (done, r4) ChatGPT app deployed and parity-tested.
-- PND-002: (done, r4) Claude-issued DEX call verified.
-- PND-003: Attach or discover an Android device and exercise a harmless ADB identity call through DEX. Continue adapter replacement only where native paths have equivalent proof.
-- PND-004: Enroll a real second device and repeat the simulation matrix (`scripts/sim-two-nodes.ts` with its node ID) plus one real ChatGPT OFF/READ-ONLY/ON check.
-- PND-005: Owner password is the bootstrap-generated 32-character value in `~/.dex-reach/secrets.env`; a user-chosen replacement must be ≥16 characters (gateway config enforces this) and requires a gateway restart plus re-linking any client whose refresh token has expired.
-- PND-006: Remote Desktop Commander's external hosted-relay process remains separate from DEX and is not required by DEX. The npm package `@wonderwhy-er/desktop-commander` remains a DEX compatibility dependency (spawned per node with telemetry off and an isolated HOME) for `reach_list_tools`/`reach_call`; native paths cover file read/write, process run, repo info, checkpoint, and ADB. Whether to stop the unrelated external fallback remains a deployment-owner decision.
-- PND-007: Install/restart the persistent primary gateway/node from 0.3.0, run the updated 15-tool public smoke, refresh client action discovery if necessary, and exercise `reach_plan`, `reach_commit_plan`, and `reach_receipts` through a real client before promoting those paths to deployed verification.
-- PND-008: Observe the first pushed GitHub Actions validation and CodeQL runs; do not describe hosted CI as verified until those runs complete successfully.
+
+- **PND-001:** refresh/relink ChatGPT client action discovery if direct UI access to plan/commit/receipts is required.
+- **PND-002:** attach an Android device and perform a harmless hardware identity operation through DEX.
+- **PND-003:** enroll a real second device and repeat explicit-node routing plus OFF/READ-ONLY/ON checks.
+- **PND-004:** run the Linux systemd path on a real Linux host before claiming Linux runtime verification.
+- **PND-005:** continue replacing compatibility primitives only when equivalent native behavior has equal or stronger proof.
+
 ## 10. Active Decisions, Defaults, and Prohibitions
+
 - Repository source is public. Runtime access remains authenticated, explicitly enrolled, node-scoped, locally governed, and fail-closed.
-- Nodes connect outbound to a relay-first gateway; direct/P2P transport is optional future work.
-- Desktop Commander is a replaceable MIT compatibility adapter with isolated HOME/config state.
-- No force push, destructive Git reset/clean, public unauthenticated shell, plaintext credential logging, or silent path-scope widening.
+- Nodes connect outbound; only the authenticated gateway may be intentionally public. No raw node listener/shell is exposed.
+- Desktop Commander is a pinned replaceable local compatibility adapter with isolated HOME/config state; its hosted relay/app is not required by DEX.
+- ON/full-local arbitrary shell is not advertised as OS-level filesystem isolation.
+- No force push, destructive Git reset/clean, plaintext credential logging, invented credentials, secret publication, silent path/root/profile/trust widening, or simulation-as-hardware claims.
+- `docs/INVARIANTS.md`, `docs/GOLDEN_WORKER.md`, and `docs/INCIDENT_PREVENTION.md` are durable release/repair references; README remains the human-facing overview.
 
 ## 11. Validation and Evidence Matrix
-| ID | Capability | State | Evidence / decisive check |
-| --- | --- | --- | --- |
-| VER-001 | Local compatibility backend | verified | Fresh official MCP SDK probe listed 26 tools |
-| VER-002 | Persistent Mac services | verified | Both launchd jobs running; health reports onlineNodes=1 |
-| VER-003 | Public OAuth/MCP execution | verified | `npm run smoke` PASS through Funnel HTTPS URL |
-| VER-004 | Gateway recovery | verified | Deliberate gateway termination followed by node auto re-registration |
-| VER-005 | Static/regression/build | verified | typecheck/test/build/audit PASS |
-| VER-006 | Per-node credential rotation | verified | Live token rotation + node-only restart; gateway PID unchanged; old grace credential expired |
-| VER-007 | Native executor + checkpoint | verified | Public `npm run smoke` PASS with native file/process, ADB discovery, dirty Git checkpoint |
-| VER-008 | Claude MCP registration/OAuth | verified | User-scope server Connected; DEX OAuth callback completed |
-| UNV-001 | Android hardware control | implemented-unverified | No ADB USB or mDNS device currently visible |
-| VER-009 | ChatGPT OAuth/MCP handshake | verified | Gateway log sequence DCR/authorize/token/initialize/initialized/tools-list from openai-mcp/1.0.0 |
-| VER-010 | ChatGPT real-client parity (5 tests) | verified | Live chat responses + audit.jsonl entries for fingerprint, file write, file read, process run |
-| VER-011 | Claude-issued tool invocation | verified | Claude Code session called reach_list_nodes over public MCP |
-| VER-012 | Node policy vs real ChatGPT | verified | OFF refusal + READ-ONLY write refusal from real ChatGPT chat; sim audit attribution |
-| VER-013 | Node policy vs Claude Code | verified | Read-only sim node refused Claude write, allowed fingerprint |
-| VER-014 | Two-node simulation (24 checks) | verified | `scripts/sim-two-nodes.ts` PASS against live gateway |
-| VER-015 | Local kill switch / timed / per-client / audit CLI | verified | Sim-node CLI session + unit tests |
-| VER-016 | Gateway restart session recovery | verified | 404 on unknown session; Claude re-initialized |
-| VER-017 | READ-ONLY shell-free / compatibility fail-closed hardening | verified (source/unit) | Adversarial command and compatibility allowlist regression tests pass |
-| VER-018 | Capability grants + policy assertions | verified (source/unit) | Client/capability/root/use/ceiling tests pass, one-use grants resist concurrent double-spend, and invalid policy writes fail |
-| VER-019 | Exact plans + signed receipts | verified (source/unit) | One-use plan test + Ed25519 nested-metadata signature/tamper/hash-chain/content-omission test pass |
-| UNV-006 | 15-tool 0.3.0 public MCP deployment | implemented-unverified | Source/build/tool registration exists; persistent deployment still 0.2.0 |
-| UNV-007 | Hosted CI / CodeQL | implemented-unverified | Workflow definitions added; pushed run not yet observed |
-| UNV-003 | Second physical device | implemented-unverified | Not available; simulated only |
-| UNV-004 | Linux systemd install | implemented-unverified | Unit generated/tested for shape only |
-| UNV-005 | macOS node-only service install | implemented-unverified | Same template as verified install:macos; not run on a fresh Mac |
+
+| Capability | State | Decisive current evidence |
+| --- | --- | --- |
+| Source/type/regression/build | verified | `npm run verify`: typecheck, 48/48 tests, build, production audit 0 vulnerabilities |
+| Raw compatibility dependency | verified | probe lists 26 pinned local backend tools |
+| Remote compatibility surface | verified | live node reports 22; public smoke enforces exact expected set |
+| Public MCP/OAuth | verified | live `npm run smoke`: OAuth/PKCE + 15 actions |
+| Owner policy/fail closed | verified | policy/grant/concurrency tests + deployed owner CLI |
+| Native/compat path guard | verified | symlink/plural/nested/camelCase/private-state regression tests + live refusals |
+| Process secret environment | verified | native regression + deployed public `env` smoke |
+| Exact plan/commit | verified | concurrency/expiry/scrub tests + deployed plan→commit smoke |
+| Signed receipt chain | verified | tamper/chain/concurrency tests + post-TOCTOU stress + deployed receipt smoke |
+| Persistent macOS self-update | verified | self-hosted install returned, expected reconnect, 0.3.1/22-tool node returned |
+| Dock Terminal launcher | verified | signed bundle, exact Dock URL, new Terminal window, live DEX menu, unchanged PID/policy/profile |
+| ADB executable | verified | live `available:true`; no device attached |
+| Containing Git commit CI/CodeQL | external-by-construction | inspect GitHub checks for the commit containing this state record; do not infer hosted CI from this file alone |
+| Second physical device | unverified | simulated second-node proof only |
+| Linux runtime | unverified | generated/shape-tested only |
+| Android hardware operation | unverified | no device attached |
 
 ## 12. Current Change Scope and Impact Radius
-DEX//REACH repository plus private deployment state outside Git: gateway state, per-node credential files, user service definitions, and the existing Tailscale Funnel HTTPS reverse proxy. Existing Remote Desktop Commander remains installed as fallback while ChatGPT/Claude host parity is incomplete.
+
+The 0.3.1 candidate changes gateway/node authorization and state persistence, compatibility exposure, execution-plan/receipt integrity, macOS service lifecycle, node-only installer lifecycle, local control tooling, public smoke, security/config validation, Dock control-terminal packaging, tests, README/security docs, invariant/golden-worker/incident-prevention docs, and this operational record. Private deployment state remains outside Git.
 
 ## 13. Compact Revision Log
-- r8 — 0.3.0 source-security and verifiable-control candidate: removed arbitrary shell interpretation from READ-ONLY native execution, made compatibility READ-ONLY fail closed through an explicit allowlist, added root/use/time-bounded capability grants and policy assertions, exact one-use plan/commit records with checkpoint attempts and policy/client binding, local Ed25519-signed hash-chained receipts, 15-tool MCP metadata, adversarial/unit regression coverage, GitHub validation + CodeQL workflows, README/security corrections, and explicit separation between source/unit proof and the still-0.2.0 deployed public service.
-- r7 — Sanitized public operational evidence by removing deployment-specific hostnames, app/chat identifiers, local usernames/paths, process details, and second-device personal names while retaining verification claims and trust invariants.
-- r6 — Reconciled public-source onboarding: HTTPS clone path, no repository-access prerequisite, generic public examples, explicit separation of public code from private enrollment/runtime authority, private vulnerability-reporting policy, and preserved node-local trust invariants.
-- r1 — Initialized authoritative state from the user contract and inspected machine/repository evidence.
-- r2 — Implemented, installed, and validated gateway/node/OAuth/MCP path; added public HTTPS ingress and recovery proof.
-- r3 — Added per-node credential enrollment/rotation, migrated and live-rotated the Mac credential, enforced scope on native operations, moved file/process primitives native, verified ADB discovery and dirty-worktree checkpoint over public MCP, and registered/authenticated Claude Code.
-- r5 — Second-device trust model: node-local access policy (`src/shared/access.ts`; off/read-only/on, timed windows with deterministic expiry, per-client caps, fail-closed defaults), enforced in the node before every request; gateway forwards non-secret actor identity and displays node policy; audit records actor and never file contents; local CLI (`npm run dex`: status/enable/read-only/disable/client/audit/uninstall) working offline; `install:node` second-device installer (starts off; macOS launchd; Linux unit generated) and `enroll` default `DEX_REACH_INITIAL_ACCESS=off`; routing hardened (blank/unknown/revoked IDs fail, gateway sweep enforces CLI revocation on connected nodes, revoke bookkeeping, `forget` tombstone cleanup); default cwd confined to allowed roots; unknown MCP session → 404 for client recovery; docs/TRUST_AND_PRIVACY.md and docs/SECOND_DEVICE_QUICKSTART.md; two-node simulation and real ChatGPT/Claude cross-policy checks.
-- r4 — Root cause of the "0 actions" ChatGPT app: the app existed (created 00:14Z, DCR succeeded) but no OAuth authorization was ever completed, so ChatGPT had no link and never fetched `tools/list`; creating a replacement failed with HTTP 409 (duplicate name) because the disabled app still existed. Repair: re-enabled/published the existing app, completed the owner OAuth approval, refreshed actions, set approval mode `ask_before_writes`, saved. Gateway changes: `trust proxy loopback` (fixes express-rate-limit X-Forwarded-For validation errors behind Funnel), secret-free handshake logging, empty-scope → `mcp:tools` defaulting with unsupported-scope rejection, MCP tool titles/descriptions/annotations (readOnlyHint etc.) so ChatGPT classifies reads vs writes, platform-aware node shell (`DEX_REACH_SHELL`), smoke checkpoint fixture inside an advertised allowed root, smoke gate for tool metadata. Documented second-device enrollment and ChatGPT app procedure.
+
+- **r12** — Exhaustive 0.3.1 hardening/golden-worker sweep. Closed symlink/plural/camelCase scope bypasses, policy stale-write rollback, plan double-claim, receipt-chain races, node-auth/revocation/bootstrap/OAuth persistence races, OAuth client-ID injection, public HTTP/remote WS transport gaps, compatibility safety-config/history/vendor/URL-proxy exposure, child-process credential-environment leakage, launchd Homebrew PATH/ADB false-positive behavior, self-hosted installer self-termination/respawning-helper failures, and Dock launcher Terminal/TCC mismatch. Reproduced and repaired a second receipt fork caused by stale-lock recovery deleting a newer owner's lock. Final local/deployed proof: 48/48 tests, three complete post-lock regression passes, five focused lock/receipt stress passes, build, 0-vulnerability production audit, 26-tool raw backend probe, 15-tool public MCP, exact 22-tool remote compatibility surface, ADB available, plan→commit, signed receipts, checkpoint, and signed Dock app opening a new Terminal without changing node PID or authority. Publication/hosted-check state is intentionally read from Git/GitHub rather than self-asserted inside the commit being checked.
+- **r11** — Historical Dock persistence repair: exact Dock URL verification replaced substring detection; launcher/icon/signature/pin were verified. Superseded by r12's shell-app Terminal control launcher.
+- **r10** — Historical Dock detection correction: restricted detection to `persistent-apps` and reverified the pinned app path.
+- **r9** — Introduced the primary-Mac Dock launcher and documented the then-observed forced-restart teardown problem. Superseded in r12 by bounded backend close and the self-host-safe one-shot installer lifecycle.
+- **r8** — Added 0.3.0 READ-ONLY fail-closed hardening, capability grants, policy assertions, exact plan/commit, signed receipts, 15-tool MCP metadata, CI/CodeQL workflows, and adversarial tests; deployment was still on the older public surface at that time.
+- **r7** — Sanitized public operational evidence and separated deployment-specific/private identifiers from public repository documentation.
+- **r6** — Reconciled public-source onboarding and added private vulnerability-reporting guidance without weakening enrollment/runtime authority.
+- **r5** — Added node-local access policy, second-device enrollment/install flow, explicit routing/no fallback, actor-aware audit, local control CLI, fail-closed policy, and two-node simulation/real-client policy checks.
+- **r4** — Repaired ChatGPT OAuth/app action discovery, added MCP metadata/classification, proxy handling, checkpoint smoke fixture, and client handshake evidence.
+- **r3** — Added per-node credential migration/rotation, native file/process/repo/checkpoint/ADB paths, and Claude registration/authentication.
+- **r2** — Implemented and validated the initial persistent gateway/node/OAuth/MCP path plus public HTTPS ingress and recovery proof.
+- **r1** — Initialized the authoritative operational record from repository/runtime evidence.

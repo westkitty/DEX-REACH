@@ -1,5 +1,5 @@
-import path from 'node:path';
 import type { ClientKind } from './protocol.js';
+import { extractPaths, pathAllowed } from './security.js';
 
 export type ReachCapability =
   | 'inspect'
@@ -33,19 +33,13 @@ export function operationCapability(operation: string): ReachCapability {
   return 'inspect';
 }
 
+/** All path-bearing request arguments, including plural compatibility-tool arrays. */
 export function requestPaths(args: Record<string, unknown>): string[] {
-  const found: string[] = [];
-  for (const [key, value] of Object.entries(args)) {
-    if (typeof value === 'string' && /^(path|cwd|file|directory|destination|source)$/i.test(key) && path.isAbsolute(value)) found.push(path.resolve(value));
-    if (value && typeof value === 'object' && !Array.isArray(value)) found.push(...requestPaths(value as Record<string, unknown>));
-  }
-  return found;
+  return extractPaths(args);
 }
 
+/** Grant roots are a second narrowing boundary and therefore receive the same canonical/symlink checks. */
 export function rootsCover(paths: string[], roots: string[]): boolean {
   if (!paths.length) return true;
-  return paths.every(candidate => roots.some(root => {
-    const base = path.resolve(root);
-    return candidate === base || candidate.startsWith(base + path.sep);
-  }));
+  return paths.every(candidate => pathAllowed(candidate, roots));
 }

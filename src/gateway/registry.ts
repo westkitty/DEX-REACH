@@ -1,10 +1,9 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import crypto from 'node:crypto';
 import type { Server } from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
 import type { NodeAuthStore } from './node-auth.js';
 import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor } from '../shared/protocol.js';
+import { addRevokedNode, loadRevokedNodes } from '../shared/revoked-nodes.js';
 
 export type NodeRecord = {
   hello: NodeHello;
@@ -26,20 +25,12 @@ export class NodeRegistry {
   private readonly nodes = new Map<string, NodeRecord>();
   private readonly pending = new Map<string, Pending>();
   private readonly revoked = new Set<string>();
-  private readonly revokedFile: string;
   private sweepTimer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly nodeAuth: NodeAuthStore, stateDir: string) {
-    this.revokedFile = path.join(stateDir, 'revoked-nodes.json');
-  }
+  constructor(private readonly nodeAuth: NodeAuthStore, private readonly stateDir: string) {}
 
   async initialize(): Promise<void> {
-    try {
-      const raw = JSON.parse(await fs.readFile(this.revokedFile, 'utf8')) as string[];
-      for (const nodeId of raw) this.revoked.add(nodeId);
-    } catch {
-      // First launch has no revocation file.
-    }
+    for (const nodeId of await loadRevokedNodes(this.stateDir)) this.revoked.add(nodeId);
   }
 
   /**
@@ -71,8 +62,14 @@ export class NodeRegistry {
       const auth = req.headers.authorization || '';
       const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
       const nodeId = url.searchParams.get('nodeId') || '';
-      if (!nodeId || this.revoked.has(nodeId)) return socket.destroy();
+      if (!nodeId) return socket.destroy();
       try {
+        // A revoked node can be explicitly forgotten and re-enrolled. Reconcile the in-memory tombstone
+        // with the authoritative credential store so a gateway restart is not required for that recovery.
+        if (this.revoked.has(nodeId)) {
+          if (await this.nodeAuth.isRevoked(nodeId)) return socket.destroy();
+          this.revoked.delete(nodeId);
+        }
         if (!(await this.nodeAuth.authenticate(nodeId, token))) return socket.destroy();
       } catch {
         return socket.destroy();
@@ -132,8 +129,8 @@ export class NodeRegistry {
       record.socket.close(4001, 'node revoked');
       this.nodes.delete(nodeId);
     }
-    await fs.mkdir(path.dirname(this.revokedFile), { recursive: true, mode: 0o700 });
-    await fs.writeFile(this.revokedFile, JSON.stringify([...this.revoked].sort(), null, 2), { mode: 0o600 });
+    this.revoked.clear();
+    for (const revokedId of await addRevokedNode(this.stateDir, nodeId)) this.revoked.add(revokedId);
     return Boolean(record);
   }
 

@@ -6,9 +6,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { stateDir } from '../src/shared/local-env.js';
 import { pathAllowed } from '../src/shared/security.js';
-import { ACCESS_MODES, accessFile, authorizeOperation, createGrant, isAccessMode, loadAccessState, modeForActor, parseDuration, policyCheck, resolveMode, saveAccessState, type AccessState } from '../src/shared/access.js';
+import { ACCESS_MODES, accessFile, authorizeOperation, createGrant, inspectAccessPolicyFile, isAccessMode, loadAccessState, modeForActor, parseDuration, resolveMode, updateAccessState } from '../src/shared/access.js';
 import { REACH_CAPABILITIES, type ReachCapability } from '../src/shared/capabilities.js';
 import { AuditLog, auditFile } from '../src/shared/audit.js';
+import { listReceipts, verifyReceipt } from '../src/shared/receipts.js';
 import { readRuntimeStatus, runtimeFile } from '../src/node/runtime-status.js';
 import type { AccessMode, ClientKind, ReachProfile } from '../src/shared/protocol.js';
 import { arg, flag, localNodeIds, nodeEnvFile, readEnvFile } from './lib/node-files.js';
@@ -30,6 +31,7 @@ function usage(): never {
   audit [--limit 20] [--client chatgpt]
   grant <client> <capability> --root <path> --for 30m [--max-uses N]
   grants                          list capability grants
+  receipts [--limit 20]           verify and list recent signed node receipts
   grant-clear <client>            remove grants and stop requiring grants for that client
   explain <client> <operation> [--path PATH]
   policy-check                    validate policy schema and built-in safety assertions
@@ -85,16 +87,30 @@ async function status(): Promise<void> {
 }
 
 async function setMode(mode: AccessMode): Promise<void> {
-  const nodeId = await pickNodeId(); const current = await loadAccessState(nodeId); const duration = arg('--for', argv); let next: AccessState;
-  if (duration) { const revertTo = current.until ? (current.revertTo ?? 'off') : resolveMode(current); next = { ...current, mode, until: new Date(Date.now() + parseDuration(duration)).toISOString(), revertTo }; }
-  else next = { ...current, mode, until: null, revertTo: null };
-  await saveAccessState(nodeId, next); console.log(`${nodeId}: AI access is now ${describeMode(mode)}${next.until ? remaining(next.until) + ` then reverts to ${next.revertTo}` : ''}.`); console.log('Takes effect immediately; no gateway contact required.');
+  const nodeId = await pickNodeId();
+  const duration = arg('--for', argv);
+  const next = await updateAccessState(nodeId, current => {
+    if (duration) {
+      const revertTo = current.until ? (current.revertTo ?? 'off') : resolveMode(current);
+      return { ...current, mode, until: new Date(Date.now() + parseDuration(duration)).toISOString(), revertTo };
+    }
+    return { ...current, mode, until: null, revertTo: null };
+  });
+  console.log(`${nodeId}: AI access is now ${describeMode(mode)}${next.until ? remaining(next.until) + ` then reverts to ${next.revertTo}` : ""}.`);
+  console.log('Takes effect immediately for new requests; an already-reserved in-flight request may finish. No gateway contact required.');
 }
 
 async function setClient(): Promise<void> {
-  const kind = argv[1] as ClientKind | undefined; const mode = argv[2]; if (!kind || !CLIENT_KINDS.includes(kind) || !mode || (mode !== 'default' && !isAccessMode(mode))) usage();
-  const nodeId = await pickNodeId(); const current = await loadAccessState(nodeId); const clients = { ...current.clients }; if (mode === 'default') delete clients[kind]; else clients[kind] = mode as AccessMode;
-  await saveAccessState(nodeId, { ...current, clients }); console.log(`${nodeId}: ${CLIENT_LABEL[kind]} limit is now ${mode === 'default' ? 'the node mode' : mode}.`);
+  const kind = argv[1] as ClientKind | undefined;
+  const mode = argv[2];
+  if (!kind || !CLIENT_KINDS.includes(kind) || !mode || (mode !== 'default' && !isAccessMode(mode))) usage();
+  const nodeId = await pickNodeId();
+  await updateAccessState(nodeId, current => {
+    const clients = { ...current.clients };
+    if (mode === 'default') delete clients[kind]; else clients[kind] = mode as AccessMode;
+    return { ...current, clients };
+  });
+  console.log(`${nodeId}: ${CLIENT_LABEL[kind]} limit is now ${mode === "default" ? "the node mode" : mode}.`);
 }
 async function auditCommand(): Promise<void> {
   const nodeId = await pickNodeId(); const limit = Number(arg('--limit', argv) || 20); const client = arg('--client', argv);
@@ -102,20 +118,37 @@ async function auditCommand(): Promise<void> {
   console.log(`Last ${events.length} AI requests to ${nodeId}:`); for (const e of events) console.log(formatAuditLine(e));
 }
 async function grantCommand(): Promise<void> {
-  const kind = argv[1] as ClientKind | undefined; const capability = argv[2] as ReachCapability | undefined;
+  const kind = argv[1] as ClientKind | undefined;
+  const capability = argv[2] as ReachCapability | undefined;
   if (!kind || !CLIENT_KINDS.includes(kind) || !capability || !REACH_CAPABILITIES.includes(capability)) usage();
-  const root = arg('--root', argv); const duration = arg('--for', argv); if (!root || !path.isAbsolute(root) || !duration) throw new Error('grant requires an absolute --root and --for duration');
-  const maxRaw = arg('--max-uses', argv); const maxUses = maxRaw ? Number(maxRaw) : null; if (maxUses !== null && (!Number.isInteger(maxUses) || maxUses <= 0)) throw new Error('--max-uses must be a positive integer');
-  const nodeId = await pickNodeId(); const env = await readEnvFile(nodeEnvFile(nodeId)); const allowedRoots = (env.DEX_REACH_ALLOWED_ROOTS || os.homedir()).split(path.delimiter); if (!pathAllowed(root, allowedRoots)) throw new Error("grant root is outside this node's configured allowed roots"); const current = await loadAccessState(nodeId); const next = createGrant(current, kind, [capability], [root], parseDuration(duration), maxUses); const errors = policyCheck(next); if (errors.length) throw new Error(`policy assertions failed: ${errors.join('; ')}`);
-  await saveAccessState(nodeId, next); const created = next.grants[next.grants.length - 1]!; console.log(`${nodeId}: grant ${created.id} now constrains ${CLIENT_LABEL[kind]} to ${capability} under ${root} until ${created.until}${maxUses ? ` (${maxUses} uses max)` : ''}.`);
+  const root = arg('--root', argv);
+  const duration = arg('--for', argv);
+  if (!root || !path.isAbsolute(root) || !duration) throw new Error('grant requires an absolute --root and --for duration');
+  const maxRaw = arg('--max-uses', argv);
+  const maxUses = maxRaw ? Number(maxRaw) : null;
+  if (maxUses !== null && (!Number.isInteger(maxUses) || maxUses <= 0)) throw new Error('--max-uses must be a positive integer');
+  const nodeId = await pickNodeId();
+  const env = await readEnvFile(nodeEnvFile(nodeId));
+  const allowedRoots = (env.DEX_REACH_ALLOWED_ROOTS || os.homedir()).split(path.delimiter);
+  if (!pathAllowed(root, allowedRoots)) throw new Error("grant root is outside this node's configured allowed roots");
+  const next = await updateAccessState(nodeId, current => createGrant(current, kind, [capability], [root], parseDuration(duration), maxUses));
+  const created = next.grants[next.grants.length - 1]!;
+  console.log(`${nodeId}: grant ${created.id} now constrains ${CLIENT_LABEL[kind]} to ${capability} under ${root} until ${created.until}${maxUses ? ` (${maxUses} uses max)` : ""}.`);
 }
 async function grantsCommand(): Promise<void> {
   const nodeId = await pickNodeId(); const state = await loadAccessState(nodeId); console.log(`Capability grants for ${nodeId}:`); if (!state.grants.length) console.log('(none)');
   for (const g of state.grants) console.log(`${g.id}  ${g.client}  ${g.capabilities.join(',')}  roots=${g.roots.join(',')}  uses=${g.uses}${g.maxUses === null ? '' : '/' + g.maxUses}  until=${g.until}`);
 }
 async function grantClearCommand(): Promise<void> {
-  const kind = argv[1] as ClientKind | undefined; if (!kind || !CLIENT_KINDS.includes(kind)) usage(); const nodeId = await pickNodeId(); const state = await loadAccessState(nodeId); const grantRequired = { ...state.grantRequired }; delete grantRequired[kind];
-  await saveAccessState(nodeId, { ...state, grantRequired, grants: state.grants.filter(g => g.client !== kind) }); console.log(`${nodeId}: cleared ${CLIENT_LABEL[kind]} grants and restored normal node/client policy behavior.`);
+  const kind = argv[1] as ClientKind | undefined;
+  if (!kind || !CLIENT_KINDS.includes(kind)) usage();
+  const nodeId = await pickNodeId();
+  await updateAccessState(nodeId, current => {
+    const grantRequired = { ...current.grantRequired };
+    delete grantRequired[kind];
+    return { ...current, grantRequired, grants: current.grants.filter(grant => grant.client !== kind) };
+  });
+  console.log(`${nodeId}: cleared ${CLIENT_LABEL[kind]} grants and restored normal node/client policy behavior.`);
 }
 async function explainCommand(): Promise<void> {
   const kind = argv[1] as ClientKind | undefined; const operation = argv[2]; if (!kind || !CLIENT_KINDS.includes(kind) || !operation) usage();
@@ -123,7 +156,20 @@ async function explainCommand(): Promise<void> {
   const decision = authorizeOperation(state, { kind, clientId: 'local-explain', clientName: CLIENT_LABEL[kind] }, operation, profile, Date.now(), args); console.log(JSON.stringify({ nodeId, kind, operation, args, decision }, null, 2));
 }
 async function policyCheckCommand(): Promise<void> {
-  const nodeId = await pickNodeId(); const errors = policyCheck(await loadAccessState(nodeId)); if (errors.length) throw new Error(`policy check failed: ${errors.join('; ')}`); console.log(`${nodeId}: policy check PASS (schema + OFF/read-only invariants + grant validation).`);
+  const nodeId = await pickNodeId();
+  const inspection = await inspectAccessPolicyFile(nodeId);
+  if (!inspection.valid) throw new Error(`policy check failed: ${inspection.errors.join("; ")}`);
+  console.log(`${nodeId}: policy check PASS (schema v${inspection.state.version}, revision ${inspection.state.revision}, OFF/read-only invariants + grant validation).`);
+}
+
+async function receiptsCommand(): Promise<void> {
+  const nodeId = await pickNodeId();
+  const limit = Math.max(1, Math.min(Number(arg('--limit', argv) || 20), 100));
+  const receipts = await listReceipts(nodeId, limit);
+  const linear = receipts.length <= 1 || receipts.every((receipt, index) => index === 0 || receipt.previousHash === receipts[index - 1]!.receiptHash);
+  const signatures = receipts.every(receipt => verifyReceipt(receipt));
+  console.log(`Recent signed receipts for ${nodeId}: ${receipts.length} (signatures=${signatures ? "PASS" : "FAIL"}, returned-chain=${linear ? "PASS" : "PARTIAL"})`);
+  for (const receipt of receipts) console.log(`  ${receipt.at}  ${receipt.ok ? "ok" : "REFUSED"}  ${receipt.operation}  id=${receipt.receiptId}  hash=${receipt.receiptHash.slice(0, 12)}…`);
 }
 async function uninstall(): Promise<void> {
   const nodeId = await pickNodeId();
@@ -145,6 +191,7 @@ try {
     case 'audit': await auditCommand(); break;
     case 'grant': await grantCommand(); break;
     case 'grants': await grantsCommand(); break;
+    case 'receipts': await receiptsCommand(); break;
     case 'grant-clear': await grantClearCommand(); break;
     case 'explain': await explainCommand(); break;
     case 'policy-check': await policyCheckCommand(); break;

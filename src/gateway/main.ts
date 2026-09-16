@@ -14,6 +14,7 @@ import { NodeAuthStore } from './node-auth.js';
 import { createReachMcpServer } from './mcp.js';
 import { classifyClient } from '../shared/access.js';
 import type { RequestActor } from '../shared/protocol.js';
+import { DEX_REACH_VERSION } from '../shared/version.js';
 
 loadLocalSecrets();
 const config = loadGatewayConfig();
@@ -63,7 +64,7 @@ app.use((req, res, next) => {
 });
 
 app.get('/healthz', (_req, res) => {
-  res.json({ ok: true, service: 'DEX//REACH', version: '0.3.0', onlineNodes: registry.listNodes().length });
+  res.json({ ok: true, service: 'DEX//REACH', version: DEX_REACH_VERSION, onlineNodes: registry.listNodes().length });
 });
 
 app.post('/dex/approve', async (req, res) => {

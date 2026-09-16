@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { NodeRegistry } from './registry.js';
 import type { AuditLog } from '../shared/audit.js';
 import type { RequestActor } from '../shared/protocol.js';
+import { DEX_REACH_VERSION } from '../shared/version.js';
 
 const NODE_ID_HINT = 'Target node ID exactly as returned by reach_list_nodes (for example "macbook-air.local"). Never guess; each node is a different machine.';
 
@@ -14,7 +15,7 @@ function text(value: unknown) {
 }
 
 export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, clientId = 'unknown', actor?: RequestActor): McpServer {
-  const server = new McpServer({ name: 'DEX//REACH', version: '0.3.0' });
+  const server = new McpServer({ name: 'DEX//REACH', version: DEX_REACH_VERSION });
 
   const routed = async (nodeId: string, operation: string, args: Record<string, unknown>) => {
     const started = Date.now();
@@ -107,7 +108,7 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
 
   server.registerTool('reach_process_run', {
     title: 'Run Shell Command',
-    description: 'Run a bounded, time-limited shell command on the selected node and return stdout, stderr, and exit code. Guarded by REACH Guard (blocked destructive patterns) and the node\'s allowed roots. Mutating: the command may change the machine.',
+    description: 'Run a bounded, time-limited shell command on the selected node. The working directory must be inside configured roots and destructive command classes are blocked. In ON mode this is still an arbitrary-shell capability, not an OS filesystem sandbox; prefer typed operations or capability grants when possible.',
     inputSchema: {
       node_id: z.string().min(1).describe(NODE_ID_HINT),
       command: z.string().min(1).describe('Shell command line to execute.'),
@@ -122,7 +123,7 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
     description: 'Create a short-lived, one-use execution plan for an exact operation and arguments on one node. The node re-authorizes the target operation locally, records the current policy hash, and attempts a Git checkpoint when relevant. Planning does not execute the target operation.',
     inputSchema: {
       node_id: z.string().min(1).describe(NODE_ID_HINT),
-      operation: z.string().min(1).describe('Exact target operation such as dex.file.write or dex.process.run.'),
+      operation: z.enum(['dex.file.write', 'dex.process.run', 'dex.checkpoint', 'dc.call']).describe('Exact supported mutating target operation.'),
       arguments: z.record(z.string(), z.unknown()).default({}).describe('Exact target arguments that must match the later commit.')
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
