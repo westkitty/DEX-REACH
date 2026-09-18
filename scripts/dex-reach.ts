@@ -11,6 +11,8 @@ import { REACH_CAPABILITIES, type ReachCapability } from '../src/shared/capabili
 import { AuditLog, auditFile } from '../src/shared/audit.js';
 import { listReceipts, verifyReceipt } from '../src/shared/receipts.js';
 import { readRuntimeStatus, runtimeFile } from '../src/node/runtime-status.js';
+import { portfolio, resolveProject } from '../src/node/projects.js';
+import { createCheckpoint } from '../src/node/native.js';
 import type { AccessMode, ClientKind, ReachProfile } from '../src/shared/protocol.js';
 import { arg, flag, localNodeIds, nodeEnvFile, readEnvFile } from './lib/node-files.js';
 
@@ -32,6 +34,9 @@ function usage(): never {
   grant <client> <capability> --root <path> --for 30m [--max-uses N]
   grants                          list capability grants
   receipts [--limit 20]           verify and list recent signed node receipts
+  projects [--root PATH] [--depth N] [--json]  discover local Git projects and show portfolio status
+  dirty [--root PATH] [--depth N] [--json]     show only projects with uncommitted changes
+  project <query> [info|checkpoint] [--json]   inspect or checkpoint one uniquely matched project
   grant-clear <client>            remove grants and stop requiring grants for that client
   explain <client> <operation> [--path PATH]
   policy-check                    validate policy schema and built-in safety assertions
@@ -171,6 +176,73 @@ async function receiptsCommand(): Promise<void> {
   console.log(`Recent signed receipts for ${nodeId}: ${receipts.length} (signatures=${signatures ? "PASS" : "FAIL"}, returned-chain=${linear ? "PASS" : "PARTIAL"})`);
   for (const receipt of receipts) console.log(`  ${receipt.at}  ${receipt.ok ? "ok" : "REFUSED"}  ${receipt.operation}  id=${receipt.receiptId}  hash=${receipt.receiptHash.slice(0, 12)}…`);
 }
+
+function configuredRoots(env: Record<string, string>): string[] {
+  return (env.DEX_REACH_ALLOWED_ROOTS || os.homedir()).split(path.delimiter).filter(Boolean);
+}
+
+function defaultPortfolioRoots(allowedRoots: string[]): string[] {
+  const home = os.homedir();
+  return pathAllowed(home, allowedRoots) ? [home] : allowedRoots.slice(0, 1);
+}
+
+async function portfolioCommand(onlyDirty = false): Promise<void> {
+  const nodeId = await pickNodeId();
+  const env = await readEnvFile(nodeEnvFile(nodeId));
+  const allowedRoots = configuredRoots(env);
+  const requestedRoot = arg('--root', argv);
+  let roots = defaultPortfolioRoots(allowedRoots);
+  if (requestedRoot) {
+    if (!path.isAbsolute(requestedRoot)) throw new Error('--root must be an absolute path');
+    if (!pathAllowed(requestedRoot, allowedRoots)) throw new Error("requested project root is outside this node's configured allowed roots");
+    roots = [requestedRoot];
+  }
+  const depthRaw = Number(arg('--depth', argv) || 3);
+  if (!Number.isInteger(depthRaw) || depthRaw < 0 || depthRaw > 8) throw new Error('--depth must be an integer from 0 through 8');
+  let projects = await portfolio(roots, { maxDepth: depthRaw });
+  if (onlyDirty) projects = projects.filter(project => project.dirty);
+  if (flag('--json', argv)) {
+    console.log(JSON.stringify({ nodeId, roots, count: projects.length, projects }, null, 2));
+    return;
+  }
+  const heading = onlyDirty ? 'Dirty Git projects' : 'Git project portfolio';
+  console.log(`${heading} for ${nodeId}: ${projects.length}`);
+  for (const project of projects) {
+    const sync = project.ahead === null ? '' : ` ↑${project.ahead} ↓${project.behind}`;
+    const dirty = project.dirty ? `DIRTY(${project.changes})` : 'clean';
+    console.log(`${dirty.padEnd(12)} ${project.branch.padEnd(28)}${sync.padEnd(10)} ${project.path}`);
+  }
+}
+
+async function projectCommand(): Promise<void> {
+  const query = argv[1];
+  const action = argv[2] && !argv[2]!.startsWith('--') ? argv[2] : 'info';
+  if (!query || !['info', 'checkpoint'].includes(action)) usage();
+  const nodeId = await pickNodeId();
+  const env = await readEnvFile(nodeEnvFile(nodeId));
+  const allowedRoots = configuredRoots(env);
+  const roots = defaultPortfolioRoots(allowedRoots);
+  const projects = await portfolio(roots, { maxDepth: 3 });
+  const project = resolveProject(query, projects);
+  if (action === 'checkpoint') {
+    const checkpoint = await createCheckpoint(project.path);
+    console.log(JSON.stringify({ nodeId, project, checkpoint }, null, 2));
+    return;
+  }
+  if (flag('--json', argv)) console.log(JSON.stringify({ nodeId, project }, null, 2));
+  else {
+    console.log([
+      project.name,
+      `Path:     ${project.path}`,
+      `Branch:   ${project.branch}`,
+      `Remote:   ${project.remote ?? '(none)'}`,
+      `Status:   ${project.dirty ? `DIRTY (${project.changes} changes)` : 'clean'}`,
+      `Upstream: ${project.upstream ?? '(none)'}`,
+      `Sync:     ${project.ahead === null ? 'unknown' : `ahead ${project.ahead}, behind ${project.behind}`}`
+    ].join('\n'));
+  }
+}
+
 async function uninstall(): Promise<void> {
   const nodeId = await pickNodeId();
   if (process.platform === 'darwin') { const label = 'com.stinkyweasel.dex-reach.node'; const plist = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`); try { await execFileAsync('launchctl', ['bootout', `gui/${process.getuid?.() ?? os.userInfo().uid}`, plist]); } catch {} await fs.rm(plist, { force: true }); console.log(`Removed launchd service ${label} (if installed).`); }
@@ -192,6 +264,9 @@ try {
     case 'grant': await grantCommand(); break;
     case 'grants': await grantsCommand(); break;
     case 'receipts': await receiptsCommand(); break;
+    case 'projects': await portfolioCommand(false); break;
+    case 'dirty': await portfolioCommand(true); break;
+    case 'project': await projectCommand(); break;
     case 'grant-clear': await grantClearCommand(); break;
     case 'explain': await explainCommand(); break;
     case 'policy-check': await policyCheckCommand(); break;

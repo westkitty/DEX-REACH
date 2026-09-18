@@ -161,6 +161,10 @@ npm run dex -- policy-check
 npm run dex -- grant chatgpt file.write --root "$HOME/projects" --for 20m --max-uses 6
 npm run dex -- explain chatgpt dex.file.write --path "$HOME/projects/example.txt"
 npm run dex -- grants
+npm run dex -- projects
+npm run dex -- dirty
+npm run dex -- project DEX-REACH info
+npm run dex -- project Atlas_Of_One checkpoint
 ```
 
 ### Access modes
