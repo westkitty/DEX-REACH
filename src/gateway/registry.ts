@@ -4,6 +4,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import type { NodeAuthStore } from './node-auth.js';
 import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor } from '../shared/protocol.js';
 import { addRevokedNode, loadRevokedNodes } from '../shared/revoked-nodes.js';
+import { familiarForNode } from '../shared/familiar.js';
 
 export type NodeRecord = {
   hello: NodeHello;
@@ -88,7 +89,14 @@ export class NodeRegistry {
       toolCount: record.hello.tools.length,
       agentVersion: record.hello.agentVersion,
       connectedAt: new Date(record.connectedAt).toISOString(),
-      lastSeenAt: new Date(record.lastSeenAt).toISOString()
+      lastSeenAt: new Date(record.lastSeenAt).toISOString(),
+      familiar: familiarForNode({
+        nodeId: record.hello.nodeId,
+        online: record.socket.readyState === WebSocket.OPEN,
+        access: record.access,
+        sequence: record.lastSeenAt,
+        now: record.lastSeenAt
+      })
     }));
   }
 
