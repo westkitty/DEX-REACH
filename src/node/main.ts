@@ -25,6 +25,7 @@ import { appendReceipt, listReceipts } from '../shared/receipts.js';
 import { consumePlan, createPlan, hashValue, sweepExpiredPlans } from '../shared/plans.js';
 import { writeRuntimeStatus } from './runtime-status.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
+import { checkpointStrategyFor, plannableOperations } from '../shared/operations.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -84,7 +85,7 @@ function identityCwdForPlan(args: Record<string, unknown>): string {
 }
 
 async function checkpointForPlan(operation: string, args: Record<string, unknown>): Promise<string | null> {
-  if (!['dex.file.write', 'dex.process.run', 'dc.call'].includes(operation)) return null;
+  if (checkpointStrategyFor(operation) === 'none') return null;
   const cwdCandidate = identityCwdForPlan(args);
   try {
     return String((await createCheckpoint(cwdCandidate) as { id: string }).id);
@@ -96,7 +97,7 @@ async function checkpointForPlan(operation: string, args: Record<string, unknown
 async function buildPlan(actor: RequestActor | undefined, args: Record<string, unknown>): Promise<unknown> {
   const operation = String(args.operation || '');
   const targetArgs = (args.arguments || {}) as Record<string, unknown>;
-  if (!['dex.file.write', 'dex.process.run', 'dex.checkpoint', 'dc.call'].includes(operation)) throw new Error('plan target must be dex.file.write, dex.process.run, dex.checkpoint, or dc.call');
+  if (!plannableOperations().includes(operation)) throw new Error(`plan target must be ${plannableOperations().join(', ')}`);
   const state = await loadAccessState(config.nodeId);
   const decision = authorizeOperation(state, actor, operation, config.profile, Date.now(), targetArgs);
   if (!decision.allowed) throw new Error(decision.reason);

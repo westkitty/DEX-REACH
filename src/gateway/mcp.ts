@@ -4,6 +4,7 @@ import type { NodeRegistry } from './registry.js';
 import type { AuditLog } from '../shared/audit.js';
 import type { RequestActor } from '../shared/protocol.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
+import { PLAN_TARGET_OPERATIONS } from '../shared/operations.js';
 
 const NODE_ID_HINT = 'Target node ID exactly as returned by reach_list_nodes (for example "macbook-air.local"). Never guess; each node is a different machine.';
 const EXECUTION_IDENTITY_EXPECTATION = z.object({
@@ -143,7 +144,7 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
     description: 'Create a short-lived, one-use execution plan for an exact operation and arguments on one node. The node re-authorizes the target operation locally, records the current policy hash, and attempts a Git checkpoint when relevant. Planning does not execute the target operation.',
     inputSchema: {
       node_id: z.string().min(1).describe(NODE_ID_HINT),
-      operation: z.enum(['dex.file.write', 'dex.process.run', 'dex.checkpoint', 'dc.call']).describe('Exact supported mutating target operation.'),
+      operation: z.enum(PLAN_TARGET_OPERATIONS).describe('Exact supported mutating target operation.'),
       arguments: z.record(z.string(), z.unknown()).default({}).describe('Exact target arguments that must match the later commit.'),
       expected_identity: EXECUTION_IDENTITY_EXPECTATION.optional().describe('Optional expected execution identity. If supplied, planning fails before mutation when any supplied field differs. Every successful plan also locks the fresh fingerprint and rechecks it at commit time.')
     },

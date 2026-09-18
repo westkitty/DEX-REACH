@@ -427,7 +427,7 @@ Before changing execution, routing, authentication, policy, or install behavior,
 ├── src/
 │   ├── gateway/          # OAuth, MCP server, node registry, routing, audit
 │   ├── node/             # node connection, native execution, local enforcement
-│   └── shared/           # protocol, access policy, guardrails, work coordination, shared helpers
+│   └── shared/           # protocol, access policy, operation catalog, guardrails, work coordination
 ├── scripts/              # bootstrap, install, credentials, smoke, simulations, local CLI
 ├── tests/                # access, auth, routing, security, native, audit, result-store, coordinator tests
 ├── docs/

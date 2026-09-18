@@ -8,6 +8,7 @@ import { executionFingerprint } from '../shared/fingerprint.js';
 import { canonicalPathForScope, commandGuard, pathAllowed, parseReadonlyCommand } from '../shared/security.js';
 import type { ReachProfile } from '../shared/protocol.js';
 import { stateDir } from '../shared/local-env.js';
+import { describeOperation } from '../shared/operations.js';
 
 const execFileAsync = promisify(execFile);
 const SENSITIVE_ENV_KEY = /(^DEX_REACH_(?:NODE_TOKEN|OWNER_PASSWORD|ENV_FILE)$|TOKEN|PASSWORD|PASSWD|SECRET|AUTHORIZATION|COOKIE|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)/i;
@@ -152,6 +153,13 @@ export function defaultCwd(roots: string[]): string {
 }
 
 export async function nativeCall(nodeId: string, operation: string, args: Record<string, unknown>, roots: string[], profile: ReachProfile): Promise<unknown> {
+  // Second, independent READ-ONLY check driven by the operation catalog. Policy already refuses
+  // these before routing; this repeats the refusal at the executor so a future caller that reaches
+  // nativeCall by another path cannot mutate under a read-only profile.
+  const descriptor = describeOperation(operation);
+  if (profile === 'read-only' && descriptor && !descriptor.readOnlyAllowed) {
+    throw new Error(`read-only profile does not permit ${operation}`);
+  }
   switch (operation) {
     case 'dex.fingerprint':
       return executionFingerprint(nodeId, scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd'));

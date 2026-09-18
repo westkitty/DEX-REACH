@@ -1,5 +1,6 @@
 import type { ClientKind } from './protocol.js';
 import { extractPaths, pathAllowed } from './security.js';
+import { describeOperation } from './operations.js';
 
 export type ReachCapability =
   | 'inspect'
@@ -24,13 +25,16 @@ export type CapabilityGrant = {
   createdAt: string;
 };
 
+/**
+ * Capability required by an operation, read from the central operation catalog.
+ *
+ * An operation outside the catalog resolves to `inspect`, the narrowest capability, which is what
+ * this function has always done. That is deliberately not a way in: an unknown operation is refused
+ * by the node executor before it can do anything, and grant matching against `inspect` cannot widen
+ * authority. Callers that must classify before acting use `requireOperation` instead, which throws.
+ */
 export function operationCapability(operation: string): ReachCapability {
-  if (operation === 'dex.file.read' || operation === 'dex.result.read' || operation === 'dex.receipts.list') return 'file.read';
-  if (operation === 'dex.file.write') return 'file.write';
-  if (operation === 'dex.checkpoint') return 'checkpoint';
-  if (operation === 'dex.process.run') return 'process.shell';
-  if (operation === 'dc.call') return 'compat';
-  return 'inspect';
+  return describeOperation(operation)?.capability ?? 'inspect';
 }
 
 /** All path-bearing request arguments, including plural compatibility-tool arrays. */

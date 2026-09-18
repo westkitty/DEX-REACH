@@ -6,6 +6,7 @@ import { stateDir } from './local-env.js';
 import { operationCapability, requestPaths, rootsCover, type CapabilityGrant, type ReachCapability } from './capabilities.js';
 import { atomicWriteFile, withFileLock } from './state-io.js';
 import { hashValue } from './hash.js';
+import { readOnlyDelegatedOperations, readOnlyInspectOperations } from './operations.js';
 
 export type AccessState = {
   version: 3;
@@ -21,7 +22,11 @@ export type AccessState = {
 
 export const ACCESS_MODES: readonly AccessMode[] = ['off', 'read-only', 'on'];
 const RANK: Record<AccessMode, number> = { off: 0, 'read-only': 1, on: 2 };
-const READ_OPERATIONS = new Set(['dex.fingerprint', 'dex.trustReport', 'dex.repoInfo', 'dex.adbDevices', 'dex.file.read', 'dex.result.read', 'dex.receipts.list']);
+// READ-ONLY admission is derived from the operation catalog rather than restated here. Inspect
+// operations are served directly; delegated ones (shell and compatibility calls) are admitted by
+// policy and then constrained by the node's shell-free grammar and tool allowlist.
+const READ_OPERATIONS = new Set(readOnlyInspectOperations());
+const READ_DELEGATED_OPERATIONS = new Set(readOnlyDelegatedOperations());
 
 export function isAccessMode(value: unknown): value is AccessMode {
   return typeof value === 'string' && (ACCESS_MODES as string[]).includes(value);
@@ -178,7 +183,7 @@ export function authorizeOperation(state: AccessState, actor: RequestActor | und
   if (mode === 'off') return { allowed: false, reason: `NODE OWNER has disabled remote AI execution ${scope}; ${operation} from ${who} was refused locally` };
   if (mode === 'read-only') {
     if (READ_OPERATIONS.has(operation)) return { allowed: true, effectiveProfile: 'read-only' };
-    if (operation === 'dex.process.run' || operation === 'dc.call') return { allowed: true, effectiveProfile: 'read-only' };
+    if (READ_DELEGATED_OPERATIONS.has(operation)) return { allowed: true, effectiveProfile: 'read-only' };
     return { allowed: false, reason: `NODE OWNER limited remote AI access to read-only ${scope}; ${operation} from ${who} is a mutation and was refused locally` };
   }
   const kind = actor?.kind ?? 'other';
