@@ -1,0 +1,584 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { stateDir } from './local-env.js';
+import { atomicWriteFile, withFileLock } from './state-io.js';
+import {
+  type AccessClass,
+  type MachineCapacity,
+  type ObservedWorkloads,
+  type WorkloadClass,
+  evaluateCapacity,
+  isSubstantive,
+  observeWorkloads,
+  probeHost
+} from './machine-capacity.js';
+
+export const WORK_EXECUTORS = ['claude-code', 'chatgpt', 'codex', 'grok', 'human', 'other'] as const;
+export type WorkExecutor = (typeof WORK_EXECUTORS)[number];
+
+export const WORK_ACCESS_CLASSES: readonly AccessClass[] = ['read', 'mutate', 'exclusive'];
+export const WORK_WORKLOAD_CLASSES: readonly WorkloadClass[] = ['light', 'medium', 'heavy'];
+
+/** Publish a heartbeat about this often. */
+export const HEARTBEAT_INTERVAL_MS = 30_000;
+/** A lease is only a reclaim candidate after several missed heartbeats, never after one late one. */
+export const LEASE_STALE_MS = 5 * HEARTBEAT_INTERVAL_MS;
+export const TICKET_STALE_MS = 5 * HEARTBEAT_INTERVAL_MS;
+/** Bounded history so coordination state cannot grow without limit. */
+export const HISTORY_LIMIT = 200;
+
+const MAX_LABEL_LENGTH = 64;
+
+/**
+ * Coordination metadata only. There is deliberately no capability, grant, root, token, mode or
+ * profile field here: holding a lease answers "can this run now?" and never "is this allowed?"
+ * (DEX-INV-022).
+ */
+export type WorkLease = {
+  id: string;
+  pid: number;
+  parentPid?: number;
+  executor: WorkExecutor;
+  repositoryRoot?: string;
+  branch?: string;
+  access: AccessClass;
+  workload: WorkloadClass;
+  phase?: string;
+  createdAt: string;
+  heartbeatAt: string;
+};
+
+export type WorkQueueTicket = {
+  id: string;
+  pid: number;
+  executor: WorkExecutor;
+  repositoryRoot?: string;
+  access: AccessClass;
+  workload: WorkloadClass;
+  phase?: string;
+  enqueuedAt: string;
+  heartbeatAt: string;
+};
+
+/** Exact persisted key sets. Anything else is dropped on write and ignored on read. */
+export const LEASE_FIELDS: readonly (keyof WorkLease)[] = [
+  'id', 'pid', 'parentPid', 'executor', 'repositoryRoot', 'branch', 'access', 'workload', 'phase', 'createdAt', 'heartbeatAt'
+];
+export const TICKET_FIELDS: readonly (keyof WorkQueueTicket)[] = [
+  'id', 'pid', 'executor', 'repositoryRoot', 'access', 'workload', 'phase', 'enqueuedAt', 'heartbeatAt'
+];
+
+export type WorkRequest = {
+  executor: WorkExecutor;
+  access: AccessClass;
+  workload: WorkloadClass;
+  repositoryRoot?: string;
+  branch?: string;
+  phase?: string;
+  /** Present when re-attempting an existing queue position. */
+  ticketId?: string;
+  pid?: number;
+  parentPid?: number;
+  /**
+   * Host measurement to decide against. Callers normally omit this and the host is measured here;
+   * supplying it lets a caller reuse one measurement across a poll loop, and lets tests exercise
+   * admission policy against a fixed host rather than whatever the runner happens to be doing.
+   */
+  snapshot?: CapacitySnapshot;
+};
+
+export type CoordinatorState = {
+  leases: WorkLease[];
+  tickets: WorkQueueTicket[];
+  /** True when any coordination file was unreadable or malformed. Forces conservative admission. */
+  degraded: boolean;
+  degradedReasons: string[];
+};
+
+export type AdmissionResult =
+  | { status: 'acquired'; lease: WorkLease; capacity: MachineCapacity }
+  | { status: 'queued'; ticket: WorkQueueTicket; position: number; capacity: MachineCapacity; reasons: string[] };
+
+export type WorkStatus = {
+  capacity: MachineCapacity;
+  leases: WorkLease[];
+  tickets: WorkQueueTicket[];
+  observed: ObservedWorkloads;
+  degraded: boolean;
+  degradedReasons: string[];
+};
+
+// ---------------------------------------------------------------------------
+// Paths
+// ---------------------------------------------------------------------------
+
+export function coordinatorDir(): string { return path.join(stateDir(), 'coordinator'); }
+export function leasesDir(): string { return path.join(coordinatorDir(), 'leases'); }
+export function queueDir(): string { return path.join(coordinatorDir(), 'queue'); }
+export function historyFile(): string { return path.join(coordinatorDir(), 'history', 'events.jsonl'); }
+export function coordinatorLockFile(): string { return path.join(coordinatorDir(), 'coordinator.lock'); }
+
+async function ensureLayout(): Promise<void> {
+  for (const dir of [coordinatorDir(), leasesDir(), queueDir(), path.dirname(historyFile())]) {
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Input validation. Coordination metadata is coordination metadata: no prompt
+// bodies, no transcripts, no credentials (DEX-INV-026).
+// ---------------------------------------------------------------------------
+
+const SAFE_LABEL = /^[A-Za-z0-9._\-/ ]+$/;
+
+/**
+ * Reject values that look like credential material. A label is a short human word such as
+ * "phase-0a" or "verify"; a long mixed-case alphanumeric run is a token, not a label.
+ */
+export function looksLikeSecretMaterial(value: string): boolean {
+  for (const token of value.split(/[^A-Za-z0-9]+/)) {
+    if (token.length < 20) continue;
+    if (/[a-z]/.test(token) && /[A-Z]/.test(token) && /\d/.test(token)) return true;
+  }
+  return false;
+}
+
+export function sanitizeLabel(value: string | undefined, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > MAX_LABEL_LENGTH) throw new Error(`${field} must be at most ${MAX_LABEL_LENGTH} characters; it is a short label, not free text`);
+  if (!SAFE_LABEL.test(trimmed)) throw new Error(`${field} may contain only letters, digits, spaces and . _ - /`);
+  if (looksLikeSecretMaterial(trimmed)) throw new Error(`${field} looks like credential material; coordination state stores labels only`);
+  return trimmed;
+}
+
+/** Canonical absolute repository path so two spellings of the same repo cannot both hold it. */
+export async function canonicalRepositoryRoot(value: string | undefined): Promise<string | undefined> {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const resolved = path.resolve(trimmed);
+  try {
+    return await fs.realpath(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+function assertMember<T extends string>(value: string, allowed: readonly T[], field: string): T {
+  if (!(allowed as readonly string[]).includes(value)) throw new Error(`${field} must be one of: ${allowed.join(', ')}`);
+  return value as T;
+}
+
+// ---------------------------------------------------------------------------
+// Reading and writing coordination state
+// ---------------------------------------------------------------------------
+
+function pick<T extends object>(source: Record<string, unknown>, fields: readonly (keyof T)[]): T {
+  const out: Record<string, unknown> = {};
+  for (const field of fields) {
+    const value = source[field as string];
+    if (value !== undefined) out[field as string] = value;
+  }
+  return out as T;
+}
+
+function validLease(raw: unknown): WorkLease | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const record = raw as Record<string, unknown>;
+  if (typeof record.id !== 'string' || !record.id) return null;
+  if (typeof record.pid !== 'number' || !Number.isInteger(record.pid) || record.pid <= 0) return null;
+  if (typeof record.createdAt !== 'string' || typeof record.heartbeatAt !== 'string') return null;
+  if (!WORK_EXECUTORS.includes(record.executor as WorkExecutor)) return null;
+  if (!WORK_ACCESS_CLASSES.includes(record.access as AccessClass)) return null;
+  if (!WORK_WORKLOAD_CLASSES.includes(record.workload as WorkloadClass)) return null;
+  return pick<WorkLease>(record, LEASE_FIELDS);
+}
+
+function validTicket(raw: unknown): WorkQueueTicket | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const record = raw as Record<string, unknown>;
+  if (typeof record.id !== 'string' || !record.id) return null;
+  if (typeof record.pid !== 'number' || !Number.isInteger(record.pid) || record.pid <= 0) return null;
+  if (typeof record.enqueuedAt !== 'string' || typeof record.heartbeatAt !== 'string') return null;
+  if (!WORK_EXECUTORS.includes(record.executor as WorkExecutor)) return null;
+  if (!WORK_ACCESS_CLASSES.includes(record.access as AccessClass)) return null;
+  if (!WORK_WORKLOAD_CLASSES.includes(record.workload as WorkloadClass)) return null;
+  return pick<WorkQueueTicket>(record, TICKET_FIELDS);
+}
+
+async function readDirEntries(dir: string): Promise<string[]> {
+  try {
+    return (await fs.readdir(dir)).filter(name => name.endsWith('.json'));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+/**
+ * Read all coordination state. A malformed or unreadable file never widens admission: it marks the
+ * coordinator degraded, which collapses capacity to a single substantive job (DEX-INV-024).
+ */
+export async function readCoordinatorState(): Promise<CoordinatorState> {
+  const leases: WorkLease[] = [];
+  const tickets: WorkQueueTicket[] = [];
+  const degradedReasons: string[] = [];
+
+  for (const name of await readDirEntries(leasesDir())) {
+    try {
+      const lease = validLease(JSON.parse(await fs.readFile(path.join(leasesDir(), name), 'utf8')));
+      if (lease) leases.push(lease);
+      else degradedReasons.push(`lease file ${name} is malformed`);
+    } catch {
+      degradedReasons.push(`lease file ${name} is unreadable`);
+    }
+  }
+  for (const name of await readDirEntries(queueDir())) {
+    try {
+      const ticket = validTicket(JSON.parse(await fs.readFile(path.join(queueDir(), name), 'utf8')));
+      if (ticket) tickets.push(ticket);
+      else degradedReasons.push(`queue file ${name} is malformed`);
+    } catch {
+      degradedReasons.push(`queue file ${name} is unreadable`);
+    }
+  }
+
+  tickets.sort((a, b) => (a.enqueuedAt === b.enqueuedAt ? a.id.localeCompare(b.id) : a.enqueuedAt.localeCompare(b.enqueuedAt)));
+  return { leases, tickets, degraded: degradedReasons.length > 0, degradedReasons };
+}
+
+export function processAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but belongs to another user.
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * A lease is reclaimable only when its heartbeat is well past due AND its recorded process is gone.
+ * Reclaiming means the coordination claim expired; it never means terminate that workload
+ * (DEX-INV-025).
+ */
+export function leaseIsReclaimable(lease: WorkLease, now = Date.now()): boolean {
+  const age = now - Date.parse(lease.heartbeatAt);
+  if (!Number.isFinite(age) || age <= LEASE_STALE_MS) return false;
+  return !processAlive(lease.pid);
+}
+
+function ticketIsStale(ticket: WorkQueueTicket, now = Date.now()): boolean {
+  const age = now - Date.parse(ticket.heartbeatAt);
+  if (!Number.isFinite(age)) return true;
+  return age > TICKET_STALE_MS && !processAlive(ticket.pid);
+}
+
+async function appendHistory(event: Record<string, unknown>): Promise<void> {
+  const file = historyFile();
+  let lines: string[] = [];
+  try {
+    lines = (await fs.readFile(file, 'utf8')).split('\n').filter(Boolean);
+  } catch { /* first event */ }
+  lines.push(JSON.stringify({ at: new Date().toISOString(), ...event }));
+  await atomicWriteFile(file, lines.slice(-HISTORY_LIMIT).join('\n') + '\n');
+}
+
+async function writeLease(lease: WorkLease): Promise<void> {
+  await atomicWriteFile(path.join(leasesDir(), `${lease.id}.json`), JSON.stringify(pick<WorkLease>(lease as unknown as Record<string, unknown>, LEASE_FIELDS), null, 2) + '\n');
+}
+async function writeTicket(ticket: WorkQueueTicket): Promise<void> {
+  await atomicWriteFile(path.join(queueDir(), `${ticket.id}.json`), JSON.stringify(pick<WorkQueueTicket>(ticket as unknown as Record<string, unknown>, TICKET_FIELDS), null, 2) + '\n');
+}
+async function removeLeaseFile(id: string): Promise<void> { await fs.rm(path.join(leasesDir(), `${id}.json`), { force: true }); }
+async function removeTicketFile(id: string): Promise<void> { await fs.rm(path.join(queueDir(), `${id}.json`), { force: true }); }
+
+/** Drop expired coordination claims. Returns the surviving state. */
+async function pruneExpired(state: CoordinatorState, now = Date.now()): Promise<CoordinatorState> {
+  const leases: WorkLease[] = [];
+  for (const lease of state.leases) {
+    if (leaseIsReclaimable(lease, now)) {
+      await removeLeaseFile(lease.id);
+      await appendHistory({ event: 'lease-reclaimed', id: lease.id, executor: lease.executor, reason: 'heartbeat expired and process absent' });
+    } else {
+      leases.push(lease);
+    }
+  }
+  const tickets: WorkQueueTicket[] = [];
+  for (const ticket of state.tickets) {
+    if (ticketIsStale(ticket, now)) {
+      await removeTicketFile(ticket.id);
+      await appendHistory({ event: 'ticket-expired', id: ticket.id, executor: ticket.executor });
+    } else {
+      tickets.push(ticket);
+    }
+  }
+  return { ...state, leases, tickets };
+}
+
+// ---------------------------------------------------------------------------
+// Admission
+// ---------------------------------------------------------------------------
+
+export type CapacitySnapshot = {
+  physicalMemoryBytes: number;
+  logicalCpuCount: number;
+  loadAverage1m: number | null;
+  memory: MachineCapacity['livePressure']['memory'];
+  thermal: MachineCapacity['livePressure']['thermal'];
+  observed: ObservedWorkloads;
+};
+
+/**
+ * Measure the host outside the coordinator lock. The state lock and the workload lease are not the
+ * same thing: the lock is held only long enough to reserve capacity.
+ */
+export async function snapshotCapacity(): Promise<CapacitySnapshot> {
+  const state = await readCoordinatorState().catch(() => ({ leases: [] as WorkLease[] }));
+  const probe = await probeHost();
+  const observed = await observeWorkloads({ leasedPids: state.leases.map(lease => lease.pid) });
+  return {
+    physicalMemoryBytes: probe.physicalMemoryBytes,
+    logicalCpuCount: probe.logicalCpuCount,
+    loadAverage1m: probe.loadAverage1m,
+    memory: probe.memory,
+    thermal: probe.thermal,
+    observed
+  };
+}
+
+/**
+ * Pure admission decision over a state and a host snapshot. Kept separate from persistence so the
+ * policy is inspectable and testable without touching the filesystem.
+ */
+export function decideAdmission(
+  state: CoordinatorState,
+  snapshot: CapacitySnapshot,
+  request: { access: AccessClass; workload: WorkloadClass; repositoryRoot?: string; ticketId?: string }
+): { admit: boolean; capacity: MachineCapacity; reasons: string[] } {
+  const blocking: string[] = [];
+  const substantive = isSubstantive(request.workload, request.access);
+
+  // Corrupt or unreadable coordination state collapses to one substantive job (DEX-INV-024).
+  const degradedPenalty = state.degraded && substantive ? 1 : 0;
+  if (state.degraded && substantive) blocking.push(`coordinator state degraded (${state.degradedReasons.length} unreadable entr${state.degradedReasons.length === 1 ? 'y' : 'ies'}); falling back to single-substantive-job mode`);
+
+  // Repository mutation ownership is exclusive (DEX-INV-023).
+  if (request.access !== 'read' && request.repositoryRoot) {
+    const holder = state.leases.find(lease => lease.repositoryRoot === request.repositoryRoot && lease.access !== 'read');
+    if (holder) blocking.push(`repository ${request.repositoryRoot} is held for ${holder.access} by lease ${holder.id} (${holder.executor})`);
+  }
+
+  // Installation/deployment style work is machine-exclusive.
+  if (request.access === 'exclusive' && state.leases.length > 0) {
+    blocking.push(`exclusive work requires an otherwise idle machine; ${state.leases.length} lease(s) active`);
+  }
+  const machineExclusive = state.leases.find(lease => lease.access === 'exclusive');
+  if (machineExclusive && substantive) {
+    blocking.push(`lease ${machineExclusive.id} holds the machine exclusively`);
+  }
+
+  // FIFO: a new substantive request goes behind live tickets. Releasing and reacquiring therefore
+  // cannot jump the queue. Light read-only inspection is exempt because it takes no slot.
+  if (substantive) {
+    const ahead = state.tickets.filter(ticket => ticket.id !== request.ticketId);
+    const mine = request.ticketId ? state.tickets.findIndex(ticket => ticket.id === request.ticketId) : -1;
+    const blockedBy = mine >= 0 ? state.tickets.slice(0, mine) : ahead;
+    if (blockedBy.length) blocking.push(`${blockedBy.length} ticket(s) queued ahead`);
+  }
+
+  const activeSubstantive = state.leases.filter(lease => isSubstantive(lease.workload, lease.access)).length + degradedPenalty;
+  const activeHeavy = state.leases.filter(lease => lease.workload === 'heavy').length + degradedPenalty;
+
+  const capacity = evaluateCapacity(
+    {
+      physicalMemoryBytes: state.degraded ? 0 : snapshot.physicalMemoryBytes,
+      logicalCpuCount: state.degraded ? 0 : snapshot.logicalCpuCount,
+      loadAverage1m: snapshot.loadAverage1m,
+      memory: snapshot.memory,
+      thermal: snapshot.thermal
+    },
+    { activeSubstantive, activeHeavy, observedUncoordinatedHeavy: snapshot.observed.uncoordinatedHeavy },
+    { workload: request.workload, access: request.access }
+  );
+
+  if (!capacity.canAdmit) blocking.push(...capacity.reasons);
+  const reasons = blocking.length ? [...new Set(blocking)] : capacity.reasons;
+  return { admit: blocking.length === 0, capacity, reasons };
+}
+
+/**
+ * Reserve capacity, or take a queue position. Admission never grants execution authority: a job may
+ * be AUTHORIZED but QUEUED, or admitted here and still refused by DEX policy (DEX-INV-022).
+ */
+export async function acquireWork(request: WorkRequest): Promise<AdmissionResult> {
+  const executor = assertMember(request.executor, WORK_EXECUTORS, 'executor');
+  const access = assertMember(request.access, WORK_ACCESS_CLASSES, 'access');
+  const workload = assertMember(request.workload, WORK_WORKLOAD_CLASSES, 'workload');
+  const phase = sanitizeLabel(request.phase, 'phase');
+  const branch = sanitizeLabel(request.branch, 'branch');
+  const repositoryRoot = await canonicalRepositoryRoot(request.repositoryRoot);
+  const pid = request.pid ?? process.pid;
+  const parentPid = request.parentPid ?? process.ppid;
+
+  if (access !== 'read' && !repositoryRoot && access === 'mutate') {
+    throw new Error('mutating work must name the repository it will mutate (--repo)');
+  }
+
+  await ensureLayout();
+  const snapshot = request.snapshot ?? (await snapshotCapacity());
+
+  return withFileLock(coordinatorLockFile(), async () => {
+    const state = await pruneExpired(await readCoordinatorState());
+    const decision = decideAdmission(state, snapshot, { access, workload, repositoryRoot, ticketId: request.ticketId });
+    const now = new Date().toISOString();
+
+    if (decision.admit) {
+      const lease: WorkLease = {
+        id: `lease-${crypto.randomUUID()}`,
+        pid,
+        ...(Number.isInteger(parentPid) && parentPid > 0 ? { parentPid } : {}),
+        executor,
+        ...(repositoryRoot ? { repositoryRoot } : {}),
+        ...(branch ? { branch } : {}),
+        access,
+        workload,
+        ...(phase ? { phase } : {}),
+        createdAt: now,
+        heartbeatAt: now
+      };
+      await writeLease(lease);
+      if (request.ticketId) await removeTicketFile(request.ticketId);
+      await appendHistory({ event: 'lease-acquired', id: lease.id, executor, access, workload, phase: phase ?? null });
+      return { status: 'acquired', lease, capacity: decision.capacity };
+    }
+
+    const existing = request.ticketId ? state.tickets.find(ticket => ticket.id === request.ticketId) : undefined;
+    const ticket: WorkQueueTicket = existing
+      ? { ...existing, heartbeatAt: now }
+      : {
+          id: `ticket-${crypto.randomUUID()}`,
+          pid,
+          executor,
+          ...(repositoryRoot ? { repositoryRoot } : {}),
+          access,
+          workload,
+          ...(phase ? { phase } : {}),
+          enqueuedAt: now,
+          heartbeatAt: now
+        };
+    await writeTicket(ticket);
+    if (!existing) await appendHistory({ event: 'ticket-enqueued', id: ticket.id, executor, access, workload });
+
+    const queue = existing ? state.tickets : [...state.tickets, ticket];
+    const position = queue.findIndex(entry => entry.id === ticket.id) + 1;
+    return { status: 'queued', ticket, position, capacity: decision.capacity, reasons: decision.reasons };
+  }, { timeoutMs: 15_000 });
+}
+
+export type ReleaseResult = { released: boolean; reason?: string };
+
+/**
+ * Release a lease. By default only the holding process may release its own lease; `force` is a
+ * local owner override and is never available to a remote caller.
+ */
+export async function releaseWork(leaseId: string, options: { pid?: number; force?: boolean } = {}): Promise<ReleaseResult> {
+  await ensureLayout();
+  return withFileLock(coordinatorLockFile(), async () => {
+    const state = await readCoordinatorState();
+    const lease = state.leases.find(entry => entry.id === leaseId);
+    if (!lease) return { released: false, reason: `no active lease ${leaseId}` };
+    const pid = options.pid ?? process.pid;
+    if (!options.force && lease.pid !== pid && processAlive(lease.pid)) {
+      return { released: false, reason: `lease ${leaseId} belongs to live pid ${lease.pid}; use --force as the local owner to override` };
+    }
+    await removeLeaseFile(leaseId);
+    await appendHistory({ event: 'lease-released', id: leaseId, executor: lease.executor, forced: Boolean(options.force) });
+    return { released: true };
+  }, { timeoutMs: 15_000 });
+}
+
+export async function heartbeat(id: string): Promise<boolean> {
+  await ensureLayout();
+  return withFileLock(coordinatorLockFile(), async () => {
+    const state = await readCoordinatorState();
+    const now = new Date().toISOString();
+    const lease = state.leases.find(entry => entry.id === id);
+    if (lease) { await writeLease({ ...lease, heartbeatAt: now }); return true; }
+    const ticket = state.tickets.find(entry => entry.id === id);
+    if (ticket) { await writeTicket({ ...ticket, heartbeatAt: now }); return true; }
+    return false;
+  }, { timeoutMs: 15_000 });
+}
+
+/** Cancel exactly one ticket: the caller's. Cancelling never touches another waiter's position. */
+export async function cancelTicket(ticketId: string): Promise<boolean> {
+  await ensureLayout();
+  return withFileLock(coordinatorLockFile(), async () => {
+    const state = await readCoordinatorState();
+    if (!state.tickets.some(ticket => ticket.id === ticketId)) return false;
+    await removeTicketFile(ticketId);
+    await appendHistory({ event: 'ticket-cancelled', id: ticketId });
+    return true;
+  }, { timeoutMs: 15_000 });
+}
+
+export async function workStatus(options: { snapshot?: CapacitySnapshot } = {}): Promise<WorkStatus> {
+  await ensureLayout();
+  const snapshot = options.snapshot ?? (await snapshotCapacity());
+  const state = await pruneExpired(await readCoordinatorState());
+  const decision = decideAdmission(state, snapshot, { access: 'mutate', workload: 'medium' });
+  return {
+    capacity: decision.capacity,
+    leases: state.leases,
+    tickets: state.tickets,
+    observed: snapshot.observed,
+    degraded: state.degraded,
+    degradedReasons: state.degradedReasons
+  };
+}
+
+/**
+ * Share-safe projection. Repository paths, branches, PIDs and host memory size are local details
+ * and stay out of anything intended to leave the machine (DEX-INV-026).
+ */
+export function redactWorkStatusForShare(status: WorkStatus): Record<string, unknown> {
+  return {
+    substantiveSlots: status.capacity.substantiveSlots,
+    heavySlots: status.capacity.heavySlots,
+    logicalCpuCount: status.capacity.logicalCpuCount,
+    livePressure: status.capacity.livePressure,
+    activeLeases: status.leases.length,
+    activeHeavy: status.capacity.activeHeavy,
+    queueDepth: status.tickets.length,
+    observedUncoordinatedHeavy: status.observed.uncoordinatedHeavy,
+    dexServices: status.observed.dexServices,
+    degraded: status.degraded
+  };
+}
+
+/** One-line human summary for `dex status` and, later, `dex doctor`. */
+export function describeWorkStatus(status: WorkStatus): string[] {
+  const held = status.leases.map(lease => {
+    const where = lease.repositoryRoot ? path.basename(lease.repositoryRoot) : 'machine';
+    return `  ${lease.id.slice(0, 14)}… ${lease.executor.padEnd(11)} ${where} / ${lease.workload} / ${lease.access}${lease.phase ? ` / ${lease.phase}` : ''}`;
+  });
+  return [
+    `Machine capacity: ${status.capacity.substantiveSlots} substantive slot${status.capacity.substantiveSlots === 1 ? '' : 's'}, ${status.capacity.heavySlots} heavy`,
+    `Host:             ${(status.capacity.physicalMemoryBytes / 1024 ** 3).toFixed(1)} GiB RAM, ${status.capacity.logicalCpuCount} logical CPUs (${os.hostname()})`,
+    `Memory pressure:  ${status.capacity.livePressure.memory}`,
+    `CPU pressure:     ${status.capacity.livePressure.cpu}`,
+    `Thermal:          ${status.capacity.livePressure.thermal}`,
+    `Active leases:    ${status.leases.length}`,
+    ...(held.length ? held : ['  (none)']),
+    `Queue depth:      ${status.tickets.length}`,
+    `Uncoordinated heavy jobs: ${status.observed.uncoordinatedHeavy}`,
+    `DEX services observed:    ${status.observed.dexServices}`,
+    ...(status.degraded ? ['Coordinator:      DEGRADED — conservative single-substantive-job mode', ...status.degradedReasons.map(reason => `  ${reason}`)] : [])
+  ];
+}

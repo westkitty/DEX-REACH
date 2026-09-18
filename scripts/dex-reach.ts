@@ -15,6 +15,9 @@ import { portfolio, resolveProject } from '../src/node/projects.js';
 import { createCheckpoint } from '../src/node/native.js';
 import type { AccessMode, ClientKind, ReachProfile } from '../src/shared/protocol.js';
 import { arg, flag, localNodeIds, nodeEnvFile, readEnvFile } from './lib/node-files.js';
+import { WORK_ACCESS_CLASSES, WORK_EXECUTORS, WORK_WORKLOAD_CLASSES, acquireWork, cancelTicket, describeWorkStatus, heartbeat, redactWorkStatusForShare, releaseWork, workStatus } from '../src/shared/work-coordinator.js';
+import type { AccessClass, WorkloadClass } from '../src/shared/machine-capacity.js';
+import type { WorkExecutor } from '../src/shared/work-coordinator.js';
 
 const execFileAsync = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -41,6 +44,19 @@ function usage(): never {
   explain <client> <operation> [--path PATH]
   policy-check                    validate policy schema and built-in safety assertions
   uninstall [--purge-state --yes-delete-state]
+
+Shared-machine work coordination (resource admission only; grants no execution authority):
+  work-status [--json] [--share]  machine capacity, active leases, queue depth, observed load
+  work-queue [--json]             queued tickets in FIFO order
+  work-acquire --repo PATH --access read|mutate|exclusive --workload light|medium|heavy
+                [--executor claude-code|chatgpt|codex|grok|human|other] [--phase LABEL]
+                [--pid N] [--branch NAME] [--json]
+                --pid names the long-lived process that owns the work. Without it the lease is
+                owned by this short-lived command and must be kept alive by work-heartbeat.
+  work-release <lease-id> [--force]
+  work-wait <ticket-id> [--timeout 30m]   bounded polling until the ticket is admitted
+  work-cancel <ticket-id>
+  work-heartbeat <lease-or-ticket-id>
 
 Capabilities: ${REACH_CAPABILITIES.join(', ')}
 Options: --node <id> when more than one node credential exists locally.`);
@@ -253,6 +269,133 @@ async function uninstall(): Promise<void> {
   else console.log(`Local state under ${stateDir()} was preserved.`);
 }
 
+
+// --- Shared-machine work coordination -------------------------------------
+// These commands answer "can this run now?". They never answer "is this allowed?": owner mode,
+// client ceilings, grants, roots, profiles and plans are unaffected by any lease (DEX-INV-022).
+
+function workOption<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
+  const value = arg(name, argv);
+  if (value === undefined) return fallback;
+  if (!(allowed as readonly string[]).includes(value)) throw new Error(`${name} must be one of: ${allowed.join(', ')}`);
+  return value as T;
+}
+
+async function workStatusCommand(): Promise<void> {
+  const status = await workStatus();
+  if (flag('--share', argv)) { console.log(JSON.stringify(redactWorkStatusForShare(status), null, 2)); return; }
+  if (flag('--json', argv)) { console.log(JSON.stringify(status, null, 2)); return; }
+  console.log(describeWorkStatus(status).join('\n'));
+  console.log(`\nAdmission for a new medium mutating job: ${status.capacity.canAdmit ? 'AVAILABLE' : 'QUEUE'}`);
+  for (const reason of status.capacity.reasons) console.log(`  ${reason}`);
+  console.log('\nMachine admission is not execution authority. Run `dex explain` for the authorization question.');
+}
+
+async function workQueueCommand(): Promise<void> {
+  const status = await workStatus();
+  if (flag('--json', argv)) { console.log(JSON.stringify(status.tickets, null, 2)); return; }
+  if (!status.tickets.length) { console.log('Work queue is empty.'); return; }
+  console.log(`Work queue (FIFO, ${status.tickets.length} waiting):`);
+  status.tickets.forEach((ticket, index) => {
+    const where = ticket.repositoryRoot ? path.basename(ticket.repositoryRoot) : 'machine';
+    console.log(`  ${String(index + 1).padStart(2)}. ${ticket.id}  ${ticket.executor.padEnd(11)} ${where} / ${ticket.workload} / ${ticket.access}  since ${ticket.enqueuedAt.replace('T', ' ').slice(0, 19)}`);
+  });
+}
+
+function workPid(): number | undefined {
+  const value = arg('--pid', argv);
+  if (value === undefined) return undefined;
+  const pid = Number.parseInt(value, 10);
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error('--pid must be a positive process id');
+  return pid;
+}
+
+async function workAcquireCommand(): Promise<void> {
+  const result = await acquireWork({
+    executor: workOption<WorkExecutor>('--executor', WORK_EXECUTORS, 'other'),
+    access: workOption<AccessClass>('--access', WORK_ACCESS_CLASSES, 'read'),
+    workload: workOption<WorkloadClass>('--workload', WORK_WORKLOAD_CLASSES, 'light'),
+    repositoryRoot: arg('--repo', argv),
+    branch: arg('--branch', argv),
+    phase: arg('--phase', argv),
+    ticketId: arg('--ticket', argv),
+    pid: workPid()
+  });
+  if (flag('--json', argv)) { console.log(JSON.stringify(result, null, 2)); if (result.status === 'queued') process.exitCode = 3; return; }
+  if (result.status === 'acquired') {
+    console.log(`ADMITTED  lease ${result.lease.id}`);
+    console.log(`  ${result.lease.workload} / ${result.lease.access}${result.lease.repositoryRoot ? ` on ${result.lease.repositoryRoot}` : ''}`);
+    console.log(`  Owning process: ${result.lease.pid}`);
+    console.log(`  Heartbeat with: npm run dex -- work-heartbeat ${result.lease.id}  (every ~30s, or the lease expires after 2.5 minutes without one)`);
+    console.log(`  Release with:   npm run dex -- work-release ${result.lease.id}`);
+    console.log('  This lease reserves machine capacity only; it grants no execution authority.');
+    return;
+  }
+  console.log(`QUEUED    ticket ${result.ticket.id} (position ${result.position})`);
+  for (const reason of result.reasons) console.log(`  ${reason}`);
+  console.log(`  Wait with: npm run dex -- work-wait ${result.ticket.id}`);
+  process.exitCode = 3;
+}
+
+async function workReleaseCommand(): Promise<void> {
+  const id = argv[1];
+  if (!id) throw new Error('usage: work-release <lease-id> [--force]');
+  const result = await releaseWork(id, { force: flag('--force', argv) });
+  if (!result.released) throw new Error(result.reason || `could not release ${id}`);
+  console.log(`Released ${id}.`);
+}
+
+async function workCancelCommand(): Promise<void> {
+  const id = argv[1];
+  if (!id) throw new Error('usage: work-cancel <ticket-id>');
+  if (!(await cancelTicket(id))) throw new Error(`no queued ticket ${id}`);
+  console.log(`Cancelled ${id}. Other waiters keep their positions.`);
+}
+
+async function workHeartbeatCommand(): Promise<void> {
+  const id = argv[1];
+  if (!id) throw new Error('usage: work-heartbeat <lease-or-ticket-id>');
+  if (!(await heartbeat(id))) throw new Error(`no active lease or ticket ${id}`);
+  console.log(`Heartbeat recorded for ${id}.`);
+}
+
+async function workWaitCommand(): Promise<void> {
+  const ticketId = argv[1];
+  if (!ticketId) throw new Error('usage: work-wait <ticket-id> [--timeout 30m]');
+  const timeoutMs = parseDuration(arg('--timeout', argv) || '30m');
+  const deadline = Date.now() + timeoutMs;
+  const pollMs = 25_000;
+  const status = await workStatus();
+  const ticket = status.tickets.find(entry => entry.id === ticketId);
+  if (!ticket) throw new Error(`no queued ticket ${ticketId}`);
+
+  // Bounded low-cost polling. Waiting is a valid outcome, not a failure.
+  while (true) {
+    const result = await acquireWork({
+      executor: ticket.executor,
+      access: ticket.access,
+      workload: ticket.workload,
+      repositoryRoot: ticket.repositoryRoot,
+      phase: ticket.phase,
+      ticketId
+    });
+    if (result.status === 'acquired') {
+      console.log(`ADMITTED  lease ${result.lease.id}`);
+      console.log(`  Release with: npm run dex -- work-release ${result.lease.id}`);
+      return;
+    }
+    if (Date.now() >= deadline) {
+      console.log(`STILL QUEUED  ticket ${ticketId} (position ${result.position}) after waiting.`);
+      console.log('  The ticket remains valid. This is QUEUED, not FAILED.');
+      process.exitCode = 3;
+      return;
+    }
+    console.log(`  queued at position ${result.position}: ${result.reasons[0] ?? 'waiting'}`);
+    await new Promise(resolve => setTimeout(resolve, Math.min(pollMs, Math.max(1000, deadline - Date.now()))));
+  }
+}
+
+
 try {
   switch (command) {
     case 'status': await status(); break;
@@ -271,6 +414,13 @@ try {
     case 'explain': await explainCommand(); break;
     case 'policy-check': await policyCheckCommand(); break;
     case 'uninstall': await uninstall(); break;
+    case 'work-status': await workStatusCommand(); break;
+    case 'work-queue': await workQueueCommand(); break;
+    case 'work-acquire': await workAcquireCommand(); break;
+    case 'work-release': await workReleaseCommand(); break;
+    case 'work-cancel': await workCancelCommand(); break;
+    case 'work-heartbeat': await workHeartbeatCommand(); break;
+    case 'work-wait': await workWaitCommand(); break;
     case 'modes': console.log(ACCESS_MODES.join('\n')); break;
     default: usage();
   }

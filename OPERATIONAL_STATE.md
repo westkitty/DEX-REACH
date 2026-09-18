@@ -1,7 +1,7 @@
 # DEX//REACH Operational State
 
 <!-- operational-state:metadata
-{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":14,"last_updated":"2026-09-18T16:35:36Z","current_baseline":{"identity":"DEX//REACH 0.3.2 identity-bound trust baseline plus local portfolio control on main","state":"verified-local-and-public-runtime","last_verified":"2026-09-18T16:35:36Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, Dock control terminal, project docs"],"linked_parent_state":null}
+{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":15,"last_updated":"2026-09-18T23:50:00Z","current_baseline":{"identity":"DEX//REACH 0.3.2 identity-bound trust baseline plus local portfolio control on main","state":"verified-local-and-public-runtime","last_verified":"2026-09-18T16:35:36Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, Dock control terminal, project docs"],"linked_parent_state":null}
 -->
 
 ## 1. Project Identity and Scope
@@ -24,6 +24,8 @@ Current public server surface:
 
 `npm run verify:golden` passes on the deployed 0.3.2 build: typecheck, the synchronized **21-invariant machine manifest**, **51/51 regression tests**, production build, production dependency audit with **0 vulnerabilities**, raw 26-tool compatibility probe, and live public smoke covering OAuth, **16 DEX tools**, the evidence-scoped trust report, the exact 22-tool safe compatibility surface, blocked configuration/URL-proxy paths, ADB executable availability, native file/process execution, sanitized child environment, refusal of a deliberately wrong expected identity, refusal after real Git branch drift between plan and commit, successful identity-bound plan→commit, signed receipts, and checkpoint creation.
 
+Source on the `claude/work-coordinator-cpcug3` branch additionally carries the shared-machine work coordinator described in section 12. That code has **not** been built into, installed on, or observed running on the primary Mac; the deployed 0.3.2 evidence above is unchanged by it.
+
 The primary macOS installer is self-host safe: it stages and validates service definitions, returns the invoking DEX request, then a separate no-`KeepAlive` one-shot LaunchAgent replaces gateway/node. The expected brief disconnect is followed by node re-registration; repeated restart loops are not accepted as success.
 
 The Dock launcher is installed as a signed local shell-app bundle with a custom icon and exact Dock entry. A click opens a **new Terminal instance** running the DEX control console. The last launcher-specific proof was on 0.3.1 and showed the node PID unchanged across launcher invocation and the same access mode, profile, and per-client ceilings before and after launch. Version 0.3.2 did not modify the launcher path, so that proof remains historical rather than being relabeled as a fresh launcher test.
@@ -36,7 +38,7 @@ Provide explicit-node remote access for filesystem, search/edit, process/termina
 
 ## 4. Active Invariants
 
-The detailed proof obligations live in [`docs/INVARIANTS.md`](docs/INVARIANTS.md), and `src/shared/invariants.ts` is the synchronized machine-consumable ID index. There are **21 release-blocking invariants**. The active groups are:
+The detailed proof obligations live in [`docs/INVARIANTS.md`](docs/INVARIANTS.md), and `src/shared/invariants.ts` is the synchronized machine-consumable ID index. There are **26 release-blocking invariants**. The active groups are:
 
 - **DEX-INV-001** — explicit node selection and no routing fallback.
 - **DEX-INV-002–003** — node-local owner authority and fail-closed policy.
@@ -49,6 +51,7 @@ The detailed proof obligations live in [`docs/INVARIANTS.md`](docs/INVARIANTS.md
 - **DEX-INV-019** — simulation is never upgraded into physical-hardware proof.
 - **DEX-INV-020** — planned mutations bind a fresh execution fingerprint and commit refuses identity drift.
 - **DEX-INV-021** — live trust-report PASS is explicitly limited to the checks it actually evaluates.
+- **DEX-INV-022–026** — shared-machine work coordination: admission grants no execution authority, repository mutation ownership is exclusive, exhausted capacity queues rather than oversubscribing, stale coordination claims expire without terminating processes, and coordination metadata carries no prompts, transcripts or credentials. These five are currently proved by regression only; they have not been exercised on the primary Mac.
 
 ## 5. Verified Working Behavior
 
@@ -92,6 +95,8 @@ Directly issuing `launchctl kickstart -k` **from the DEX request being killed** 
 - **UNV-002 — Second physical device:** no independent second machine has completed the full enrollment/policy matrix. Multi-node evidence is simulation on the primary Mac.
 - **UNV-003 — Linux service runtime:** systemd user-unit generation is implemented/shape-tested but has not run on a real Linux host.
 - **UNV-004 — macOS node-only fresh-machine install:** the node-only installer uses the same staged one-shot replacement design but has not been exercised on a fresh second Mac.
+- **UNV-005 — Shared-machine work coordinator on real hardware:** the coordinator, its CLI commands, and DEX-INV-022 through 026 pass 29 focused regression tests, but every one of those runs happened in an ephemeral Linux container. No lease, queue, or admission decision has been observed on the primary Mac, and no second agent has contended for a real lease there.
+- **UNV-007 — macOS capacity probes:** `sysctl kern.memorystatus_vm_pressure_level`, `memory_pressure`, `sysctl vm.swapusage`, and `pmset -g therm` are parsed by tested pure functions fed recorded fixture output. The probe commands themselves have not been executed on macOS, so the mapping from live macOS output to a pressure level is unverified on hardware. Linux has no portable thermal signal at all and reports `unknown` by design.
 - **UNV-006 — Current ChatGPT client action refresh:** the public MCP server proves 16 actions, but this already-open ChatGPT connector session still exposes the older 12-action schema and has not refreshed the four newer plan/commit/receipt/trust actions. Public MCP runtime proof is complete; client-cache refresh remains separate.
 
 ## 8. Unknown or Evidence-Stale State
@@ -104,6 +109,8 @@ None that blocks the primary-Mac 0.3.2 runtime candidate. The current ChatGPT co
 - **PND-002:** attach an Android device and perform a harmless hardware identity operation through DEX.
 - **PND-003:** enroll a real second device and repeat explicit-node routing plus OFF/READ-ONLY/ON checks.
 - **PND-004:** run the Linux systemd path on a real Linux host before claiming Linux runtime verification.
+- **PND-006:** run `npm run dex -- work-status` and a real two-agent lease contention on the primary Mac, and confirm the macOS pressure probes return parseable output there, before claiming DEX-INV-022 through 026 as anything beyond regression evidence.
+- **PND-007:** dogfood the coordinator for the remaining phases of the expansion program, acquiring the appropriate lease before each phase and releasing it afterward.
 - **PND-005:** continue replacing compatibility primitives only when equivalent native behavior has equal or stronger proof.
 
 ## 10. Active Decisions, Defaults, and Prohibitions
@@ -119,7 +126,9 @@ None that blocks the primary-Mac 0.3.2 runtime candidate. The current ChatGPT co
 
 | Capability | State | Decisive current evidence |
 | --- | --- | --- |
-| Source/type/regression/build | verified | `npm run verify`: typecheck, synchronized 21-invariant manifest, 53/53 tests, build, production audit 0 vulnerabilities |
+| Source/type/regression/build | verified | `npm run verify`: typecheck, synchronized 21-invariant manifest, 53/53 tests, build, production audit 0 vulnerabilities (primary Mac, 0.3.2) |
+| Shared-machine work coordination | regression-only | typecheck, synchronized 26-invariant manifest, 82 tests with 29 new coordinator/capacity tests passing, build, production audit 0 vulnerabilities — all in an ephemeral Linux container, never on the primary Mac. One pre-existing unrelated `native.test.ts` failure in that container is environmental: its shell profile prints `nvm` on startup, contaminating `dex.process.run` stdout. The same test fails identically at base commit `80fcbe1` there. |
+| macOS capacity probes | unverified | fixture-parsed only; probe commands not executed on macOS |
 | Raw compatibility dependency | verified | probe lists 26 pinned local backend tools |
 | Remote compatibility surface | verified | live node reports 22; public smoke enforces exact expected set |
 | Public MCP/OAuth | verified | live `npm run smoke`: OAuth/PKCE + 15 actions |
@@ -139,10 +148,13 @@ None that blocks the primary-Mac 0.3.2 runtime candidate. The current ChatGPT co
 
 ## 12. Current Change Scope and Impact Radius
 
+The `claude/work-coordinator-cpcug3` branch adds a local shared-machine work coordinator: `src/shared/machine-capacity.ts` (host measurement and deterministic slot/pressure policy), `src/shared/work-coordinator.ts` (leases, FIFO queue, bounded history), seven `work-*` owner CLI commands, and invariants DEX-INV-022 through 026. Coordination state lives under `~/.dex-reach/coordinator/` at mode 0700/0600 and is excluded from Git by the existing `.dex-reach/` ignore rule. The change adds no MCP action, no capability, no dependency, and no authorization path: `authorizeOperation` is untouched and a regression test asserts that holding a lease leaves its outcome identical. Machine admission and execution authorization stay separate decisions that must both pass.
+
 The current 0.3.2 source baseline now also adds bounded local portfolio intelligence to the owner CLI: home-root Git discovery, branch/dirty/upstream summaries, dirty-only filtering, unique project resolution, and exact-project checkpointing through the existing checkpoint primitive. This does not widen the public MCP action surface or remote execution authority. It preserves the existing gateway/node authority model, compatibility surface, macOS service lifecycle, launcher path, and private deployment state outside Git.
 
 ## 13. Compact Revision Log
 
+- **r15** — Added the shared-machine work coordinator as the first phase of the DEX expansion program. Introduced deterministic host capacity measurement (memory-primary and CPU-secondary slot ceilings, live memory/CPU/thermal pressure, uncoordinated-workload observation from the process table only), per-repository exclusive mutation leases, a FIFO work queue with anti-jump ordering, heartbeat-and-dead-process staleness reclaim that never signals another process, bounded local history, and seven owner CLI commands. Added invariants DEX-INV-022 through 026 and 29 focused tests covering all fifteen required coordinator proofs. Dogfooding the coordinator on its own implementation surfaced and fixed two real defects: the caller's own process tree was counted as competing anonymous load, and the `dex-reach` control CLI was misclassified as a persistent DEX service. All validation ran in an ephemeral Linux container, not on the primary Mac: typecheck, 26-invariant manifest, 82 tests (81 pass; one pre-existing unrelated `native.test.ts` failure reproduced identically at base commit `80fcbe1` and caused by that container's shell profile printing `nvm`), production build, and 0 production vulnerabilities. No install, no deployment, no smoke, and no change to the 16-action public MCP contract or any authorization path. macOS pressure probes are fixture-tested only and remain unverified on macOS.
 - **r14** — Added bounded local project portfolio controls to the owner CLI without widening remote authority. New `projects`, `dirty`, and `project <query> info|checkpoint` commands discover repositories under the home root (or an explicitly allowed root), report branch/dirty/upstream state, refuse ambiguous project matches, and reuse the existing DEX checkpoint mechanism for reversible project snapshots. Discovery and per-repository Git inspection are concurrency-bounded for large portfolios. Real-Mac built-CLI smoke enumerated 103 repositories under `/Users/andrew`; focused portfolio tests passed 2/2; complete `npm run verify` passed with synchronized 21-invariant manifest, 53/53 tests, production build, 0 production vulnerabilities, and 26-tool raw compatibility probe. The public 16-action MCP contract and node authority model remain unchanged.
 - **r13** — Added DEX//REACH 0.3.2 trust proof as an executable control rather than a display-only fingerprint. Introduced the synchronized 21-ID machine invariant manifest and `npm run invariants`; added evidence-scoped `reach_trust_report`; bound every new exact-action plan to a fresh execution fingerprint and optional caller-supplied expected identity; made commit refuse machine/user/cwd/repository/branch/remote/runtime drift before mutation; added regression tests plus live public smoke for wrong-identity refusal and real Git branch drift with no write. Deployed through the self-hosted macOS installer: the expected brief transport interruption occurred, gateway/node returned on new PIDs, node re-registered as 0.3.2, owner ON/full-local policy, roots, client ceilings, and no-grant state were preserved. Final `npm run verify:golden` passed with 21 invariant IDs, 51/51 tests, build, 0 production vulnerabilities, 26 raw compatibility tools, exactly 22 safe remote compatibility tools, 16 public MCP actions, trust report PASS, identity-bound plan/commit, signed receipts, and checkpoint proof. DEX correctly refused remote access to its own private install-state path during verification. This already-open ChatGPT connector still exposes the older 12-action cache, so direct UI/tool discovery of plan/commit/receipts/trust remains unverified even though public MCP runtime proof is green.
 - **r12** — Exhaustive 0.3.1 hardening/golden-worker sweep. Closed symlink/plural/camelCase scope bypasses, policy stale-write rollback, plan double-claim, receipt-chain races, node-auth/revocation/bootstrap/OAuth persistence races, OAuth client-ID injection, public HTTP/remote WS transport gaps, compatibility safety-config/history/vendor/URL-proxy exposure, child-process credential-environment leakage, launchd Homebrew PATH/ADB false-positive behavior, self-hosted installer self-termination/respawning-helper failures, and Dock launcher Terminal/TCC mismatch. Reproduced and repaired a second receipt fork caused by stale-lock recovery deleting a newer owner's lock. Final local/deployed proof: 48/48 tests, three complete post-lock regression passes, five focused lock/receipt stress passes, build, 0-vulnerability production audit, 26-tool raw backend probe, 15-tool public MCP, exact 22-tool remote compatibility surface, ADB available, plan→commit, signed receipts, checkpoint, and signed Dock app opening a new Terminal without changing node PID or authority. Publication/hosted-check state is intentionally read from Git/GitHub rather than self-asserted inside the commit being checked.

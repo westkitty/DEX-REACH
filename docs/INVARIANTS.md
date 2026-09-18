@@ -25,6 +25,11 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 | DEX-INV-019 | Simulation stays labeled simulation | Isolated second-node tests | No statement upgrades simulated process evidence into separate-hardware proof | Operational State/README review | Verified | Documentation/release claims |
 | DEX-INV-020 | Planned mutations bind execution identity | Create an exact mutation plan, optionally with expected identity, then commit | Planning refuses mismatched expected identity; successful plans store a fresh execution fingerprint/hash; commit refuses if machine/user/cwd/repository/branch/remote/runtime identity drifted | Execution-identity regression tests + deployed rejected-identity, branch-drift refusal, and plan→commit smoke | Verified on deployed 0.3.2 golden worker | Plan schema, fingerprint, commit, repository identity changes |
 | DEX-INV-021 | Live trust reports remain evidence-scoped | Request `reach_trust_report` | Report includes fresh fingerprint, owner access state, live checks, invariant IDs, and certificate hash; PASS applies only to listed live checks and explicitly does not claim full release proof | Trust regression test + deployed trust-report smoke + docs review | Verified on deployed 0.3.2 golden worker | Trust report, invariant manifest, policy, compatibility surface, transport changes |
+| DEX-INV-022 | Machine workload admission grants no execution authority | Hold any coordinator lease, then request an operation | Owner mode, client ceilings, grants, roots, profile and plan rules decide the request exactly as they would with no lease; a lease record carries no capability, grant, root, token or mode field | Coordinator regression tests (lease field set, authorization parity with and without a lease) | Verified by regression only; not yet exercised on the primary Mac | Coordinator, access, capability, or CLI admission changes |
+| DEX-INV-023 | Repository mutation ownership is exclusive | Two agents request `mutate` or `exclusive` on one repository root | Exactly one holds the lease; the second is queued, and a different spelling or symlink of the same root resolves to the same holder | Coordinator concurrency tests | Verified by regression only; not yet exercised on the primary Mac | Coordinator lease or repository-canonicalization changes |
+| DEX-INV-024 | Exhausted machine capacity queues rather than oversubscribes | Substantive slots, heavy slots, live memory/CPU/thermal pressure, or corrupt coordinator state | Additional substantive work receives a FIFO queue ticket; a host at or under 12 GiB yields one substantive slot; degraded coordinator state falls back to single-substantive-job mode rather than unlimited admission | Capacity and coordinator regression tests | Verified by regression only; host probes exercised against recorded fixtures, not against the primary Mac | Capacity policy, platform probe, or coordinator admission changes |
+| DEX-INV-025 | Stale coordination state is reclaimed without terminating processes | Lease whose heartbeat expired, with its recorded PID alive or absent | A lease is reclaimed only when the heartbeat is well past due and the process is gone; a live PID is never reclaimed on heartbeat delay alone, and reclaiming never signals or kills another process | Coordinator regression tests | Verified by regression only; not yet exercised on the primary Mac | Coordinator lease lifecycle changes |
+| DEX-INV-026 | Coordination metadata carries no prompts, transcripts or credentials | Acquire, queue, heartbeat, release, and share-mode status | Persisted coordination files contain only the declared lease/ticket fields; label inputs are length- and charset-bounded, credential-shaped labels are refused, and share output omits repository paths, branches and PIDs | Coordinator regression tests + file content inspection | Verified by regression only; not yet exercised on the primary Mac | Coordinator schema, CLI, or share-report changes |
 
 ## Mandatory validation subsets
 
@@ -43,6 +48,14 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 - `npm test`
 - `npm run build`
 - deployed `npm run smoke`
+
+### Any shared-machine coordination change
+
+- DEX-INV-022 through 026
+- `npm run typecheck`
+- `npm test`
+- `npm run invariants -- --check`
+- confirm no coordinator state under `~/.dex-reach/coordinator/` is tracked by Git
 
 ### Any macOS install/launcher change
 

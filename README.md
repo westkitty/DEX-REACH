@@ -183,6 +183,48 @@ None of the local enable/disable commands require the gateway or internet access
 
 ---
 
+## Shared-Machine Work Coordination
+
+One computer often serves several AI sessions at once: a Claude Code session, a ChatGPT request through DEX, Codex, another agent, plus whatever the owner is doing. Terminal access is not ownership of the machine. DEX//REACH keeps a local work coordinator so those jobs queue instead of racing.
+
+```bash
+npm run dex -- work-status
+npm run dex -- work-queue
+
+npm run dex -- work-acquire \
+  --repo "$HOME/DEX-REACH" \
+  --access mutate \
+  --workload heavy \
+  --executor claude-code \
+  --phase phase-0a
+
+npm run dex -- work-heartbeat <lease-id>
+npm run dex -- work-release <lease-id>
+npm run dex -- work-wait <ticket-id>
+npm run dex -- work-cancel <ticket-id>
+```
+
+`work-status` measures the actual host rather than assuming a machine specification, and prints the slot ceilings, live memory/CPU/thermal pressure, active leases, queue depth, and any substantial workloads running without a lease.
+
+**What the coordinator decides.** Two rules do most of the work:
+
+- **Only one mutating owner per repository.** A second agent asking to mutate the same repository is queued, including when it spells the path differently or reaches it through a symlink. Reads still proceed alongside.
+- **Capacity is a ceiling, not a target.** Memory is the primary limiter and CPU the secondary one. A host at or under 12 GiB gets one substantive job; larger hosts scale up to a bounded number. Live memory pressure, CPU saturation, or thermal throttling queue new heavy work even when the static ceiling would allow it, and an unmeasurable reading is treated as a reason to wait rather than a reason to proceed.
+
+Installation and deployment (`install:macos`, service replacement, credential or node-authentication migration) take `--access exclusive`, which requires an otherwise idle machine.
+
+Jobs that carry no lease are still counted. Another agent's build or test run is visible in the process table and reduces available capacity as an **uncoordinated observed workload**. DEX reads only the process table for this; it never inspects another conversation's content, and a process it cannot attribute stays anonymous.
+
+**What a lease is not.** A lease answers *can this run now?* It never answers *is this allowed?* Holding one grants no filesystem, process, or network authority and does not bypass OFF, READ-ONLY, client ceilings, grants, roots, budgets, or plan rules. A job can be authorized and still queued, and it can have machine capacity and still be refused. Both checks must pass. A lease record contains only coordination metadata — no prompts, no conversation content, no command output, no credentials — and lives under `~/.dex-reach/coordinator/`, outside Git.
+
+**Staleness.** A lease heartbeats about every 30 seconds and becomes reclaimable only after several missed heartbeats *and* the recorded process being gone. Reclaiming means the coordination claim expired; it never terminates another process. A live process is never evicted for being slow. If your workflow has no long-lived process to name with `--pid`, heartbeat the lease or it expires after about two and a half minutes.
+
+If coordinator state is unreadable or corrupt, admission falls back to a single substantive job rather than unlimited concurrency, and `work-status` reports the problem so the owner can repair it.
+
+Waiting in the queue is a normal outcome, not a failure.
+
+---
+
 ## Install and Run
 
 ### Requirements
@@ -385,9 +427,9 @@ Before changing execution, routing, authentication, policy, or install behavior,
 ├── src/
 │   ├── gateway/          # OAuth, MCP server, node registry, routing, audit
 │   ├── node/             # node connection, native execution, local enforcement
-│   └── shared/           # protocol, access policy, guardrails, shared helpers
+│   └── shared/           # protocol, access policy, guardrails, work coordination, shared helpers
 ├── scripts/              # bootstrap, install, credentials, smoke, simulations, local CLI
-├── tests/                # access, auth, routing, security, native, audit, result-store tests
+├── tests/                # access, auth, routing, security, native, audit, result-store, coordinator tests
 ├── docs/
 │   ├── GOLDEN_WORKER.md
 │   ├── INVARIANTS.md
