@@ -72,6 +72,9 @@ export type GatewayRequest = {
   operation: string;
   args: Record<string, unknown>;
   actor?: RequestActor;
+  /** W3C trace context, validated by the node. An invalid value is ignored, never repaired. */
+  traceparent?: string;
+  tracestate?: string;
 };
 
 export type GatewayResponse = {
@@ -80,6 +83,8 @@ export type GatewayResponse = {
   ok: boolean;
   result?: unknown;
   error?: string;
+  /** The trace the node recorded this exchange under, so the owner can follow it with `dex trace`. */
+  traceId?: string;
 };
 
 export type Heartbeat = { type: 'heartbeat'; at: number };

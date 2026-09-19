@@ -30,6 +30,7 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 | DEX-INV-024 | Exhausted machine capacity queues rather than oversubscribes | Substantive slots, heavy slots, live memory/CPU/thermal pressure, or corrupt coordinator state | Additional substantive work receives a FIFO queue ticket; a host at or under 12 GiB yields one substantive slot; degraded coordinator state falls back to single-substantive-job mode rather than unlimited admission | Capacity and coordinator regression tests | Verified by regression only; host probes exercised against recorded fixtures, not against the primary Mac | Capacity policy, platform probe, or coordinator admission changes |
 | DEX-INV-025 | Stale coordination state is reclaimed without terminating processes | Lease whose heartbeat expired, with its recorded PID alive or absent | A lease is reclaimed only when the heartbeat is well past due and the process is gone; a live PID is never reclaimed on heartbeat delay alone, and reclaiming never signals or kills another process | Coordinator regression tests | Verified by regression only; not yet exercised on the primary Mac | Coordinator lease lifecycle changes |
 | DEX-INV-026 | Coordination metadata carries no prompts, transcripts or credentials | Acquire, queue, heartbeat, release, and share-mode status | Persisted coordination files contain only the declared lease/ticket fields; label inputs are length- and charset-bounded, credential-shaped labels are refused, and share output omits repository paths, branches and PIDs | Coordinator regression tests + file content inspection | Verified by regression only; not yet exercised on the primary Mac | Coordinator schema, CLI, or share-report changes |
+| DEX-INV-027 | Causal evidence links stages without exporting content | Any traced request, its refusals, and any inbound `traceparent`/`tracestate` | A span carries only identifiers, stage, outcome and hashes; arguments, file content, stdout/stderr, plan arguments, refusal messages and credentials are never recorded; `baggage` is never accepted; malformed inbound trace context starts a fresh trace instead of being repaired or trusted; trace storage is bounded and OpenTelemetry export stays off unless the owner enables it | Tracing regression tests + span field inspection | Verified by regression only; no deployed gateway/node pair has produced a live trace | Tracing, span schema, or trace-export changes |
 
 ## Mandatory validation subsets
 
@@ -57,6 +58,15 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 - `npm test`
 - `npm run build`
 - deployed `npm run smoke`
+
+### Any causal tracing change
+
+- DEX-INV-027
+- `npm run typecheck`
+- `npm test`, including `tests/trace.test.ts`
+- `npm run invariants -- --check`
+- inspect a recorded span file directly and confirm it holds no arguments, content, output or credentials
+- confirm `DEX_REACH_OTEL_EXPORT` is unset in any shipped configuration
 
 ### Any shared-machine coordination change
 

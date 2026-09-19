@@ -18,6 +18,7 @@ import { arg, flag, localNodeIds, nodeEnvFile, readEnvFile } from './lib/node-fi
 import { WORK_ACCESS_CLASSES, WORK_EXECUTORS, WORK_WORKLOAD_CLASSES, acquireWork, cancelTicket, describeWorkStatus, heartbeat, redactWorkStatusForShare, releaseWork, workStatus } from '../src/shared/work-coordinator.js';
 import type { AccessClass, WorkloadClass } from '../src/shared/machine-capacity.js';
 import type { WorkExecutor } from '../src/shared/work-coordinator.js';
+import { describeTrace, isValidTraceId, listTraces, otelExportEnabled, readTrace } from '../src/shared/trace.js';
 
 const execFileAsync = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -57,6 +58,11 @@ Shared-machine work coordination (resource admission only; grants no execution a
   work-wait <ticket-id> [--timeout 30m]   bounded polling until the ticket is admitted
   work-cancel <ticket-id>
   work-heartbeat <lease-or-ticket-id>
+
+Causal tracing (evidence only; never arguments, file contents or process output):
+  trace <trace-id> [--json]       reconstruct one causal chain across MCP, node, plan, commit,
+                                  execution, receipt and checkpoint
+  traces [--limit 20] [--json]    recent trace ids
 
 Capabilities: ${REACH_CAPABILITIES.join(', ')}
 Options: --node <id> when more than one node credential exists locally.`);
@@ -396,6 +402,33 @@ async function workWaitCommand(): Promise<void> {
 }
 
 
+
+// --- Causal tracing ---------------------------------------------------------
+
+async function traceCommand(): Promise<void> {
+  const traceId = argv[1];
+  if (!traceId) throw new Error('usage: trace <trace-id> [--json]');
+  if (!isValidTraceId(traceId)) throw new Error('trace id must be 32 lowercase hex characters');
+  const spans = await readTrace(traceId);
+  if (flag('--json', argv)) { console.log(JSON.stringify(spans, null, 2)); return; }
+  console.log(describeTrace(spans).join('\n'));
+  if (!spans.length) return;
+  console.log(`OpenTelemetry export: ${otelExportEnabled() ? 'ENABLED by DEX_REACH_OTEL_EXPORT' : 'off (default)'}`);
+}
+
+async function tracesCommand(): Promise<void> {
+  const limit = Number(arg('--limit', argv) || 20);
+  const traces = await listTraces(Number.isFinite(limit) && limit > 0 ? limit : 20);
+  if (flag('--json', argv)) { console.log(JSON.stringify(traces, null, 2)); return; }
+  if (!traces.length) { console.log('No traces recorded.'); return; }
+  console.log(`Recent traces (${traces.length}):`);
+  for (const entry of traces) {
+    console.log(`  ${entry.traceId}  ${String(entry.spans).padStart(3)} steps  last ${entry.at.replace('T', ' ').slice(0, 19)}`);
+  }
+  console.log('\nInspect one with: npm run dex -- trace <trace-id>');
+}
+
+
 try {
   switch (command) {
     case 'status': await status(); break;
@@ -421,6 +454,8 @@ try {
     case 'work-cancel': await workCancelCommand(); break;
     case 'work-heartbeat': await workHeartbeatCommand(); break;
     case 'work-wait': await workWaitCommand(); break;
+    case 'trace': await traceCommand(); break;
+    case 'traces': await tracesCommand(); break;
     case 'modes': console.log(ACCESS_MODES.join('\n')); break;
     default: usage();
   }

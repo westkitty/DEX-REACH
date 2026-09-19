@@ -26,6 +26,7 @@ import { consumePlan, createPlan, hashValue, sweepExpiredPlans } from '../shared
 import { writeRuntimeStatus } from './runtime-status.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
 import { checkpointStrategyFor, plannableOperations } from '../shared/operations.js';
+import { childSpan, recordSpan, traceContextFrom, type ReachTraceContext } from '../shared/trace.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -162,11 +163,29 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
   const actor = request.actor;
   let policy: unknown = null;
   let receiptCheckpoint: string | null = null;
+  // Continue the caller's trace when it supplied a valid W3C context, otherwise start one here.
+  // A malformed inbound header never fails the request and never propagates.
+  const trace: ReachTraceContext = traceContextFrom({
+    traceparent: typeof request.traceparent === 'string' ? request.traceparent : undefined,
+    tracestate: typeof request.tracestate === 'string' ? request.tracestate : undefined
+  });
+  await recordSpan({
+    traceId: trace.traceId, spanId: trace.spanId, parentSpanId: trace.parentSpanId,
+    stage: 'node', at: new Date().toISOString(), operation: request.operation,
+    nodeId: config.nodeId, actorKind: actor?.kind
+  });
   try {
     // The final authorization reservation happens immediately before execution and is serialized with
     // owner policy updates. OFF therefore wins over stale remote state instead of being overwritten.
     const reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args);
     policy = reservation.policy;
+    const authorizeSpan = childSpan(trace);
+    await recordSpan({
+      traceId: authorizeSpan.traceId, spanId: authorizeSpan.spanId, parentSpanId: authorizeSpan.parentSpanId,
+      stage: 'authorize', at: new Date().toISOString(), operation: request.operation,
+      nodeId: config.nodeId, actorKind: actor?.kind, ok: true,
+      policyHash: hashValue(reservation.policy)
+    });
     let value: unknown;
     if (request.operation === 'dex.plan') {
       value = await buildPlan(actor, request.args);
@@ -179,6 +198,15 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     }
     const result = results.bound(value);
     const durationMs = Date.now() - started;
+    const executeSpan = childSpan(trace);
+    await recordSpan({
+      traceId: executeSpan.traceId, spanId: executeSpan.spanId, parentSpanId: executeSpan.parentSpanId,
+      stage: request.operation === 'dex.plan' ? 'plan' : request.operation === 'dex.commitPlan' ? 'commit' : 'execute',
+      at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId,
+      actorKind: actor?.kind, ok: true, durationMs,
+      requestHash: hashValue({ operation: request.operation, args: request.args }),
+      ...(receiptCheckpoint ? { checkpointId: receiptCheckpoint } : {})
+    });
     await audit.append({
       at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor,
       operation: request.operation, ok: true, durationMs, args: request.args
@@ -187,10 +215,19 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: true,
       result: value, durationMs, policy, checkpointId: receiptCheckpoint
     });
-    return { type: 'response', id: request.id, ok: true, result };
+    return { type: 'response', id: request.id, ok: true, result, traceId: trace.traceId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const durationMs = Date.now() - started;
+    const failSpan = childSpan(trace);
+    await recordSpan({
+      traceId: failSpan.traceId, spanId: failSpan.spanId, parentSpanId: failSpan.parentSpanId,
+      stage: 'execute', at: new Date().toISOString(), operation: request.operation,
+      nodeId: config.nodeId, actorKind: actor?.kind, ok: false, durationMs,
+      // Refusal classification only. The refusal message can quote a path or a command, so it is
+      // deliberately not traced; the audit log already holds the redacted detail.
+      outcome: 'refused'
+    });
     await audit.append({
       at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor,
       operation: request.operation, ok: false, durationMs, args: request.args, error: message
@@ -199,7 +236,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: false,
       error: message, durationMs, policy: policy ?? { unavailable: true }, checkpointId: receiptCheckpoint
     }).catch(() => undefined);
-    return { type: 'response', id: request.id, ok: false, error: message };
+    return { type: 'response', id: request.id, ok: false, error: message, traceId: trace.traceId };
   }
 }
 

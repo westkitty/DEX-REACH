@@ -38,7 +38,8 @@ export const DEX_RELEASE_INVARIANTS: readonly ReleaseInvariant[] = [
   { id: 'DEX-INV-023', capability: 'Repository mutation ownership is exclusive', evidenceClass: 'regression' },
   { id: 'DEX-INV-024', capability: 'Exhausted machine capacity queues rather than oversubscribes', evidenceClass: 'regression' },
   { id: 'DEX-INV-025', capability: 'Stale coordination state is reclaimed without terminating processes', evidenceClass: 'regression' },
-  { id: 'DEX-INV-026', capability: 'Coordination metadata carries no prompts, transcripts or credentials', evidenceClass: 'regression' }
+  { id: 'DEX-INV-026', capability: 'Coordination metadata carries no prompts, transcripts or credentials', evidenceClass: 'regression' },
+  { id: 'DEX-INV-027', capability: 'Causal evidence links stages without exporting content', evidenceClass: 'regression' }
 ] as const;
 
 export function invariantManifest() {

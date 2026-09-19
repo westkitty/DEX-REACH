@@ -225,6 +225,27 @@ Waiting in the queue is a normal outcome, not a failure.
 
 ---
 
+## Causal Tracing
+
+Every request carries a W3C Trace Context from the MCP edge through the gateway and node into authorization, planning, commit and execution. The node returns the `traceId` alongside the result, so a completed action can be reconstructed afterwards from evidence instead of from a description of what was supposed to happen.
+
+```bash
+npm run dex -- traces            # recent traces, newest first
+npm run dex -- trace <trace-id>  # the ordered causal chain for one request
+```
+
+A trace shows the stages an action passed through, the operation, the node, the actor kind, whether each stage succeeded, and the hashes and identifiers that tie the stages together — the policy hash that authorized it, the request hash, the plan, checkpoint and receipt ids.
+
+**What a span cannot carry.** Spans are an explicit allowlist of identifiers, stage, outcome and hashes. Arguments, file content, process output, raw plan arguments, tokens and credentials are structurally refused rather than filtered out after the fact. A refusal is traced as an outcome class only: the refusal message can quote a path or a command, so it is deliberately not traced, and the local audit log remains the place that holds the redacted detail.
+
+**Inbound context.** A well-formed `traceparent` is continued so a caller's trace and DEX's evidence join up. A malformed one starts a fresh trace rather than being repaired or trusted. `tracestate` is accepted only when every member validates and the whole stays within the W3C bounds. `baggage` is never accepted at all: it is arbitrary caller-controlled key/value data, and a control plane has no reason to propagate it.
+
+**Where it goes.** Traces are local, bounded, and outside Git, under `~/.dex-reach/traces/`. OpenTelemetry export is off unless the owner sets `DEX_REACH_OTEL_EXPORT=1`, and telemetry is never enabled by default.
+
+Tracing observes decisions. It never makes one, and it grants no authority.
+
+---
+
 ## Install and Run
 
 ### Requirements
@@ -427,7 +448,7 @@ Before changing execution, routing, authentication, policy, or install behavior,
 ├── src/
 │   ├── gateway/          # OAuth, MCP server, node registry, routing, audit
 │   ├── node/             # node connection, native execution, local enforcement
-│   └── shared/           # protocol, access policy, operation catalog, guardrails, work coordination
+│   └── shared/           # protocol, access policy, operation catalog, guardrails, work coordination, tracing
 ├── scripts/              # bootstrap, install, credentials, smoke, simulations, local CLI
 ├── tests/                # access, auth, routing, security, native, audit, result-store, coordinator tests
 ├── docs/
