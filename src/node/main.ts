@@ -45,6 +45,19 @@ const audit = new AuditLog();
 let stopped = false;
 let reconnectMs = 1000;
 let activeSocket: WebSocket | null = null;
+/**
+ * Which credential to present next. A node can hold both a transport key and an enrollment token,
+ * and only the gateway knows which one its record currently accepts.
+ *
+ * This exists because of a recovery that silently never completed: after an owner revokes a node,
+ * forgets it and enrols it again, the node host still has the transport private key from before.
+ * The gateway forgot the matching public key with the rest of the record, so every proof was
+ * refused and the node retried that same refused proof forever -- online from the owner's point of
+ * view, invisible to the gateway, with nothing in either log saying why. Alternating lets the node
+ * find the credential that works. It cannot widen anything: the gateway still decides, so a node
+ * that has completed migration is still refused when it offers a bearer token.
+ */
+let preferBearerCredential = false;
 let lastAccessJson = '';
 
 await backend.start(config.allowedRoots);
@@ -332,7 +345,8 @@ async function connect(): Promise<void> {
   const url = new URL(config.gatewayWs);
   url.searchParams.set('nodeId', config.nodeId);
   const headers: Record<string, string> = {};
-  const transport = await loadTransportKeys(config.nodeId);
+  const transport = preferBearerCredential ? null : await loadTransportKeys(config.nodeId);
+  const credential: 'transport proof' | 'enrollment token' = transport ? 'transport proof' : 'enrollment token';
   if (transport) {
     const proof = signNodeProof(transport.privateKey, expectedProofDefaults(config.nodeId));
     headers.Authorization = encodeAuthorizationProof(proof);
@@ -340,10 +354,15 @@ async function connect(): Promise<void> {
     headers.Authorization = `Bearer ${config.token}`;
   }
   const ws = new WebSocket(url, { headers });
+  let opened = false;
   let lastAliveAt = Date.now();
   ws.on('pong', () => { lastAliveAt = Date.now(); });
 
   ws.on('open', async () => {
+    opened = true;
+    // Remember what the gateway actually accepted, so a reconnect does not go back to a credential
+    // already known to be refused and spend every retry on it.
+    preferBearerCredential = credential === 'enrollment token';
     reconnectMs = 1000;
     lastAliveAt = Date.now();
     activeSocket = ws;
@@ -361,7 +380,7 @@ async function connect(): Promise<void> {
     };
     ws.send(JSON.stringify(hello));
     void publishStatus().catch(() => undefined);
-    console.log(`DEX//REACH node connected to ${url.origin}`);
+    console.log(`DEX//REACH node connected to ${url.origin} using its ${credential}`);
   });
 
   ws.on('message', async data => {
@@ -391,7 +410,15 @@ async function connect(): Promise<void> {
     if (stopped) return;
     const delay = reconnectMs;
     reconnectMs = Math.min(reconnectMs * 2, 30000);
-    console.warn(`DEX//REACH gateway disconnected; reconnecting in ${delay}ms`);
+    if (!opened) {
+      // Refused before the socket ever opened. The gateway does not say why -- deliberately, so a
+      // prober learns nothing -- so the only thing this node can do is offer its other credential
+      // next time and say plainly in its own log that it is doing so.
+      preferBearerCredential = credential === 'transport proof';
+      console.warn(`DEX//REACH gateway refused this node's ${credential}; retrying in ${delay}ms with its ${preferBearerCredential ? 'enrollment token' : 'transport proof'}. If that is also refused, the owner must re-enroll this node.`);
+    } else {
+      console.warn(`DEX//REACH gateway disconnected; reconnecting in ${delay}ms`);
+    }
     setTimeout(() => void connect(), delay).unref();
   });
   ws.on('error', error => { console.error('DEX//REACH node websocket error:', error.message); });

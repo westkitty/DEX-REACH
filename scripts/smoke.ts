@@ -36,7 +36,13 @@ class SmokeOAuthProvider implements OAuthClientProvider {
   codeVerifier(): string { if (!this.verifier) throw new Error('missing PKCE verifier'); return this.verifier; }
 }
 
-async function authorize(url: URL): Promise<string> {
+/**
+ * Drive the owner approval leg and return the whole authorization response.
+ *
+ * The full parameter set is returned rather than just `code` because RFC 9207's `iss` travels with
+ * it, and a client that discards it cannot check the response came from the issuer it discovered.
+ */
+async function authorize(url: URL): Promise<URLSearchParams> {
   const page = await fetch(url);
   if (!page.ok) throw new Error(`authorization page failed: ${page.status} ${await page.text()}`);
   const html = await page.text();
@@ -49,9 +55,9 @@ async function authorize(url: URL): Promise<string> {
   if (approval.status < 300 || approval.status >= 400) throw new Error(`approval failed: ${approval.status}`);
   const location = approval.headers.get('location');
   if (!location) throw new Error('approval redirect missing');
-  const code = new URL(location).searchParams.get('code');
-  if (!code) throw new Error('authorization code missing');
-  return code;
+  const params = new URL(location).searchParams;
+  if (!params.get('code')) throw new Error('authorization code missing');
+  return params;
 }
 
 function textContent(result: Awaited<ReturnType<Client['callTool']>>): string {
@@ -73,8 +79,7 @@ async function connect(): Promise<void> {
   try { await client.connect(transport); }
   catch (error) {
     if (!(error instanceof UnauthorizedError) || !provider.authorizationUrl) throw error;
-    const code = await authorize(provider.authorizationUrl);
-    await transport.finishAuth(code);
+    await transport.finishAuth(await authorize(provider.authorizationUrl));
     await connect();
   }
 }

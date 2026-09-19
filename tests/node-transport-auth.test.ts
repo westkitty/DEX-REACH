@@ -163,3 +163,30 @@ test('transport keys are not receipt keys and live in a 0600 node-local file', a
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('forgetting a revoked node drops its transport key so re-enrollment starts clean', async () => {
+  const ctx = await isolatedStore();
+  try {
+    await ctx.store.enroll('node-a');
+    const keys = generateTransportKeyPair();
+    await ctx.store.consumeEnrollment('node-a', await ctx.store.createEnrollmentToken('node-a'), keys.publicKey);
+    await ctx.store.completeMigration('node-a');
+    const encoded = encodeNodeProof(proofFor(keys.privateKey, 'node-a'));
+    assert.equal((await ctx.store.authenticateProof('node-a', encoded)).ok, true);
+
+    await ctx.store.revoke('node-a');
+    await ctx.store.forget('node-a');
+    const fresh = await ctx.store.enroll('node-a');
+
+    // The node host still holds the old private key file. The gateway must not remember the
+    // matching public key, or a revoked credential would survive the revocation that removed it.
+    assert.equal(ctx.store.authMode('node-a'), 'bearer');
+    assert.equal(ctx.store.list().find(row => row.nodeId === 'node-a')?.transportKey, false);
+    const replayed = encodeNodeProof(proofFor(keys.privateKey, 'node-a'));
+    assert.equal((await ctx.store.authenticateProof('node-a', replayed)).ok, false);
+    // And the freshly issued credential is the one that works, so recovery is actually possible.
+    assert.equal(await ctx.store.authenticate('node-a', fresh), true);
+  } finally {
+    await ctx.restore();
+  }
+});

@@ -34,14 +34,15 @@ class Provider implements OAuthClientProvider {
   saveCodeVerifier(v: string) { this.verifier = v; } codeVerifier() { if (!this.verifier) throw new Error('no verifier'); return this.verifier; }
 }
 
-async function authorize(url: URL): Promise<string> {
+async function authorize(url: URL): Promise<URLSearchParams> {
   const html = await (await fetch(url)).text();
   const ticket = html.match(/name="ticket" value="([^"]+)"/)?.[1];
   if (!ticket) throw new Error('no ticket');
   const approval = await fetch(new URL('/dex/approve', base), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ticket, username: process.env.DEX_REACH_OWNER_USER || '', password: process.env.DEX_REACH_OWNER_PASSWORD || '' }), redirect: 'manual' });
-  const code = new URL(approval.headers.get('location') || '').searchParams.get('code');
-  if (!code) throw new Error('approval failed');
-  return code;
+  // The whole response, so the SDK can check RFC 9207's `iss` rather than being handed a bare code.
+  const params = new URL(approval.headers.get('location') || '').searchParams;
+  if (!params.get('code')) throw new Error('approval failed');
+  return params;
 }
 
 const provider = new Provider();

@@ -21,7 +21,9 @@ const config = loadGatewayConfig();
 const issuerUrl = new URL('/', config.publicBaseUrl);
 const resourceUrl = new URL('/mcp', config.publicBaseUrl);
 const audit = new AuditLog();
-const oauth = new ReachOAuthProvider(config.stateDir, config.ownerUser, config.ownerPassword, resourceUrl);
+// issuerUrl is handed over explicitly so the `iss` on the authorization response is the same
+// string the discovery document publishes, not one derived separately and liable to drift.
+const oauth = new ReachOAuthProvider(config.stateDir, config.ownerUser, config.ownerPassword, resourceUrl, issuerUrl);
 const nodeAuth = new NodeAuthStore(config.stateDir);
 await oauth.initialize();
 await nodeAuth.initialize();

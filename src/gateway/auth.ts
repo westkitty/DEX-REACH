@@ -78,7 +78,8 @@ export class ReachOAuthProvider implements OAuthServerProvider {
     stateDir: string,
     private readonly ownerUser: string,
     private readonly ownerPassword: string,
-    private readonly resourceUrl: URL
+    private readonly resourceUrl: URL,
+    private readonly issuerUrl: URL = new URL('/', resourceUrl)
   ) {
     this.stateFile = path.join(stateDir, 'oauth.json');
     this.clientsStore = new PersistentClientsStore(this);
@@ -91,6 +92,15 @@ export class ReachOAuthProvider implements OAuthServerProvider {
       this.state = structuredClone(EMPTY_STATE);
     }
     this.sweep();
+  }
+
+  /**
+   * The issuer identifier exactly as the discovery document reports it. A client compares `iss`
+   * against `metadata.issuer` by string equality, so this deliberately reuses the same URL the
+   * router is given rather than rebuilding a value that could differ by a trailing slash.
+   */
+  issuerIdentifier(): string {
+    return this.issuerUrl.href;
   }
 
   getClient(clientId: string): OAuthClientInformationFull | undefined {
@@ -128,6 +138,14 @@ export class ReachOAuthProvider implements OAuthServerProvider {
     const redirect = new URL(pending.params.redirectUri);
     redirect.searchParams.set('code', code);
     if (pending.params.state) redirect.searchParams.set('state', pending.params.state);
+    // RFC 9207. The discovery document advertises `authorization_response_iss_parameter_supported`,
+    // and a client that reads that claim MUST reject an authorization response without `iss`. The
+    // SDK appends it for providers that redirect from inside /authorize; this gateway does not --
+    // it renders an owner login form there and emits the authorization response from its own
+    // /dex/approve route, which the SDK never sees. Omitting it here made the advertised claim a
+    // lie and stopped every spec-compliant MCP client at the callback, with a server that otherwise
+    // looked healthy.
+    redirect.searchParams.set('iss', this.issuerIdentifier());
     return redirect.toString();
   }
 

@@ -390,6 +390,37 @@ The project licence is unchanged and is not chosen by this tooling.
 
 ---
 
+## Physical and Runtime Proof
+
+Everything above is a claim about behaviour. `npm run proof` is the answer to "prove it here, now":
+
+```bash
+npm run proof              # every proof this machine can establish; the rest recorded as unverified
+npm run proof -- --json    # the same run as a machine-readable artifact
+npm run proof -- --no-live # skip the live gateway/node pair
+npm run proof -- --require-live  # fail if the pair cannot start, instead of recording it unverified
+```
+
+It starts a **real gateway and a real node agent as separate OS processes**, enrolls the node, completes the Ed25519 enrollment ceremony, connects a real MCP client through the full OAuth flow, and drives owner policy from the CLI while that client watches what happens. Nothing is stubbed and nothing is reused from a previous run. It works entirely inside a temporary state directory on a loopback port, so it never touches an existing install and never contacts a deployed gateway.
+
+Nineteen proofs are required before DEX//REACH may be called physically proven. Each one names the single environment that can establish it, and what a pass still does **not** establish:
+
+| Environment | What it can establish |
+| --- | --- |
+| `this-process` | Policy, profiles, grants, budgets, receipts, traces and evidence, against the real modules |
+| `local-pair` | Routing, transport authentication, end-to-end refusal, the kill switch, revocation and recovery |
+| `macos-host` | A real install of the launchd service on a host its owner offered |
+| `android-device` | ADB operations against a physically attached phone |
+| `second-machine` | That two physically separate machines stay distinct |
+
+**An absent environment can never produce a pass.** A result reported for hardware that was not present is discarded, and the report says it was discarded — the line reads `UNVERIFIED — HARDWARE NOT AVAILABLE` with the reason. An item nobody attempted says so rather than being left out. Unverified is a third outcome, not a soft failure: no Android device attached is not evidence that ADB handling is broken, and recording it red would teach you to ignore red lines on the day one of them is real. The run exits non-zero only on a genuine failure.
+
+Two defects came out of the first executed run, neither of which any source test could have seen: a gateway whose OAuth discovery document advertised RFC 9207 support while its own approval route omitted the `iss` parameter, which stopped every spec-compliant MCP client at the callback; and a re-enrolled node that retried a transport proof the gateway had forgotten, forever, with nothing in either log saying why.
+
+Current state on a Linux container: **18 of the 19 required proofs established**, with `fresh-node-install` unverified because it needs a macOS host its owner authorizes with `DEX_REACH_PROOF_ALLOW_INSTALL=1`. That is not the same as proven on the owner's Mac, and this tooling does not say otherwise.
+
+---
+
 ## Install and Run
 
 ### Requirements

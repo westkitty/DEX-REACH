@@ -51,7 +51,9 @@ A fix must preserve DEX//REACH's core trust model:
 - credentials, enrollment files, tokens, private keys, policies, and sensitive file contents do not enter Git, public documentation, or the redacted audit trail;
 - persistent-service installation and convenience launchers may restore already-installed services but must not silently widen access mode, client ceilings, capability grants, credentials, roots, profiles, or trust boundaries;
 - live trust reports are evidence-scoped: a PASS means only the listed runtime checks passed and never substitutes for full regression, deployment, hardware, or hosted-CI proof;
-- simulation evidence is never represented as proof of separate physical hardware.
+- simulation evidence is never represented as proof of separate physical hardware;
+- anything the gateway's OAuth discovery document advertises must be performed by the route that actually answers, including routes the MCP SDK's own auth router never sees, because a client that trusts an advertised claim and finds it unhonoured fails in a way the server cannot see;
+- a proof run records only what it observed in that run: an item whose environment was absent is `UNVERIFIED — HARDWARE NOT AVAILABLE`, a result reported for absent hardware is discarded rather than believed or silently dropped, and a run on one host is never described as proof about another.
 
 Public visibility of this repository is not a security boundary. Authentication, explicit enrollment, least authority, local policy, revocation, and runtime proof are.
 

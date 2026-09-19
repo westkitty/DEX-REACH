@@ -19,6 +19,7 @@
     "invariants": "tsx scripts/invariants.ts",
     "verify:clean-build": "tsx scripts/verify-clean-build.ts",
     "release:provenance": "tsx scripts/release-provenance.ts",
+    "proof": "tsx scripts/proof-run.ts",
     "install:node": "npm run build && tsx scripts/install-node.ts",
     "install:dock": "zsh scripts/install-dock-launcher.sh",
     "verify": "npm run typecheck && npm run invariants -- --check && npm test && npm run build && npm audit --omit=dev --audit-level=high && npm run probe:backend",

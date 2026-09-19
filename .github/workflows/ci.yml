@@ -64,3 +64,33 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run verify:clean-build
+
+  # The source tests construct every module's inputs directly, so they cannot see an integration
+  # that is wrong at the seams. This job starts a real gateway and a real node agent as separate
+  # processes on a loopback port and drives them with a real MCP client through the full OAuth
+  # flow. It is what caught an authorization response that contradicted the gateway's own discovery
+  # document, and a re-enrolled node that retried a refused credential forever.
+  #
+  # Items whose environment this runner does not have -- a macOS host, an Android device, a second
+  # physical machine -- are recorded as UNVERIFIED and do not fail the job. Only a proof that ran
+  # and did not hold does.
+  runtime-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        # --require-live: this runner can start a gateway and a node, so a pair that fails to come
+        # up is a regression, not a missing environment. Without it the six live-pair proofs would
+        # quietly drop to UNVERIFIED and the job would still pass.
+      - run: npm run proof -- --require-live
+      - name: Upload the proof run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-run
+          path: release/proof-run.json
+          if-no-files-found: warn

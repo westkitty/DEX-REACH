@@ -44,12 +44,14 @@ export const DEX_RELEASE_INVARIANTS: readonly ReleaseInvariant[] = [
   { id: 'DEX-INV-029', capability: 'Rolling execution budgets only narrow authority', evidenceClass: 'regression' },
   { id: 'DEX-INV-030', capability: 'Capability requests never grant authority', evidenceClass: 'regression' },
   { id: 'DEX-INV-031', capability: 'Policy assertions and append-only policy history', evidenceClass: 'regression' },
-  { id: 'DEX-INV-032', capability: 'Node transport authentication is a separate cryptographic domain from receipt signing', evidenceClass: 'regression' },
+  { id: 'DEX-INV-032', capability: 'Node transport authentication is a separate cryptographic domain from receipt signing', evidenceClass: 'mixed' },
   { id: 'DEX-INV-033', capability: 'A node transport proof cannot be replayed within its validity window', evidenceClass: 'regression' },
   { id: 'DEX-INV-034', capability: 'A capability adapter declares; DEX decides', evidenceClass: 'regression' },
   { id: 'DEX-INV-035', capability: 'Node-local secret values never leave the node (EXPERIMENTAL)', evidenceClass: 'regression' },
   { id: 'DEX-INV-036', capability: 'Evidence bundles are portable, content-free, and never claim more than they prove', evidenceClass: 'regression' },
-  { id: 'DEX-INV-037', capability: 'A release is a function of tracked source at one commit, and says what it does not prove', evidenceClass: 'regression' }
+  { id: 'DEX-INV-037', capability: 'A release is a function of tracked source at one commit, and says what it does not prove', evidenceClass: 'regression' },
+  { id: 'DEX-INV-038', capability: 'A proof run records only what it observed, and absent hardware is never a pass', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-039', capability: 'The gateway never advertises an authorization behaviour it does not perform', evidenceClass: 'mixed' }
 ] as const;
 
 export function invariantManifest() {
