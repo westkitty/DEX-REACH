@@ -106,6 +106,16 @@ test('node-targeted actions require an explicit node_id and reach_plan keeps its
     const write = byName.get('reach_file_write')!.inputSchema as unknown as { required?: string[] };
     assert.ok(write.required?.includes('path'));
     assert.ok(write.required?.includes('text'));
+
+    // No first-class action takes a secret alias directly. The only remote route to a
+    // credential-bearing invocation is `reach_plan`'s free-form target arguments, which makes such a
+    // call exact, one-use, identity-bound and recorded before it runs -- the posture an EXPERIMENTAL
+    // credential feature should have. This is asserted so the direct route cannot be opened by
+    // accident; opening it would be a deliberate widening of the published surface.
+    for (const name of EXPECTED_TOOLS) {
+      const schema = byName.get(name)!.inputSchema as unknown as { properties?: Record<string, unknown> };
+      assert.ok(!schema.properties?.secrets, `${name} accepts a secret alias directly; only an exact plan may carry one`);
+    }
   } finally {
     await close();
   }

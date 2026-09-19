@@ -1,6 +1,7 @@
 import type { ClientKind } from './protocol.js';
 import { extractPaths, pathAllowed } from './security.js';
 import { describeCompatibilityTool, describeOperation } from './operations.js';
+import { requestNamesSecrets } from './secrets.js';
 
 export type ReachCapability =
   | 'inspect'
@@ -8,10 +9,16 @@ export type ReachCapability =
   | 'file.write'
   | 'checkpoint'
   | 'process.shell'
-  | 'compat';
+  | 'compat'
+  /**
+   * EXPERIMENTAL. Authority to have the node inject a stored secret value into one local
+   * invocation. Deliberately independent: holding `process.shell` must not imply the authority to
+   * hand a credential to a process, or every shell grant would silently be a credential grant.
+   */
+  | 'secret.use';
 
 export const REACH_CAPABILITIES: readonly ReachCapability[] = [
-  'inspect', 'file.read', 'file.write', 'checkpoint', 'process.shell', 'compat'
+  'inspect', 'file.read', 'file.write', 'checkpoint', 'process.shell', 'compat', 'secret.use'
 ];
 
 export type CapabilityGrant = {
@@ -52,11 +59,18 @@ export function operationCapability(operation: string): ReachCapability {
 export function requiredCapabilities(operation: string, args: Record<string, unknown> = {}): ReachCapability[] {
   const base = operationCapability(operation);
   const descriptor = describeOperation(operation);
-  if (!descriptor?.workspaceSafeResolvedPerTool) return [base];
-  const tool = typeof args.tool === 'string' ? args.tool : '';
-  const known = describeCompatibilityTool(tool);
-  if (!known) return [...REACH_CAPABILITIES];
-  return base === known.capability ? [base] : [base, known.capability];
+  const required: ReachCapability[] = [base];
+  if (descriptor?.workspaceSafeResolvedPerTool) {
+    const tool = typeof args.tool === 'string' ? args.tool : '';
+    const known = describeCompatibilityTool(tool);
+    if (!known) return [...REACH_CAPABILITIES];
+    if (!required.includes(known.capability)) required.push(known.capability);
+  }
+  // Naming a stored secret is its own authority, whatever the operation is. Reading it from the
+  // request rather than from the operation catalog is deliberate: the same `dex.process.run` is a
+  // shell call with no credential in one request and a credential-bearing one in the next.
+  if (requestNamesSecrets(args) && !required.includes('secret.use')) required.push('secret.use');
+  return required;
 }
 
 /** All path-bearing request arguments, including plural compatibility-tool arrays. */

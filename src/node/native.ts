@@ -9,6 +9,7 @@ import { canonicalPathForScope, commandGuard, pathAllowed, parseReadonlyCommand 
 import type { ReachProfile } from '../shared/protocol.js';
 import { workspaceSafeOperationRefusal } from '../shared/profiles.js';
 import { stateDir } from '../shared/local-env.js';
+import { NO_SECRETS, requestedSecretAliases, resolveSecrets, scrubSecretValues, secretInjectionRefusal, type ResolvedSecrets } from '../shared/secrets.js';
 import { describeOperation } from '../shared/operations.js';
 
 const execFileAsync = promisify(execFile);
@@ -122,23 +123,52 @@ export function nodeShell(): string {
   return process.platform === 'darwin' ? '/bin/zsh' : '/bin/sh';
 }
 
-export async function nativeProcess(command: string, cwd: string, profile: ReachProfile, timeoutMs: number, roots: string[] = [cwd]): Promise<Record<string, unknown>> {
+/**
+ * Run a bounded local command.
+ *
+ * `secrets` is already-resolved material for this one invocation. It is injected into the child's
+ * environment and never into the command string: a value on a command line is visible in the
+ * process table to every other process on the machine, which would defeat the whole point. Values
+ * are scrubbed from stdout and stderr on the way back, best effort and only for a verbatim echo.
+ */
+export async function nativeProcess(
+  command: string,
+  cwd: string,
+  profile: ReachProfile,
+  timeoutMs: number,
+  roots: string[] = [cwd],
+  secrets: ResolvedSecrets = NO_SECRETS
+): Promise<Record<string, unknown>> {
   const blocked = commandGuard(command, profile, roots);
   if (blocked) throw new Error(blocked);
+  // The last gate before injection, repeated from nativeCall and the node dispatcher because this is
+  // where a value actually enters a child environment. Under read-only the allowlisted grammar
+  // includes programs that print their own environment, and READ-ONLY admission never consults a
+  // capability grant, so a value must not be here at all rather than relying on output scrubbing,
+  // which is best effort and explicitly not a boundary.
+  if (secrets.values.length && (profile === 'read-only' || profile === 'workspace-safe')) {
+    throw new Error(`the ${profile} profile does not inject stored secrets; it admits only commands that have no use for a credential`);
+  }
   const timeout = Math.max(100, Math.min(timeoutMs, 60_000));
   const readonly = profile === 'read-only' ? parseReadonlyCommand(command, roots) : null;
   const shell = profile === 'read-only' ? null : nodeShell();
+  // safeChildEnvironment strips the node's own credential-shaped variables first; the broker's
+  // injection is layered on top of that clean base, so a stored secret cannot be shadowed by, or
+  // silently merged with, something inherited from the node process.
+  const env = { ...safeChildEnvironment(), ...secrets.env };
+  const scrub = (text: string) => scrubSecretValues(redactKnownEnvironmentSecrets(text), secrets.values);
   try {
     const { stdout, stderr } = readonly
-      ? await execFileAsync(readonly.program, readonly.args, { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env: safeChildEnvironment() })
-      : await execFileAsync(shell!, ['-lc', command], { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env: safeChildEnvironment() });
-    return { exitCode: 0, stdout: redactKnownEnvironmentSecrets(stdout), stderr: redactKnownEnvironmentSecrets(stderr) };
+      ? await execFileAsync(readonly.program, readonly.args, { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env })
+      : await execFileAsync(shell!, ['-lc', command], { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env });
+    return { exitCode: 0, stdout: scrub(stdout), stderr: scrub(stderr), secretsUsed: secrets.aliases };
   } catch (error) {
     const value = error as Error & { code?: number; stdout?: string; stderr?: string };
     return {
       exitCode: typeof value.code === 'number' ? value.code : 1,
-      stdout: redactKnownEnvironmentSecrets(value.stdout || ''),
-      stderr: redactKnownEnvironmentSecrets(value.stderr || value.message)
+      stdout: scrub(value.stdout || ''),
+      stderr: scrub(value.stderr || value.message),
+      secretsUsed: secrets.aliases
     };
   }
 }
@@ -165,6 +195,11 @@ export async function nativeCall(nodeId: string, operation: string, args: Record
   // compatibility call, so no target resolution is needed here.
   const workspaceSafeBlocked = workspaceSafeOperationRefusal(profile, operation);
   if (workspaceSafeBlocked) throw new Error(workspaceSafeBlocked);
+  // Repeated here as well as at the node's dispatcher, because this is the function that holds the
+  // only call to resolveSecrets: a future caller reaching nativeCall by another path must not be
+  // able to inject under a profile or an operation the dispatcher would have refused.
+  const secretsBlocked = secretInjectionRefusal(operation, profile, args);
+  if (secretsBlocked) throw new Error(secretsBlocked);
   switch (operation) {
     case 'dex.fingerprint':
       return executionFingerprint(nodeId, scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd'));
@@ -188,7 +223,11 @@ export async function nativeCall(nodeId: string, operation: string, args: Record
     }
     case 'dex.process.run': {
       const cwd = scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd');
-      return nativeProcess(String(args.command || ''), cwd, profile, Number(args.timeoutMs || 15000), roots);
+      // Resolve here and nowhere earlier. This is after final authorization and immediately before
+      // the invocation, so a value is in memory for the shortest window the design allows and never
+      // while the request is still being authorized, planned, traced or recorded.
+      const secrets = await resolveSecrets(nodeId, requestedSecretAliases(args));
+      return nativeProcess(String(args.command || ''), cwd, profile, Number(args.timeoutMs || 15000), roots, secrets);
     }
     default:
       throw new Error(`unknown native operation: ${operation}`);

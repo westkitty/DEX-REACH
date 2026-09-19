@@ -4,6 +4,7 @@ import { DesktopCommanderAdapter } from './adapters/desktop-commander.js';
 import { loadNodeConfig } from './config.js';
 import { ResultStore } from './result-store.js';
 import { nativeCall, createCheckpoint, defaultCwd } from './native.js';
+import { secretInjectionRefusal } from '../shared/secrets.js';
 import { executionFingerprint } from '../shared/fingerprint.js';
 import { toolGuard, pathAllowed } from '../shared/security.js';
 import { assertExecutionIdentityExpectation, assertExecutionIdentityStable, executionIdentityHash, parseExecutionIdentityExpectation } from '../shared/execution-identity.js';
@@ -61,6 +62,13 @@ async function executeOperation(operation: string, args: Record<string, unknown>
   // narrowings must apply; neither may widen the other.
   const profileBlocked = workspaceSafeOperationRefusal(config.profile, operation);
   if (profileBlocked) throw new Error(profileBlocked);
+  // Every operation the node executes passes through here, including compatibility calls, which
+  // nativeCall never sees. A request that names a secret an operation cannot inject is refused
+  // rather than executed without it. The node's configured profile is used, not the effective one
+  // an authorization produced, for the same reason as the line above: both narrowings must apply.
+  const secretsBlocked = secretInjectionRefusal(operation, config.profile, args)
+    ?? secretInjectionRefusal(operation, profile, args);
+  if (secretsBlocked) throw new Error(secretsBlocked);
   if (operation === 'dc.call') {
     const tool = String(args.tool || '');
     const toolArgs = (args.arguments || {}) as Record<string, unknown>;

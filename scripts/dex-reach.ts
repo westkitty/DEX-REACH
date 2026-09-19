@@ -8,6 +8,7 @@ import { stateDir } from '../src/shared/local-env.js';
 import { pathAllowed } from '../src/shared/security.js';
 import { ACCESS_MODES, accessFile, authorizeOperation, createGrant, inspectAccessPolicyFile, isAccessMode, loadAccessState, modeForActor, parseDuration, resolveMode, restorePolicyRevision, updateAccessState } from '../src/shared/access.js';
 import { REACH_CAPABILITIES, type ReachCapability } from '../src/shared/capabilities.js';
+import { listSecretAliases, removeSecret, setSecret } from '../src/shared/secrets.js';
 import { AuditLog, auditFile } from '../src/shared/audit.js';
 import { listReceipts, verifyReceipt } from '../src/shared/receipts.js';
 import { readRuntimeStatus, runtimeFile } from '../src/node/runtime-status.js';
@@ -75,6 +76,9 @@ function usage(): never {
                                   --justification TEXT [--operation NAME]
   request approve <id> [--capability C] [--root PATH] [--for 30m] [--max-uses N]
   request deny <id>               refuse a pending request; creates no grant
+  secrets [--json]                list node-local secret aliases (never values)
+  secret set <alias> --env NAME   store a secret; the value is read from stdin, never from argv
+  secret rm <alias>               remove one stored secret
   assertions [--json]             list custom policy assertions
   assertion add <client> --note TEXT [--forbid CAP] [--write-root PATH]
   assertion clear <id>
@@ -542,6 +546,74 @@ async function requestApproveCommand(): Promise<void> {
   console.log(`${nodeId}: approved request ${id} as grant ${result.grantId}${result.request.narrowed ? ' (narrowed)' : ''}. Remote AI still cannot raise this grant.`);
 }
 
+// ---------------------------------------------------------------------------
+// EXPERIMENTAL node-local secret broker
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a secret value without it ever appearing in argv.
+ *
+ * A value passed as a command-line argument is visible in the process table to every other process
+ * on the machine and is written to the owner's shell history, so it is refused outright rather than
+ * accepted with a warning. When stdin is a terminal, echo is disabled while typing; when it is a
+ * pipe, the value is read from it, which is what makes `... | dex secret set` work in a script
+ * without the value ever being an argument.
+ */
+async function readSecretValue(): Promise<string> {
+  for (const rejected of ['--value', '--secret', '--password']) {
+    if (argv.includes(rejected)) {
+      throw new Error(`refusing ${rejected}: a secret on the command line is visible in the process table and in shell history. Pipe it in, or type it at the prompt.`);
+    }
+  }
+  if (!process.stdin.isTTY) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks).toString('utf8').replace(/\r?\n$/, '');
+  }
+  const readline = await import('node:readline');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  const asMutable = rl as unknown as { output?: NodeJS.WriteStream; _writeToOutput?: (text: string) => void };
+  asMutable._writeToOutput = () => {};
+  process.stdout.write('Secret value (not echoed): ');
+  try {
+    return await new Promise<string>(resolve => rl.question('', answer => resolve(answer)));
+  } finally {
+    rl.close();
+    process.stdout.write('\n');
+  }
+}
+
+async function secretsCommand(): Promise<void> {
+  const nodeId = await pickNodeId();
+  const aliases = await listSecretAliases(nodeId);
+  if (flag('--json', argv)) { console.log(JSON.stringify({ nodeId, secrets: aliases }, null, 2)); return; }
+  if (!aliases.length) { console.log(`${nodeId}: no stored secrets.`); return; }
+  console.log(`Node-local secrets for ${nodeId} (EXPERIMENTAL; aliases only, values never leave this node):`);
+  for (const info of aliases) {
+    console.log(`  ${info.alias.padEnd(24)} -> $${info.env.padEnd(24)} id ${info.fingerprint}  updated ${info.updatedAt.replace('T', ' ').slice(0, 19)}`);
+  }
+  console.log('  A model names an alias. It never receives a value, and secret.use is required on top of whatever the operation itself needs.');
+}
+
+async function secretSetCommand(): Promise<void> {
+  const alias = argv[2];
+  const env = arg('--env', argv);
+  if (!alias || !env) throw new Error('usage: secret set <alias> --env NAME   (value is read from stdin, never from argv)');
+  const nodeId = await pickNodeId();
+  const value = await readSecretValue();
+  const result = await setSecret(nodeId, alias, env, value);
+  console.log(`${nodeId}: ${result.replaced ? 'replaced' : 'stored'} secret ${result.info.alias} -> $${result.info.env} (id ${result.info.fingerprint}).`);
+  console.log('  The value stays on this node. Grant secret.use separately; process.shell alone does not permit it.');
+}
+
+async function secretRemoveCommand(): Promise<void> {
+  const alias = argv[2];
+  if (!alias) throw new Error('usage: secret rm <alias>');
+  const nodeId = await pickNodeId();
+  if (!(await removeSecret(nodeId, alias))) throw new Error(`no secret alias ${alias}`);
+  console.log(`${nodeId}: removed secret ${alias}.`);
+}
+
 async function assertionsCommand(): Promise<void> {
   const nodeId = await pickNodeId();
   const assertions = await loadPolicyAssertions(nodeId);
@@ -726,6 +798,12 @@ try {
       if (argv[1] === 'create') await requestCreateCommand();
       else if (argv[1] === 'approve') await requestApproveCommand();
       else if (argv[1] === 'deny') await requestDenyCommand();
+      else usage();
+      break;
+    case 'secrets': await secretsCommand(); break;
+    case 'secret':
+      if (argv[1] === 'set') await secretSetCommand();
+      else if (argv[1] === 'rm') await secretRemoveCommand();
       else usage();
       break;
     case 'assertions': await assertionsCommand(); break;

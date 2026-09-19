@@ -11,7 +11,7 @@ import {
 } from '../src/shared/adapter-contract.js';
 import { DESKTOP_COMMANDER_MANIFEST_DATA } from '../src/node/adapters/desktop-commander.manifest.js';
 import { COMPATIBILITY_TOOLS, describeCompatibilityTool, remoteCompatibilityTools } from '../src/shared/operations.js';
-import { requiredCapabilities } from '../src/shared/capabilities.js';
+import { REACH_CAPABILITIES, requiredCapabilities } from '../src/shared/capabilities.js';
 import { authorizeOperation, type AccessState } from '../src/shared/access.js';
 import { workspaceSafeToolRefusal } from '../src/shared/profiles.js';
 import { toolGuard } from '../src/shared/security.js';
@@ -176,7 +176,7 @@ test('the plan wrapper inherits the tool\'s capability instead of laundering it'
 
   // A call naming no tool, or one DEX does not classify, demands every capability and so matches
   // no grant at all.
-  assert.equal(requiredCapabilities('dc.call', {}).length, 6);
+  assert.equal(requiredCapabilities('dc.call', {}).length, REACH_CAPABILITIES.length);
   const unknown = authorizeOperation(bothHeld, claude, 'dc.call', 'development', Date.now(), { tool: 'not_a_tool' });
   assert.equal(unknown.allowed, false);
 });

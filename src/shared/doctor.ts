@@ -10,6 +10,7 @@ import { listCapabilityRequests } from './capability-requests.js';
 import { loadPolicyAssertions } from './policy-assertions.js';
 import { invariantManifest } from './invariants.js';
 import { redactWorkStatusForShare, workStatus } from './work-coordinator.js';
+import { listSecretAliases } from './secrets.js';
 import { stateDir } from './local-env.js';
 
 const execFileAsync = promisify(execFile);
@@ -55,6 +56,15 @@ export async function collectDoctorReport(options: DoctorOptions = {}): Promise<
   const budget = options.nodeId ? await inspectBudgetPolicy(options.nodeId, dir) : null;
   const requests = options.nodeId ? await listCapabilityRequests(options.nodeId, dir) : [];
   const assertions = options.nodeId ? await loadPolicyAssertions(options.nodeId, dir).catch(() => []) : [];
+  // Alias metadata only, and never a fingerprint: the point is that an owner can see the node holds
+  // credentials at all. A corrupt store is reported as an error rather than as zero aliases, because
+  // "no secrets stored" and "the secret store is unreadable" are very different things to be told.
+  const secrets = options.nodeId
+    ? await listSecretAliases(options.nodeId, dir).then(
+        aliases => ({ count: aliases.length, aliases: aliases.map(entry => entry.alias), error: null as string | null }),
+        error => ({ count: null, aliases: [] as string[], error: error instanceof Error ? error.message : String(error) })
+      )
+    : null;
   const grants = options.nodeId && access ? access.state.grants.length : 0;
   const coordination = await workStatus();
   const report: Record<string, unknown> = {
@@ -85,6 +95,17 @@ export async function collectDoctorReport(options: DoctorOptions = {}): Promise<
     } : { exists: false, note: 'no node id supplied' },
     budgets: budget ? { unrestricted: budget.unrestricted, valid: budget.valid, exists: budget.exists } : null,
     capabilityRequests: { count: requests.length, pending: requests.filter(request => request.status === 'pending').length },
+    secrets: secrets
+      ? {
+          // EXPERIMENTAL. Values never appear here, in any mode. Alias names are withheld from a
+          // shareable report because a name like "acme-prod-deploy" describes infrastructure even
+          // though it is not itself a credential.
+          experimental: true,
+          count: secrets.count,
+          aliases: options.share ? undefined : secrets.aliases,
+          error: secrets.error
+        }
+      : null,
     assertions: { count: assertions.length },
     coordinator: options.share ? redactWorkStatusForShare(coordination) : {
       substantiveSlots: coordination.capacity.substantiveSlots,

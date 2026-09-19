@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { AccessMode, AccessSnapshot, ClientKind, ReachProfile, RequestActor } from './protocol.js';
 import { stateDir } from './local-env.js';
-import { operationCapability, requestPaths, requiredCapabilities, rootsCover, type CapabilityGrant, type ReachCapability } from './capabilities.js';
+import { REACH_CAPABILITIES, operationCapability, requestPaths, requiredCapabilities, rootsCover, type CapabilityGrant, type ReachCapability } from './capabilities.js';
 import { atomicWriteFile, withFileLock } from './state-io.js';
 import { hashValue } from './hash.js';
 import { describeOperation, readOnlyDelegatedOperations, readOnlyInspectOperations, requestedAuthorityCost } from './operations.js';
@@ -308,7 +308,7 @@ export function policyCheck(state: AccessState): string[] {
   if (!Number.isInteger(state.revision) || state.revision < 0) errors.push('policy revision must be a non-negative integer');
   for (const grant of state.grants) {
     if (!['chatgpt','claude','smoke','other'].includes(grant.client)) errors.push(`grant ${grant.id} has invalid client`);
-    if (grant.capabilities.some(capability => !['inspect','file.read','file.write','checkpoint','process.shell','compat'].includes(capability))) errors.push(`grant ${grant.id} has invalid capability`);
+    if (grant.capabilities.some(capability => !(REACH_CAPABILITIES as readonly string[]).includes(capability))) errors.push(`grant ${grant.id} has invalid capability`);
     if (!grant.capabilities.length) errors.push(`grant ${grant.id} has no capabilities`);
     if (!grant.roots.length) errors.push(`grant ${grant.id} has no roots`);
     if (!Number.isFinite(Date.parse(grant.until))) errors.push(`grant ${grant.id} has invalid expiry`);

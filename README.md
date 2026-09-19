@@ -313,6 +313,30 @@ The remote compatibility surface remains exactly the approved 22 of the adapter'
 
 ---
 
+## Node-Local Secrets (EXPERIMENTAL)
+
+A remote AI can ask the node to run a command that needs a credential without ever being told the credential. The owner stores a value locally under an alias; the model names the alias.
+
+```bash
+npm run dex -- secret set deploy-token --env DEPLOY_TOKEN   # value is typed without echo, or piped in
+npm run dex -- secrets                                      # aliases only, never values
+npm run dex -- secret rm deploy-token
+```
+
+The value lives in `~/.dex-reach/nodes/<node>.secrets.json`, mode 0600, on the node. It is read after final authorization and immediately before the local invocation, injected into that one child process's environment, and scrubbed from what comes back. It is never resolved at the gateway, in MCP, when a request is created, or while a plan is being made, and it never appears in a plan, an audit entry, a receipt, a trace, a checkpoint, a `doctor --share` report or Git.
+
+**Using a secret is its own authority.** `secret.use` is a separate capability. Holding `process.shell`, `file.write` and everything else combined does not let a client name a stored alias, and holding `secret.use` alone grants no shell to inject one into. That separation is the point: otherwise every shell grant would quietly have been a credential grant.
+
+**A named alias is never silently dropped.** An unknown alias, an operation DEX cannot inject into, or a profile that does not inject at all is a refusal, not a command that runs without the credential it asked for. READ-ONLY and `workspace-safe` refuse injection outright — READ-ONLY admits inspection commands without consulting a capability grant at all, and an inspection command has no use for a credential.
+
+**Remotely, a credential-bearing call must be planned.** No first-class MCP action takes a secret alias. The only remote route is `reach_plan`'s exact target arguments, so such a call is one-use, identity-bound and recorded before it runs rather than issued free-form.
+
+**What this does not do.** It does not make arbitrary shell safe. A command holding a credential in its environment can do anything a command can do with it, including send it somewhere DEX cannot see. Output scrubbing removes a value echoed verbatim, which is the common accident; it cannot remove one the command encoded, split or forwarded. Controlled injection narrows where a value travels. It is not a reason to grant shell you would not otherwise grant.
+
+This feature is **experimental**: it is proven by regression only, and no deployed node has brokered a secret.
+
+---
+
 ## Install and Run
 
 ### Requirements
