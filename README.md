@@ -371,6 +371,25 @@ Three of those never become PASS, whatever a bundle contains. **Node identity**:
 
 ---
 
+## Release Provenance
+
+A build that succeeds proves nothing about whether anyone else can reproduce it. `npm run verify:clean-build` answers the question that matters: are the artifacts in `dist/` a function of the tracked source at this commit, and nothing else?
+
+```bash
+npm run verify:clean-build     # rebuild this commit from git archive and compare, file by file
+npm run release:provenance     # full manifest: checks, checksums, SBOM, platform claims
+```
+
+The comparison exports the commit with `git archive`, installs from `package-lock.json` alone, and builds in a directory with a different absolute path and no pre-existing output. That catches four things a green build hides: an untracked file the build reads, a stale artifact left over from a module that no longer exists, a globally installed package the workflow never installs, and an absolute path or timestamp baked into the output. A difference names the file and its likely cause. It runs as its own CI job, so a failure there is not mistaken for a test or audit failure.
+
+`release:provenance` writes `release/manifest.json`, `release/checksums.txt` and a CycloneDX `release/sbom.cdx.json`. The manifest records the exact commit, whether the working tree was clean, the toolchain, every check with its result, a SHA-256 for each artifact, and a hash of the SBOM normalized so two builds of one dependency tree hash alike.
+
+**It states what it did not do.** A check that could not run is recorded with its reason rather than omitted, because a missing line reads as "fine" to everyone who was not there. `live deployment` is always UNVERIFIED: nothing in a build exercises a deployed gateway, an installed service or a real MCP client session. macOS, Android and second-machine claims read `UNVERIFIED — HARDWARE NOT AVAILABLE` unless the checks genuinely ran there. And reproducibility does not mean correctness: a compromised upstream package produces a perfectly reproducible build of compromised code.
+
+The project licence is unchanged and is not chosen by this tooling.
+
+---
+
 ## Install and Run
 
 ### Requirements

@@ -26,6 +26,7 @@ jobs:
       - run: npm install -g npm@11.19.1
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run invariants -- --check
       - run: npm test
       - run: npm run build
       - name: Production dependency audit
@@ -40,3 +41,26 @@ jobs:
             sleep $((attempt * 20))
           done
           npm audit --omit=dev --audit-level=high
+
+  # A build that succeeds proves nothing about whether it can be rebuilt by anyone else. This job
+  # exports the commit with `git archive`, installs from the lockfile alone and builds in a
+  # different directory, then compares every artifact by hash against a build of the checkout. It
+  # catches an untracked build input, a stale artifact, a globally installed dependency the workflow
+  # never installs, and an absolute path baked into the output. It is a separate job so a failure
+  # here is attributable and does not read as a test or audit failure.
+  reproducible-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # git archive needs the commit's full tree, and a shallow clone with no history is fine,
+          # but the checkout must be of the commit itself rather than a synthetic merge, or the
+          # rebuild would compare against something that exists nowhere in the repository.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run verify:clean-build
