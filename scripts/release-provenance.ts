@@ -34,13 +34,35 @@ async function git(args: string[]): Promise<string> {
   return stdout.trim();
 }
 
+/**
+ * Lines worth keeping from a failed command.
+ *
+ * `error.message` is only "Command failed: npm test", which tells a reader that something went wrong
+ * and nothing about what. A manifest whose failure line cannot be acted on is barely better than one
+ * that omitted the check, so the actual failing output is carried instead, newest lines first.
+ */
+function failureDetail(error: unknown): string {
+  const value = error as { message?: string; stdout?: string; stderr?: string };
+  const output = [value.stderr, value.stdout]
+    .filter((text): text is string => typeof text === 'string' && text.trim().length > 0)
+    .join('\n');
+  // Anchored rather than a substring search. A loose /fail/ matches the *names* of tests that
+  // passed -- "corrupt policy fails closed" is a passing assertion -- and fills the manifest with
+  // successes while the real failure scrolls off.
+  const interesting = output
+    .split('\n')
+    .filter(line => /^not ok /.test(line) || /^# fail [1-9]/.test(line) || /^\s*(Error|TypeError|AssertionError):/.test(line) || /^npm error/.test(line))
+    .slice(0, 6);
+  const lines = interesting.length ? interesting : output.split('\n').filter(Boolean).slice(-6);
+  return [value.message ?? String(error), ...lines].join(' | ').slice(0, 1200);
+}
+
 async function runCheck(name: string, command: string, args: string[], detail: string): Promise<ReleaseCheck> {
   try {
     await execFileAsync(command, args, { cwd: repoRoot, timeout: 20 * 60_000, maxBuffer: 64 * 1024 * 1024 });
     return check(name, 'pass', detail);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return check(name, 'fail', `${detail} It failed: ${message.split('\n').slice(0, 3).join(' ').slice(0, 400)}`);
+    return check(name, 'fail', `${detail} It failed: ${failureDetail(error)}`);
   }
 }
 
