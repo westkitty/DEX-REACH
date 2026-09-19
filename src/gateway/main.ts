@@ -67,6 +67,20 @@ app.get('/healthz', (_req, res) => {
   res.json({ ok: true, service: 'DEX//REACH', version: DEX_REACH_VERSION, onlineNodes: registry.listNodes().length });
 });
 
+app.post('/node/enroll', express.json({ limit: '16kb' }), async (req, res) => {
+  try {
+    const nodeId = String(req.body?.nodeId || '');
+    const token = String(req.body?.token || '');
+    const publicKey = String(req.body?.publicKey || '');
+    await nodeAuth.consumeEnrollment(nodeId, token, publicKey);
+    res.json({ ok: true, nodeId, authMode: nodeAuth.authMode(nodeId) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'enrollment failed';
+    if (/PRIVATE KEY/.test(message)) res.status(400).json({ ok: false, error: 'private key material is not accepted' });
+    else res.status(400).json({ ok: false, error: 'enrollment failed' });
+  }
+});
+
 app.post('/dex/approve', async (req, res) => {
   try {
     const redirect = await oauth.approve(String(req.body.ticket || ''), String(req.body.username || ''), String(req.body.password || ''));

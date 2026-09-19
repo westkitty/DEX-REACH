@@ -353,6 +353,8 @@ npm run nodes -- enroll second-laptop --profile development
 
 This creates a private node environment file under `~/.dex-reach/nodes/`. Transfer that file privately to the device owner. Do not put it in Git, ChatGPT, email, or a public paste.
 
+Working nodes can later migrate to Ed25519 transport authentication without a flag-day. That keypair is not the receipt-signing key. The owner issues a one-use enrollment token (`npm run nodes -- enroll-token <node>`), the node creates the private key locally, and `complete-migration` disables bearer tokens. Gateway state stores only the public key. File-backed 0600 storage is the proven local store; Keychain-backed storage is not claimed.
+
 ### 2. Device owner installs the node
 
 ```bash

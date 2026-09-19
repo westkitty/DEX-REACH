@@ -1,7 +1,7 @@
 # DEX//REACH Operational State
 
 <!-- operational-state:metadata
-{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":24,"last_updated":"2026-09-19T02:44:11Z","current_baseline":{"identity":"DEX//REACH 0.3.2 identity-bound trust baseline plus local portfolio control on main","state":"verified-local-and-public-runtime","last_verified":"2026-09-18T16:35:36Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, Dock control terminal, project docs"],"linked_parent_state":null}
+{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":25,"last_updated":"2026-09-19T02:52:33Z","current_baseline":{"identity":"DEX//REACH 0.3.2 identity-bound trust baseline plus local portfolio control on main","state":"verified-local-and-public-runtime","last_verified":"2026-09-18T16:35:36Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, Dock control terminal, project docs"],"linked_parent_state":null}
 -->
 
 ## 1. Project Identity and Scope
@@ -40,7 +40,7 @@ Provide explicit-node remote access for filesystem, search/edit, process/termina
 
 ## 4. Active Invariants
 
-The detailed proof obligations live in [`docs/INVARIANTS.md`](docs/INVARIANTS.md), and `src/shared/invariants.ts` is the synchronized machine-consumable ID index. There are **31 release-blocking invariants**. The active groups are:
+The detailed proof obligations live in [`docs/INVARIANTS.md`](docs/INVARIANTS.md), and `src/shared/invariants.ts` is the synchronized machine-consumable ID index. There are **32 release-blocking invariants**. The active groups are:
 
 - **DEX-INV-001** — explicit node selection and no routing fallback.
 - **DEX-INV-002–003** — node-local owner authority and fail-closed policy.
@@ -59,6 +59,7 @@ The detailed proof obligations live in [`docs/INVARIANTS.md`](docs/INVARIANTS.md
 - **DEX-INV-029** — rolling execution budgets only narrow authority (regression-only; no deployed node has a live budget).
 - **DEX-INV-030** — capability requests never grant authority; only local owner approval creates an ordinary grant (regression-only; not a public MCP action).
 - **DEX-INV-031** — custom policy assertions run before owner-policy persist; policy history is append-only and restore creates a new revision (regression-only).
+- **DEX-INV-032** — node transport authentication is a separate cryptographic domain from receipt signing (regression-only; no live asymmetric enrollment on the deployed gateway).
 
 ## 5. Verified Working Behavior
 
@@ -106,6 +107,7 @@ Directly issuing `launchctl kickstart -k` **from the DEX request being killed** 
 - **UNV-007 — macOS capacity probes:** live `work-status` on the primary Mac returned parseable memory `warning`, CPU `saturated`, and thermal `unknown`. Fixture tests still cover the parsers; thermal remains unknown on this host.
 - **UNV-011 — Rolling execution budgets on a live node:** policy/usage files, reservation, lock order, and owner CLI pass regression tests on the primary Mac. No deployed node has a configured budget, so live enforcement against a real MCP client is unverified.
 - **UNV-012 — Capability request remote path:** local request/approve/deny CLI and the node operation `dex.capability.request` pass regression tests. The public MCP surface remains 16 actions; remote ChatGPT/Claude cannot file a request through MCP until that contract is intentionally expanded.
+- **UNV-013 — Asymmetric node authentication on a live gateway/node pair:** enrollment tokens, proof verification, dual-mode migration and private-key isolation pass regression tests. No deployed gateway has accepted a DexNodeEd25519 websocket, and Keychain storage is not claimed.
 - **UNV-008 — MCP SDK v2 runtime behavior:** the migration to `@modelcontextprotocol/server`, `/client`, `/node`, `/express` and `/server-legacy` 2.0.0 with zod 4 typechecks, builds, and passes 105 local tests including five served-surface contract tests driven by a real MCP client over an in-memory transport. No deployed gateway has served a request from this build. OAuth authorization-server behavior in particular is now provided by `@modelcontextprotocol/server-legacy/auth`, which upstream marks as a frozen migration bridge, and that path has not been exercised against a real client.
 - **UNV-010 — workspace-safe on a configured node:** the profile, its refusals and the composition rules pass ten focused regression tests, but no node has been started with `DEX_REACH_PROFILE=workspace-safe`. Every installed node still carries the profile it was configured with, and the default is unchanged at `development`, so the profile is available and unused rather than deployed.
 - **UNV-009 — Causal tracing on a live gateway/node pair:** span creation, W3C `traceparent` continuation, the bounded trace store, the redaction rules and the `trace`/`traces` CLI pass eight focused regression tests, and the store and CLI were exercised for real in this container. No trace has been produced by a deployed gateway serving a real request, so the gateway-to-node header propagation is typechecked but not runtime-proven.
@@ -190,6 +192,7 @@ The current 0.3.2 source baseline now also adds bounded local portfolio intellig
 
 ## 13. Compact Revision Log
 
+- **r25** — Added asymmetric node transport authentication as a separate Ed25519 domain from receipt signing. Gateway node-auth v2 stores public keys, one-use enrollment tokens and a bounded nonce cache; private keys never persist there. Legacy bearer nodes remain valid; explicit enrollment of a transport public key enters `migrating`; `complete-migration` makes the node asymmetric-only and refuses silent downgrade. Websocket upgrade accepts `DexNodeEd25519` proofs or bearer tokens. Transport keys live in `nodes/<id>.transport.ed25519.pem` (0600), not the receipts key path. File-backed storage is the proven store; Keychain is not claimed. Added DEX-INV-032. Validation on the primary Mac: typecheck, 32-invariant check, 160/160 tests, production build, 0 production vulnerabilities, 26-tool backend probe. No live gateway/node pair has completed asymmetric enrollment, so this is regression-only. Do-not-install and PROOF STALE marks from r17 still stand.
 - **r24** — Fixed capability-request risk classification. Unknown operations are refused instead of being recorded as inspect. Capability-only requests take the highest catalog-derived risk of the requested capabilities and never default to inspect. DEX-INV-030 wording updated to match. Request creation still grants no authority. Validation on the primary Mac: typecheck, 31-invariant check, 154/154 tests, build, 0 production vulnerabilities, 26-tool backend probe. Do-not-install and PROOF STALE marks from r17 still stand.
 - **r23** — Added read-only `dex doctor` with `--json`, `--deep` and `--share`. The report is evidence-scoped: source/branch/dirty, source version (explicitly not installed-service proof), owner policy, budgets, requests, assertions, coordinator slots/pressure/leases/queue, and the 16-action MCP contract with PROOF STALE caveats. `--share` redacts repository paths, upstream and hostname. `--deep` adds launchd load state without treating load as health. Validation on the primary Mac: typecheck, 150/150 tests, production build, 0 production vulnerabilities, live `doctor --share`.
 - **r22** — Added custom policy assertions and append-only policy history. Assertions are regression tests against the real policy engine, not a second authorizer: candidate owner state is checked with built-in policyCheck plus custom assertions before persist. History records owner authority mutations and not grant-use counters. Restoring an old revision creates a new revision. Owner CLI: `assertions`, `assertion add/clear`, `policy-history`, `policy-restore`. Added DEX-INV-031. Validation on the primary Mac: typecheck, 31-invariant manifest, 149/149 tests, production build, 0 production vulnerabilities.

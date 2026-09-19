@@ -31,6 +31,8 @@ import { DEX_REACH_VERSION } from '../shared/version.js';
 import { checkpointStrategyFor, plannableOperations } from '../shared/operations.js';
 import { workspaceSafeOperationRefusal, workspaceSafeToolRefusal } from '../shared/profiles.js';
 import { childSpan, recordSpan, traceContextFrom, type ReachTraceContext } from '../shared/trace.js';
+import { loadTransportKeys } from './transport-keys.js';
+import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -318,7 +320,15 @@ async function connect(): Promise<void> {
   if (stopped) return;
   const url = new URL(config.gatewayWs);
   url.searchParams.set('nodeId', config.nodeId);
-  const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${config.token}` } });
+  const headers: Record<string, string> = {};
+  const transport = await loadTransportKeys(config.nodeId);
+  if (transport) {
+    const proof = signNodeProof(transport.privateKey, expectedProofDefaults(config.nodeId));
+    headers.Authorization = encodeAuthorizationProof(proof);
+  } else {
+    headers.Authorization = `Bearer ${config.token}`;
+  }
+  const ws = new WebSocket(url, { headers });
   let lastAliveAt = Date.now();
   ws.on('pong', () => { lastAliveAt = Date.now(); });
 

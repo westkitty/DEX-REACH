@@ -35,6 +35,7 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 | DEX-INV-029 | Rolling execution budgets only narrow authority | Owner-configured shared and per-client rolling budgets, including missing/corrupt budget files and concurrent reservations | A budget never transforms DENY into ALLOW; OFF, READ-ONLY, workspace-safe, client ceilings and grants still win; shared and per-client ceilings intersect by minimum; usage counters do not change the owner policy hash; a preauthorization denial consumes nothing; a successful reservation keeps its rolling cost after execution failure while releasing only the inflight concurrency slot; missing/corrupt budget policy is unrestricted because owner policy remains the authority source; corrupt usage with a real policy fails closed; plan/commit inherit the target's cost | Budget regression tests | Verified by regression only; no deployed node has enforced a live budget | Budget policy/usage, reservation, or CLI changes |
 | DEX-INV-030 | Capability requests never grant authority | AI-created capability request, owner approve/deny/expiry, and owner narrowing | Creating a request does not create a grant or change the owner policy hash; only local owner approval creates an ordinary CapabilityGrant; owner approval may narrow and cannot widen; deny and expiry create no grant; OFF still refuses execution after approval; raw secret-bearing arguments are not stored; an explicit unknown operation is refused rather than recorded as inspect; capability-only requests carry the highest catalog-derived risk of the requested capabilities and never default to inspect | Capability-request regression tests | Verified by regression only; not advertised as a public MCP action | Capability-request store, approval, or grant creation changes |
 | DEX-INV-031 | Policy assertions and append-only policy history | Owner policy mutation, custom assertions, grant-use counters, and restore | Candidate owner policy is checked with built-in policyCheck plus custom assertions before persist; a violating write is refused; history is append-only; restoring an old revision creates a new revision; grant-use counters do not append history | Policy-assertion regression tests | Verified by regression only | Policy assertion, history, or owner persist changes |
+| DEX-INV-032 | Node transport authentication is a separate cryptographic domain from receipt signing | Enrollment token, transport Ed25519 proof, legacy bearer coexistence, revocation, and gateway persistence | Transport keys are not receipt keys; gateway state stores only public keys; private keys never persist in node-auth.json; unknown/revoked/wrong-key/tampered/stale/future/replay/wrong-node/wrong-path/incompatible-protocol proofs fail; enrollment tokens are one-use; a migrated asymmetric node cannot silently downgrade to bearer; legacy bearer remains valid during an explicit migrating state | Node-transport-auth regression tests | Verified by regression only; no live gateway/node pair has completed asymmetric enrollment on the primary Mac | Node transport auth, enrollment, or node websocket authentication changes |
 
 ## Mandatory validation subsets
 
@@ -87,6 +88,14 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 - `npm test`, including `tests/budget.test.ts`
 - `npm run invariants -- --check`
 - confirm budget usage files are not tracked by Git and that policy-hash tests still pass without grant consumption
+
+### Any node transport-authentication change
+
+- DEX-INV-013, 032
+- `npm run typecheck`
+- `npm test`, including `tests/node-transport-auth.test.ts` and `tests/node-auth.test.ts`
+- confirm gateway `node-auth.json` fixtures never contain private key PEM
+- confirm transport key files are not receipt key files
 
 ### Any shared-machine coordination change
 
