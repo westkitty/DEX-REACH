@@ -17,8 +17,26 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Node 22 bundles npm 10, whose `npm audit` falls back to the registry's retired quick-audit
+      # endpoint. That endpoint reports every failure as `400 Invalid package tree, run npm install
+      # to rebuild your package-lock.json`, which is misleading: it says nothing about the lockfile,
+      # which is valid, and it hides what actually went wrong. npm 11 uses the supported bulk
+      # advisory endpoint and reports the real status. Pinned exactly rather than tracking latest so
+      # the toolchain stays reproducible; raise it deliberately.
+      - run: npm install -g npm@11.19.1
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm audit --omit=dev --audit-level=high
+      - name: Production dependency audit
+        # The gate is unchanged: `npm audit --omit=dev --audit-level=high`, failing the job on any
+        # high or critical advisory in the production tree. The loop retries only to ride out a
+        # registry transport failure; a real advisory is deterministic, so it fails every attempt and
+        # the unguarded final run below carries its output and its exit status.
+        run: |
+          for attempt in 1 2 3; do
+            if npm audit --omit=dev --audit-level=high; then exit 0; fi
+            echo "npm audit attempt ${attempt} failed; retrying in $((attempt * 20))s"
+            sleep $((attempt * 20))
+          done
+          npm audit --omit=dev --audit-level=high
