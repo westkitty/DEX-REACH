@@ -158,6 +158,10 @@ npm run dex -- client claude read-only
 npm run dex -- client chatgpt default
 npm run dex -- audit --limit 50
 npm run dex -- policy-check
+npm run dex -- assertions
+npm run dex -- assertion add chatgpt --forbid process.shell --note "ChatGPT must never have shell"
+npm run dex -- policy-history
+npm run dex -- policy-restore 1
 npm run dex -- grant chatgpt file.write --root "$HOME/projects" --for 20m --max-uses 6
 npm run dex -- explain chatgpt dex.file.write --path "$HOME/projects/example.txt"
 npm run dex -- grants

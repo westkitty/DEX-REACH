@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { stateDir } from '../src/shared/local-env.js';
 import { pathAllowed } from '../src/shared/security.js';
-import { ACCESS_MODES, accessFile, authorizeOperation, createGrant, inspectAccessPolicyFile, isAccessMode, loadAccessState, modeForActor, parseDuration, resolveMode, updateAccessState } from '../src/shared/access.js';
+import { ACCESS_MODES, accessFile, authorizeOperation, createGrant, inspectAccessPolicyFile, isAccessMode, loadAccessState, modeForActor, parseDuration, resolveMode, restorePolicyRevision, updateAccessState } from '../src/shared/access.js';
 import { REACH_CAPABILITIES, type ReachCapability } from '../src/shared/capabilities.js';
 import { AuditLog, auditFile } from '../src/shared/audit.js';
 import { listReceipts, verifyReceipt } from '../src/shared/receipts.js';
@@ -38,6 +38,7 @@ import {
   denyCapabilityRequest,
   listCapabilityRequests
 } from '../src/shared/capability-requests.js';
+import { addPolicyAssertion, clearPolicyAssertion, listPolicyHistory, loadPolicyAssertions } from '../src/shared/policy-assertions.js';
 
 const execFileAsync = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -73,6 +74,11 @@ function usage(): never {
                                   --justification TEXT [--operation NAME]
   request approve <id> [--capability C] [--root PATH] [--for 30m] [--max-uses N]
   request deny <id>               refuse a pending request; creates no grant
+  assertions [--json]             list custom policy assertions
+  assertion add <client> --note TEXT [--forbid CAP] [--write-root PATH]
+  assertion clear <id>
+  policy-history [--limit 20] [--json]
+  policy-restore <revision>       restore an old policy as a NEW revision
   uninstall [--purge-state --yes-delete-state]
 
 Shared-machine work coordination (resource admission only; grants no execution authority):
@@ -534,6 +540,65 @@ async function requestApproveCommand(): Promise<void> {
   console.log(`${nodeId}: approved request ${id} as grant ${result.grantId}${result.request.narrowed ? ' (narrowed)' : ''}. Remote AI still cannot raise this grant.`);
 }
 
+async function assertionsCommand(): Promise<void> {
+  const nodeId = await pickNodeId();
+  const assertions = await loadPolicyAssertions(nodeId);
+  if (flag('--json', argv)) { console.log(JSON.stringify({ nodeId, assertions }, null, 2)); return; }
+  if (!assertions.length) { console.log(`${nodeId}: no custom policy assertions.`); return; }
+  console.log(`Policy assertions for ${nodeId} (regression tests against the real policy engine):`);
+  for (const assertion of assertions) {
+    const forbid = assertion.forbidCapabilities.length ? ` forbid=${assertion.forbidCapabilities.join(',')}` : '';
+    const roots = assertion.writeRoots.length ? ` write-roots=${assertion.writeRoots.join(',')}` : '';
+    console.log(`  ${assertion.id}  ${assertion.client}${forbid}${roots}  ${assertion.note}`);
+  }
+}
+
+async function assertionAddCommand(): Promise<void> {
+  const kind = argv[2] as ClientKind | undefined;
+  if (!kind || !CLIENT_KINDS.includes(kind)) throw new Error('usage: assertion add <client> --note TEXT [--forbid CAP] [--write-root PATH]');
+  const note = arg('--note', argv);
+  if (!note) throw new Error('assertion add requires --note');
+  const forbid = arg('--forbid', argv) as ReachCapability | undefined;
+  if (forbid && !REACH_CAPABILITIES.includes(forbid)) throw new Error(`unknown capability ${forbid}`);
+  const writeRoot = arg('--write-root', argv);
+  const nodeId = await pickNodeId();
+  const created = await addPolicyAssertion(nodeId, {
+    client: kind,
+    note,
+    ...(forbid ? { forbidCapabilities: [forbid] } : {}),
+    ...(writeRoot ? { writeRoots: [writeRoot] } : {})
+  });
+  console.log(`${nodeId}: assertion ${created.id} will refuse owner-policy writes that violate: ${created.note}`);
+}
+
+async function assertionClearCommand(): Promise<void> {
+  const id = argv[2];
+  if (!id) throw new Error('usage: assertion clear <id>');
+  const nodeId = await pickNodeId();
+  await clearPolicyAssertion(nodeId, id);
+  console.log(`${nodeId}: cleared assertion ${id}.`);
+}
+
+async function policyHistoryCommand(): Promise<void> {
+  const nodeId = await pickNodeId();
+  const limit = Number(arg('--limit', argv) || 20);
+  const entries = await listPolicyHistory(nodeId, Number.isFinite(limit) && limit > 0 ? limit : 20);
+  if (flag('--json', argv)) { console.log(JSON.stringify(entries.map(({ state, ...rest }) => rest), null, 2)); return; }
+  if (!entries.length) { console.log(`${nodeId}: no policy history yet.`); return; }
+  console.log(`Policy history for ${nodeId} (append-only; restore creates a new revision):`);
+  for (const entry of entries) {
+    console.log(`  rev ${String(entry.revision).padStart(4)}  ${entry.at.replace('T', ' ').slice(0, 19)}  ${entry.hash.slice(0, 12)}…${entry.restoredFrom !== null ? `  restored-from ${entry.restoredFrom}` : ''}`);
+  }
+}
+
+async function policyRestoreCommand(): Promise<void> {
+  const revision = Number(argv[1]);
+  if (!Number.isInteger(revision) || revision < 0) throw new Error('usage: policy-restore <revision>');
+  const nodeId = await pickNodeId();
+  const next = await restorePolicyRevision(nodeId, revision);
+  console.log(`${nodeId}: restored policy from revision ${revision} as new revision ${next.revision}. History was not rewritten.`);
+}
+
 async function requestDenyCommand(): Promise<void> {
   const id = argv[2];
   if (!id) throw new Error('usage: request deny <id>');
@@ -645,6 +710,14 @@ try {
       else if (argv[1] === 'deny') await requestDenyCommand();
       else usage();
       break;
+    case 'assertions': await assertionsCommand(); break;
+    case 'assertion':
+      if (argv[1] === 'add') await assertionAddCommand();
+      else if (argv[1] === 'clear') await assertionClearCommand();
+      else usage();
+      break;
+    case 'policy-history': await policyHistoryCommand(); break;
+    case 'policy-restore': await policyRestoreCommand(); break;
     case 'uninstall': await uninstall(); break;
     case 'work-status': await workStatusCommand(); break;
     case 'work-queue': await workQueueCommand(); break;

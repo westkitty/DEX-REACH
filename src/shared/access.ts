@@ -8,6 +8,7 @@ import { atomicWriteFile, withFileLock } from './state-io.js';
 import { hashValue } from './hash.js';
 import { describeOperation, readOnlyDelegatedOperations, readOnlyInspectOperations, requestedAuthorityCost } from './operations.js';
 import { releaseBudgetConcurrency, reserveBudgetUsage } from './budget-usage.js';
+import { appendPolicyHistory, evaluateCustomAssertions, historyEntry, loadPolicyAssertions } from './policy-assertions.js';
 
 export type AccessState = {
   version: 3;
@@ -114,15 +115,32 @@ export async function loadAccessState(nodeId: string, dir = stateDir()): Promise
 
 export async function inspectAccessPolicyFile(nodeId: string, dir = stateDir()): Promise<{ valid: boolean; exists: boolean; state: AccessState; errors: string[] }> {
   const read = await readAccessStateUnlocked(nodeId, dir);
-  const errors = read.exists && read.valid ? policyCheck(read.state) : [read.exists ? 'policy file is corrupt and therefore fails closed' : 'policy file is missing and therefore fails closed'];
-  return { valid: read.exists && read.valid && errors.length === 0, exists: read.exists, state: read.state, errors };
+  if (!(read.exists && read.valid)) {
+    return { valid: false, exists: read.exists, state: read.state, errors: [read.exists ? 'policy file is corrupt and therefore fails closed' : 'policy file is missing and therefore fails closed'] };
+  }
+  let assertions;
+  try {
+    assertions = await loadPolicyAssertions(nodeId, dir);
+  } catch (error) {
+    return { valid: false, exists: read.exists, state: read.state, errors: [error instanceof Error ? error.message : String(error)] };
+  }
+  const errors = [...policyCheck(read.state), ...evaluateCustomAssertions(read.state, assertions)];
+  return { valid: errors.length === 0, exists: read.exists, state: read.state, errors };
 }
 
-async function writeAccessStateUnlocked(nodeId: string, state: AccessState, revision: number, dir: string): Promise<AccessState> {
+async function writeAccessStateUnlocked(
+  nodeId: string,
+  state: AccessState,
+  revision: number,
+  dir: string,
+  options: { recordHistory?: boolean; restoredFrom?: number | null } = {}
+): Promise<AccessState> {
   const next: AccessState = { ...state, version: 3, revision, updatedAt: new Date().toISOString() };
-  const errors = policyCheck(next);
+  const assertions = await loadPolicyAssertions(nodeId, dir);
+  const errors = [...policyCheck(next), ...evaluateCustomAssertions(next, assertions)];
   if (errors.length) throw new Error(`policy assertions failed: ${errors.join('; ')}`);
   await atomicWriteFile(accessFile(nodeId, dir), JSON.stringify(next, null, 2) + '\n', 0o600);
+  if (options.recordHistory !== false) await appendPolicyHistory(nodeId, next, options.restoredFrom ?? null, dir);
   return next;
 }
 
@@ -145,12 +163,16 @@ export async function saveAccessState(nodeId: string, state: AccessState, dir = 
 export async function updateAccessState(
   nodeId: string,
   mutate: (current: AccessState) => AccessState | Promise<AccessState>,
-  dir = stateDir()
+  dir = stateDir(),
+  options: { restoredFrom?: number | null; recordHistory?: boolean } = {}
 ): Promise<AccessState> {
   return withFileLock(accessLockFile(nodeId, dir), async () => {
     const current = (await readAccessStateUnlocked(nodeId, dir)).state;
     const proposed = await mutate(current);
-    return writeAccessStateUnlocked(nodeId, proposed, current.revision + 1, dir);
+    return writeAccessStateUnlocked(nodeId, proposed, current.revision + 1, dir, {
+      restoredFrom: options.restoredFrom ?? null,
+      recordHistory: options.recordHistory
+    });
   });
 }
 
@@ -246,7 +268,7 @@ export async function reserveOperation(
       }
       const grants = state.grants.map(candidate => candidate.id === grant.id ? { ...candidate, uses: candidate.uses + 1 } : candidate);
       try {
-        await writeAccessStateUnlocked(nodeId, { ...state, grants }, state.revision + 1, dir);
+        await writeAccessStateUnlocked(nodeId, { ...state, grants }, state.revision + 1, dir, { recordHistory: false });
       } catch (error) {
         if (budgetReservationId) await releaseBudgetConcurrency(nodeId, budgetReservationId, dir);
         throw error;
@@ -265,7 +287,7 @@ export async function consumeGrant(nodeId: string, grantId: string | undefined, 
       throw new Error('capability grant expired or exhausted before execution');
     }
     return { ...state, grants: state.grants.map(candidate => candidate.id === grantId ? { ...candidate, uses: candidate.uses + 1 } : candidate) };
-  }, dir);
+  }, dir, { recordHistory: false });
 }
 
 export function createGrant(state: AccessState, client: ClientKind, capabilities: ReachCapability[], roots: string[], durationMs: number, maxUses: number | null, id: string = crypto.randomUUID()): AccessState {
@@ -291,6 +313,12 @@ export function policyCheck(state: AccessState): string[] {
   if (authorizeOperation({ ...state, mode: 'off' }, undefined, 'dex.fingerprint', 'full-local').allowed) errors.push('OFF invariant failed');
   if (authorizeOperation({ ...state, mode: 'read-only' }, undefined, 'dex.file.write', 'full-local').allowed) errors.push('READ-ONLY mutation invariant failed');
   return errors;
+}
+
+export async function restorePolicyRevision(nodeId: string, revision: number, dir = stateDir()): Promise<AccessState> {
+  const entry = await historyEntry(nodeId, revision, dir);
+  const restored = decodeAccessState(entry.state);
+  return updateAccessState(nodeId, () => restored, dir, { restoredFrom: revision });
 }
 
 export function parseDuration(text: string): number {
