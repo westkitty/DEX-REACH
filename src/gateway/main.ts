@@ -1,10 +1,10 @@
 import express from 'express';
 import { randomUUID } from 'node:crypto';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/sdk/server/auth/router.js';
-import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
+import { isInitializeRequest } from '@modelcontextprotocol/server';
+import { createMcpExpressApp } from '@modelcontextprotocol/express';
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
+import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/server-legacy/auth';
+import { requireBearerAuth } from '@modelcontextprotocol/express';
 import { loadLocalSecrets } from '../shared/local-env.js';
 import { AuditLog } from '../shared/audit.js';
 import { loadGatewayConfig } from './config.js';
@@ -92,7 +92,7 @@ const bearer = requireBearerAuth({
   resourceMetadataUrl
 });
 
-type McpSession = { transport: StreamableHTTPServerTransport; mcp: ReturnType<typeof createReachMcpServer>; clientId: string };
+type McpSession = { transport: NodeStreamableHTTPServerTransport; mcp: ReturnType<typeof createReachMcpServer>; clientId: string };
 const sessions = new Map<string, McpSession>();
 
 app.post('/mcp', bearer, async (req, res) => {
@@ -109,12 +109,12 @@ app.post('/mcp', bearer, async (req, res) => {
       return;
     }
     if (!isInitializeRequest(req.body)) return void res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Initialization request required' }, id: null });
-    let transport!: StreamableHTTPServerTransport;
+    let transport!: NodeStreamableHTTPServerTransport;
     // Actor identity comes from the OAuth client registration the owner approved; no token material is forwarded.
     const clientName = oauth.getClient(clientId)?.client_name || clientId;
     const actor: RequestActor = { kind: classifyClient(clientName), clientId, clientName };
     const mcp = createReachMcpServer(registry, audit, clientId, actor);
-    transport = new StreamableHTTPServerTransport({
+    transport = new NodeStreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       enableJsonResponse: true,
       onsessioninitialized: id => { sessions.set(id, { transport, mcp, clientId }); },

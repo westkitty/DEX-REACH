@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Response } from 'express';
-import type { OAuthServerProvider, AuthorizationParams } from '@modelcontextprotocol/sdk/server/auth/provider.js';
-import type { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
-import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import type { OAuthServerProvider, AuthorizationParams } from '@modelcontextprotocol/server-legacy/auth';
+import type { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from '@modelcontextprotocol/server';
+import type { AuthInfo } from '@modelcontextprotocol/server';
 import { timingSafeEqualText } from '../shared/security.js';
 import { atomicWriteFile } from '../shared/state-io.js';
 

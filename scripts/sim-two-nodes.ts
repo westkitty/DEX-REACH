@@ -7,10 +7,10 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
-import type { OAuthClientInformationFull, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
+import { Client } from '@modelcontextprotocol/client';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/client';
+import type { OAuthClientInformationFull, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/server';
 import { loadOwnerSecrets } from '../src/shared/local-env.js';
 import { loadAccessState, saveAccessState } from '../src/shared/access.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';

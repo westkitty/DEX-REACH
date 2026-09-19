@@ -1,5 +1,5 @@
 import * as z from 'zod/v4';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '@modelcontextprotocol/server';
 import type { NodeRegistry } from './registry.js';
 import type { AuditLog } from '../shared/audit.js';
 import type { RequestActor } from '../shared/protocol.js';
