@@ -209,6 +209,13 @@ export const PROOF_ITEMS: readonly ProofItem[] = [
   // Supplementary items. Not among the required nineteen, but present so the matrix names these
   // gaps explicitly. An absent line reads as "fine" to everyone who was not in the room.
   {
+    id: 'live-mcp-surface',
+    title: 'A real MCP client sees exactly the contracted surface on a running gateway',
+    proves: 'An OAuth/PKCE client of the current MCP SDK lists exactly the intended first-class actions against a running gateway, sees exactly the approved compatibility tool surface for a node with the withheld tools absent rather than refused, and receives a trust report that scopes its own verdict to the checks it ran.',
+    environment: 'local-pair',
+    limitation: 'The gateway ran over loopback HTTP. This is not the deployed HTTPS ingress, and the client was the SDK rather than ChatGPT or Claude, so the marks waiting on a deployed smoke are not cleared by it.'
+  },
+  {
     id: 'android-adb-device',
     title: 'ADB operations run against a real Android device',
     proves: 'The android-adb profile enumerates and acts on a physically attached device.',

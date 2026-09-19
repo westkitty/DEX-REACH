@@ -417,6 +417,8 @@ Nineteen proofs are required before DEX//REACH may be called physically proven. 
 
 Two defects came out of the first executed run, neither of which any source test could have seen: a gateway whose OAuth discovery document advertised RFC 9207 support while its own approval route omitted the `iss` parameter, which stopped every spec-compliant MCP client at the callback; and a re-enrolled node that retried a transport proof the gateway had forgotten, forever, with nothing in either log saying why.
 
+It also checks the served contract itself: a real OAuth/PKCE client listing exactly the 16 first-class actions, exactly the 22-tool compatibility surface with the 4 withheld tools absent rather than refused, and a trust report that scopes its own verdict. That is stronger than the source-level contract test it supplements, and it is still not the deployed HTTPS gateway, so the PROOF STALE marks in `docs/INVARIANTS.md` stand.
+
 Current state on a Linux container: **18 of the 19 required proofs established**, with `fresh-node-install` unverified because it needs a macOS host its owner authorizes with `DEX_REACH_PROOF_ALLOW_INSTALL=1`. That is not the same as proven on the owner's Mac, and this tooling does not say otherwise.
 
 ---

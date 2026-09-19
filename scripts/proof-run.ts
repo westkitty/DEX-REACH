@@ -50,6 +50,8 @@ const { newTraceId, newSpanId, recordSpan, readTrace } = await import('../src/sh
 const { exportEvidenceBundle, verifyEvidenceBundle, serializeEvidenceBundle } = await import('../src/shared/evidence.js');
 const { snapshotCapacity } = await import('../src/shared/work-coordinator.js');
 const { substantiveSlotsFor } = await import('../src/shared/machine-capacity.js');
+const { remoteCompatibilityTools, remoteBlockedCompatibilityTools } = await import('../src/shared/operations.js');
+const { DEX_RELEASE_INVARIANTS } = await import('../src/shared/invariants.js');
 const { startLivePair } = await import('./lib/live-reach.js');
 
 const observations: ProofObservation[] = [];
@@ -72,6 +74,26 @@ async function prove(id: string, fn: () => Promise<string[]>): Promise<void> {
 function expect(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
+
+/**
+ * Compare two surfaces and say exactly how they differ.
+ *
+ * A bare count check passes when one tool is swapped for another, and that is the interesting
+ * failure: a surface that grew by one withheld tool and shrank by one intended one.
+ */
+function assertSameSurface(actual: readonly string[], expected: readonly string[], what: string): void {
+  const extra = actual.filter(name => !expected.includes(name));
+  const missing = expected.filter(name => !actual.includes(name));
+  expect(!extra.length && !missing.length,
+    `the ${what} are not the contracted set: ${extra.length ? `unexpected ${extra.join(', ')}` : ''}${extra.length && missing.length ? '; ' : ''}${missing.length ? `missing ${missing.join(', ')}` : ''}`);
+}
+
+/** The contracted first-class surface, restated here so a proof run is not checking a value against itself. */
+const EXPECTED_MCP_ACTIONS = [
+  'reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_trust_report',
+  'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write',
+  'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'
+] as const;
 
 async function refusalOf(fn: () => Promise<unknown>, what: string): Promise<string> {
   try {
@@ -457,6 +479,43 @@ async function livePairProofs(pair: LivePair, nodeId: string): Promise<void> {
     return [
       `reach_fingerprint on ${nodeId} answered from the live node`,
       `reach_fingerprint on an unknown node id was refused: ${unknown.text.slice(0, 140).replace(/\s+/g, ' ')}`
+    ];
+  });
+
+  await prove('live-mcp-surface', async () => {
+    const { tools } = await pair.client.listTools();
+    const names = tools.map(tool => tool.name);
+    assertSameSurface(names, EXPECTED_MCP_ACTIONS, 'first-class MCP actions');
+    expect(tools.every(tool => typeof tool.description === 'string' && tool.description.length > 20), 'a served action carries no usable description');
+
+    const listed = await pair.call('reach_list_tools', { node_id: nodeId });
+    expect(listed.ok, `listing the node's compatibility tools failed: ${listed.text.slice(0, 200)}`);
+    const offered = (JSON.parse(listed.text) as { name: string }[]).map(tool => tool.name);
+    assertSameSurface(offered, remoteCompatibilityTools(), 'compatibility tools offered to a remote client');
+    // Absent rather than refused: a probe must not be able to tell a withheld tool from one that
+    // does not exist, and "we refuse that" is itself information about what exists.
+    for (const withheld of remoteBlockedCompatibilityTools()) {
+      expect(!offered.includes(withheld), `the remote surface offers the withheld tool ${withheld}`);
+    }
+
+    const trust = await pair.call('reach_trust_report', { node_id: nodeId });
+    expect(trust.ok, `the trust report failed: ${trust.text.slice(0, 200)}`);
+    const report = JSON.parse(trust.text) as {
+      verdict: string; certificateHash?: string; evidenceScope?: string;
+      invariants?: { count?: number; ids?: string[]; liveEvaluatedIds?: string[] };
+    };
+    expect(typeof report.certificateHash === 'string' && report.certificateHash.length === 64, 'the trust report carries no certificate hash');
+    expect(report.invariants?.count === DEX_RELEASE_INVARIANTS.length, `the trust report claims ${report.invariants?.count} invariants against ${DEX_RELEASE_INVARIANTS.length} in the manifest`);
+    // The point of the report is that PASS is narrow. A verdict that did not say so would be read
+    // as release proof by the only people who ever see it.
+    expect(/does not replace/i.test(report.evidenceScope ?? ''), 'the trust report does not scope its own verdict');
+    const live = report.invariants?.liveEvaluatedIds ?? [];
+    expect(live.length > 0 && live.length < DEX_RELEASE_INVARIANTS.length, `the report claims to have live-evaluated ${live.length} of ${DEX_RELEASE_INVARIANTS.length} invariants`);
+
+    return [
+      `a real OAuth/PKCE MCP SDK client listed exactly ${names.length} first-class actions`,
+      `the node offered exactly ${offered.length} compatibility tools; the ${remoteBlockedCompatibilityTools().length} withheld ones were absent, not refused`,
+      `reach_trust_report returned ${report.verdict} scoped to ${live.length} live-evaluated invariant(s) of ${DEX_RELEASE_INVARIANTS.length}, with a certificate hash`
     ];
   });
 
