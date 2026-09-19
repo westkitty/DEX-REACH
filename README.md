@@ -158,6 +158,9 @@ npm run dex -- client claude read-only
 npm run dex -- client chatgpt default
 npm run dex -- audit --limit 50
 npm run dex -- policy-check
+npm run dex -- doctor
+npm run dex -- doctor --json --deep
+npm run dex -- doctor --share
 npm run dex -- assertions
 npm run dex -- assertion add chatgpt --forbid process.shell --note "ChatGPT must never have shell"
 npm run dex -- policy-history

@@ -39,6 +39,7 @@ import {
   listCapabilityRequests
 } from '../src/shared/capability-requests.js';
 import { addPolicyAssertion, clearPolicyAssertion, listPolicyHistory, loadPolicyAssertions } from '../src/shared/policy-assertions.js';
+import { collectDoctorReport, formatDoctorReport } from '../src/shared/doctor.js';
 
 const execFileAsync = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -79,6 +80,7 @@ function usage(): never {
   assertion clear <id>
   policy-history [--limit 20] [--json]
   policy-restore <revision>       restore an old policy as a NEW revision
+  doctor [--json] [--deep] [--share]  read-only diagnostics; --share redacts local paths
   uninstall [--purge-state --yes-delete-state]
 
 Shared-machine work coordination (resource admission only; grants no execution authority):
@@ -591,6 +593,22 @@ async function policyHistoryCommand(): Promise<void> {
   }
 }
 
+async function doctorCommand(): Promise<void> {
+  const nodeId = await pickNodeId().catch(() => undefined);
+  const report = await collectDoctorReport({
+    json: flag('--json', argv),
+    deep: flag('--deep', argv),
+    share: flag('--share', argv),
+    repoRoot: process.cwd(),
+    nodeId
+  });
+  if (flag('--json', argv) || flag('--share', argv)) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  console.log(formatDoctorReport(report).join('\n'));
+}
+
 async function policyRestoreCommand(): Promise<void> {
   const revision = Number(argv[1]);
   if (!Number.isInteger(revision) || revision < 0) throw new Error('usage: policy-restore <revision>');
@@ -718,6 +736,7 @@ try {
       break;
     case 'policy-history': await policyHistoryCommand(); break;
     case 'policy-restore': await policyRestoreCommand(); break;
+    case 'doctor': await doctorCommand(); break;
     case 'uninstall': await uninstall(); break;
     case 'work-status': await workStatusCommand(); break;
     case 'work-queue': await workQueueCommand(); break;
