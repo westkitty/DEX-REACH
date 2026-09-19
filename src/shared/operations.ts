@@ -251,11 +251,35 @@ export function effectiveWorkspaceSafe(operation: string, plannedTarget?: string
 
 export type CompatibilityToolDescriptor = {
   tool: string;
+  /**
+   * Adapter that provides the tool. Without this, "did the manifest declare everything DEX knows
+   * about?" could only be asked against the whole catalog, which would refuse every second adapter
+   * for not declaring the first adapter's tools.
+   */
+  adapter: string;
+  /**
+   * DEX capability the tool requires, in addition to `compat` for the `dc.call` wrapper itself.
+   * Routing a write through the adapter must demand the same capability writing it natively does,
+   * or `compat` would be a way to hold one capability and exercise another.
+   */
+  capability: ReachCapability;
   risk: OperationRiskClass;
   mutation: boolean;
+  /**
+   * The tool can reach the network. This is a property of the tool, not of DEX's guard: `read_file`
+   * declares it because the adapter accepts `isUrl`, even though `toolGuard` refuses that argument.
+   * Declaring it is what lets a test prove every network-capable tool is either classified `network`
+   * or has its network argument refused, rather than leaving that to be rediscovered.
+   */
+  network: boolean;
+  /** Argument field names that carry filesystem paths, as read from the adapter's own schemas. */
+  pathArguments: readonly string[];
   /** Withheld from remote clients entirely: safety configuration, local call history, vendor surfaces. */
   remoteBlocked: boolean;
   workspaceSafeAllowed: boolean;
+  /** Whether the tool may be the target of a plan/commit pair. */
+  supportsPlan: boolean;
+  checkpointStrategy: CheckpointStrategy;
 };
 
 /**
@@ -264,37 +288,37 @@ export type CompatibilityToolDescriptor = {
  * from drifting apart.
  */
 export const COMPATIBILITY_TOOLS: readonly CompatibilityToolDescriptor[] = [
-  { tool: 'get_config', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'get_file_info', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'get_usage_stats', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'list_directory', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'read_file', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'read_multiple_files', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'start_search', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'get_more_search_results', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'list_searches', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'stop_search', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: true },
+  { tool: 'get_config', adapter: 'desktop-commander', capability: 'inspect', risk: 'inspect', mutation: false, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'get_file_info', adapter: 'desktop-commander', capability: 'file.read', risk: 'inspect', mutation: false, network: false, pathArguments: ['path'], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'get_usage_stats', adapter: 'desktop-commander', capability: 'inspect', risk: 'inspect', mutation: false, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'list_directory', adapter: 'desktop-commander', capability: 'file.read', risk: 'inspect', mutation: false, network: false, pathArguments: ['path'], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'read_file', adapter: 'desktop-commander', capability: 'file.read', risk: 'inspect', mutation: false, network: true, pathArguments: ['path'], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'read_multiple_files', adapter: 'desktop-commander', capability: 'file.read', risk: 'inspect', mutation: false, network: false, pathArguments: ['paths'], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'start_search', adapter: 'desktop-commander', capability: 'file.read', risk: 'inspect', mutation: false, network: false, pathArguments: ['path'], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'get_more_search_results', adapter: 'desktop-commander', capability: 'file.read', risk: 'inspect', mutation: false, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'list_searches', adapter: 'desktop-commander', capability: 'inspect', risk: 'inspect', mutation: false, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'stop_search', adapter: 'desktop-commander', capability: 'inspect', risk: 'inspect', mutation: false, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: false, checkpointStrategy: 'none' },
 
-  { tool: 'create_directory', risk: 'typed-mutate', mutation: true, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'move_file', risk: 'typed-mutate', mutation: true, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'write_file', risk: 'typed-mutate', mutation: true, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'write_pdf', risk: 'typed-mutate', mutation: true, remoteBlocked: false, workspaceSafeAllowed: true },
-  { tool: 'edit_block', risk: 'typed-mutate', mutation: true, remoteBlocked: false, workspaceSafeAllowed: true },
+  { tool: 'create_directory', adapter: 'desktop-commander', capability: 'file.write', risk: 'typed-mutate', mutation: true, network: false, pathArguments: ['path'], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: true, checkpointStrategy: 'git-if-available' },
+  { tool: 'move_file', adapter: 'desktop-commander', capability: 'file.write', risk: 'typed-mutate', mutation: true, network: false, pathArguments: ['source', 'destination'], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: true, checkpointStrategy: 'git-if-available' },
+  { tool: 'write_file', adapter: 'desktop-commander', capability: 'file.write', risk: 'typed-mutate', mutation: true, network: false, pathArguments: ['path'], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: true, checkpointStrategy: 'git-if-available' },
+  { tool: 'write_pdf', adapter: 'desktop-commander', capability: 'file.write', risk: 'typed-mutate', mutation: true, network: false, pathArguments: ['path', 'outputPath'], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: true, checkpointStrategy: 'git-if-available' },
+  { tool: 'edit_block', adapter: 'desktop-commander', capability: 'file.write', risk: 'typed-mutate', mutation: true, network: false, pathArguments: ['file_path'], remoteBlocked: false, workspaceSafeAllowed: true, supportsPlan: true, checkpointStrategy: 'git-if-available' },
 
   // Process and session tools are shell by another name, and stay outside workspace-safe.
-  { tool: 'start_process', risk: 'shell', mutation: true, remoteBlocked: false, workspaceSafeAllowed: false },
-  { tool: 'interact_with_process', risk: 'shell', mutation: true, remoteBlocked: false, workspaceSafeAllowed: false },
-  { tool: 'read_process_output', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: false },
-  { tool: 'list_processes', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: false },
-  { tool: 'list_sessions', risk: 'inspect', mutation: false, remoteBlocked: false, workspaceSafeAllowed: false },
-  { tool: 'force_terminate', risk: 'destructive', mutation: true, remoteBlocked: false, workspaceSafeAllowed: false },
-  { tool: 'kill_process', risk: 'destructive', mutation: true, remoteBlocked: false, workspaceSafeAllowed: false },
+  { tool: 'start_process', adapter: 'desktop-commander', capability: 'process.shell', risk: 'shell', mutation: true, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: false, supportsPlan: true, checkpointStrategy: 'git-if-available' },
+  { tool: 'interact_with_process', adapter: 'desktop-commander', capability: 'process.shell', risk: 'shell', mutation: true, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: false, supportsPlan: true, checkpointStrategy: 'git-if-available' },
+  { tool: 'read_process_output', adapter: 'desktop-commander', capability: 'process.shell', risk: 'inspect', mutation: false, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: false, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'list_processes', adapter: 'desktop-commander', capability: 'inspect', risk: 'inspect', mutation: false, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: false, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'list_sessions', adapter: 'desktop-commander', capability: 'inspect', risk: 'inspect', mutation: false, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: false, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'force_terminate', adapter: 'desktop-commander', capability: 'process.shell', risk: 'destructive', mutation: true, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: false, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'kill_process', adapter: 'desktop-commander', capability: 'process.shell', risk: 'destructive', mutation: true, network: false, pathArguments: [], remoteBlocked: false, workspaceSafeAllowed: false, supportsPlan: false, checkpointStrategy: 'none' },
 
   // Withheld from remote clients: safety configuration, local call history, and vendor surfaces.
-  { tool: 'set_config_value', risk: 'privileged', mutation: true, remoteBlocked: true, workspaceSafeAllowed: false },
-  { tool: 'get_recent_tool_calls', risk: 'privileged', mutation: false, remoteBlocked: true, workspaceSafeAllowed: false },
-  { tool: 'give_feedback_to_desktop_commander', risk: 'network', mutation: false, remoteBlocked: true, workspaceSafeAllowed: false },
-  { tool: 'get_prompts', risk: 'privileged', mutation: false, remoteBlocked: true, workspaceSafeAllowed: false }
+  { tool: 'set_config_value', adapter: 'desktop-commander', capability: 'compat', risk: 'privileged', mutation: true, network: false, pathArguments: [], remoteBlocked: true, workspaceSafeAllowed: false, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'get_recent_tool_calls', adapter: 'desktop-commander', capability: 'compat', risk: 'privileged', mutation: false, network: false, pathArguments: [], remoteBlocked: true, workspaceSafeAllowed: false, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'give_feedback_to_desktop_commander', adapter: 'desktop-commander', capability: 'compat', risk: 'network', mutation: false, network: true, pathArguments: [], remoteBlocked: true, workspaceSafeAllowed: false, supportsPlan: false, checkpointStrategy: 'none' },
+  { tool: 'get_prompts', adapter: 'desktop-commander', capability: 'compat', risk: 'privileged', mutation: false, network: false, pathArguments: [], remoteBlocked: true, workspaceSafeAllowed: false, supportsPlan: false, checkpointStrategy: 'none' }
 ] as const;
 
 const BY_TOOL = new Map(COMPATIBILITY_TOOLS.map(descriptor => [descriptor.tool, descriptor]));

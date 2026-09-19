@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { AccessMode, AccessSnapshot, ClientKind, ReachProfile, RequestActor } from './protocol.js';
 import { stateDir } from './local-env.js';
-import { operationCapability, requestPaths, rootsCover, type CapabilityGrant, type ReachCapability } from './capabilities.js';
+import { operationCapability, requestPaths, requiredCapabilities, rootsCover, type CapabilityGrant, type ReachCapability } from './capabilities.js';
 import { atomicWriteFile, withFileLock } from './state-io.js';
 import { hashValue } from './hash.js';
 import { describeOperation, readOnlyDelegatedOperations, readOnlyInspectOperations, requestedAuthorityCost } from './operations.js';
@@ -193,10 +193,14 @@ export type AccessDecision = { allowed: true; effectiveProfile: ReachProfile; gr
 
 function activeGrant(state: AccessState, actor: RequestActor | undefined, operation: string, args: Record<string, unknown>, now = Date.now()): CapabilityGrant | null {
   const kind = actor?.kind ?? 'other';
-  const capability = operationCapability(operation);
+  // Every capability the request implies, so a `compat` grant cannot exercise file.write or
+  // process.shell through the adapter wrapper without holding them.
+  const capabilities = requiredCapabilities(operation, args);
   const paths = requestPaths(args);
   return state.grants.find(grant => grant.client === kind && Date.parse(grant.until) > now &&
-    (grant.maxUses === null || grant.uses < grant.maxUses) && grant.capabilities.includes(capability) && rootsCover(paths, grant.roots)) ?? null;
+    (grant.maxUses === null || grant.uses < grant.maxUses) &&
+    capabilities.every(capability => grant.capabilities.includes(capability)) &&
+    rootsCover(paths, grant.roots)) ?? null;
 }
 
 export function authorizeOperation(state: AccessState, actor: RequestActor | undefined, operation: string, profile: ReachProfile, now = Date.now(), args: Record<string, unknown> = {}): AccessDecision {

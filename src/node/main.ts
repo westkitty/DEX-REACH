@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import path from 'node:path';
-import { DesktopCommanderBackend } from './backend.js';
+import { DesktopCommanderAdapter } from './adapters/desktop-commander.js';
 import { loadNodeConfig } from './config.js';
 import { ResultStore } from './result-store.js';
 import { nativeCall, createCheckpoint, defaultCwd } from './native.js';
@@ -30,13 +30,15 @@ import { writeRuntimeStatus } from './runtime-status.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
 import { checkpointStrategyFor, plannableOperations } from '../shared/operations.js';
 import { workspaceSafeOperationRefusal, workspaceSafeToolRefusal } from '../shared/profiles.js';
+import { AdapterRegistry, remoteAdapterToolRefusal } from '../shared/adapter-contract.js';
 import { childSpan, recordSpan, traceContextFrom, type ReachTraceContext } from '../shared/trace.js';
 import { loadTransportKeys } from './transport-keys.js';
 import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
-const backend = new DesktopCommanderBackend();
+const adapters = new AdapterRegistry();
+const backend = new DesktopCommanderAdapter(adapters);
 const results = new ResultStore();
 const audit = new AuditLog();
 let stopped = false;
@@ -62,10 +64,11 @@ async function executeOperation(operation: string, args: Record<string, unknown>
   if (operation === 'dc.call') {
     const tool = String(args.tool || '');
     const toolArgs = (args.arguments || {}) as Record<string, unknown>;
-    if (!backend.listTools().some(candidate => candidate.name === tool)) throw new Error(`unknown backend tool: ${tool}`);
-    if (tool === 'set_config_value' && profile !== 'full-local') {
-      throw new Error('remote mutation of Desktop Commander safety configuration requires full-local profile');
-    }
+    // The registry, not the running adapter, decides what a remote client may name. An adapter that
+    // starts offering a new tool cannot widen the surface, and a remote-blocked tool is absent
+    // rather than merely refused, so probing cannot tell "blocked" from "not provided".
+    const notProvided = remoteAdapterToolRefusal(adapters, tool);
+    if (notProvided) throw new Error(notProvided);
     const toolBlocked = workspaceSafeToolRefusal(config.profile, tool);
     if (toolBlocked) throw new Error(toolBlocked);
     const blocked = toolGuard(tool, toolArgs, profile, config.allowedRoots);

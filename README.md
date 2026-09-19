@@ -295,6 +295,24 @@ Tracing observes decisions. It never makes one, and it grants no authority.
 
 ---
 
+## Capability Adapters
+
+DEX can route a call to third-party tooling — today, the pinned Desktop Commander compatibility adapter. An adapter is not a peer of the authority layer, and the contract between them is deliberately one-way.
+
+An adapter **declares**, in a manifest, what each of its tools is: the DEX capability it requires, its risk class, whether it mutates, whether it can reach the network, which argument fields carry filesystem paths, whether `workspace-safe` admits it, whether it can be planned, whether it is withheld from remote clients, and what undoing it means. DEX holds its own catalog of the same facts, and a tool is admitted only when the declaration and the catalog agree on every one of them.
+
+So a manifest can only ever *fail* to admit a tool. It cannot raise a tool's privileges, invent a capability, mark a shell tool workspace-safe, un-block a withheld tool, hide a path-bearing argument, or introduce a tool DEX has not classified. Each of those is a refusal, and a refusal aborts the whole install rather than admitting the rest: a partly admitted adapter is one whose surface DEX and its owner disagree about. An absent field is refused rather than defaulted, because the safe-looking default is exactly the one an incomplete manifest would benefit from.
+
+**Adapters are installed locally, by the machine owner.** A remote client can ask which adapters are installed and call an admitted tool. There is no remote install, no remote update, no manifest edit, and no adapter-policy path at all.
+
+**The wrapper does not launder capability.** `dc.call` names the `compat` capability, but the call it wraps does whatever the named tool does. A routed call now demands both — `compat` and the tool's own capability — so a grant holding `compat` alone can no longer write files or start processes through the adapter. A call naming no tool, or a tool DEX does not classify, demands every capability and therefore matches no grant.
+
+**Identity is observed, not claimed.** The adapter's version and the hash of its entry point are read from disk at load time and recorded as evidence; the manifest's own claims about them are overwritten. An unreadable entry point records a null hash rather than an invented one.
+
+The remote compatibility surface remains exactly the approved 22 of the adapter's 26 tools. Safety configuration, local call history and the vendor feedback and onboarding surfaces stay withheld, and are absent from the surface rather than merely refused, so probing cannot tell a withheld tool from one that does not exist.
+
+---
+
 ## Install and Run
 
 ### Requirements
@@ -499,7 +517,8 @@ Before changing execution, routing, authentication, policy, or install behavior,
 ├── src/
 │   ├── gateway/          # OAuth, MCP server, node registry, routing, audit
 │   ├── node/             # node connection, native execution, local enforcement
-│   └── shared/           # protocol, access policy, operation catalog, execution profiles, guardrails, work coordination, tracing
+│   │   └── adapters/     # capability adapters and their declared manifests
+│   └── shared/           # protocol, access policy, operation catalog, adapter contract, execution profiles, guardrails, work coordination, tracing
 ├── scripts/              # bootstrap, install, credentials, smoke, simulations, local CLI
 ├── tests/                # access, auth, routing, security, native, audit, result-store, coordinator tests
 ├── docs/
