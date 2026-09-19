@@ -231,7 +231,7 @@ test('every operation the node executor handles is in the catalog', async () => 
     assert.ok(isKnownOperation(operation), `native.ts handles "${operation}" but the catalog does not classify it`);
   }
   // Operations the node serves outside nativeCall are classified too.
-  for (const operation of ['dc.call', 'dex.result.read', 'dex.trustReport', 'dex.receipts.list', 'dex.plan', 'dex.commitPlan']) {
+  for (const operation of ['dc.call', 'dex.result.read', 'dex.trustReport', 'dex.receipts.list', 'dex.plan', 'dex.commitPlan', 'dex.capability.request']) {
     assert.ok(isKnownOperation(operation), `${operation} is unclassified`);
   }
 });

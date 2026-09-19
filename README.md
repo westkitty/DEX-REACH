@@ -164,6 +164,10 @@ npm run dex -- grants
 npm run dex -- budgets
 npm run dex -- budget set chatgpt --window 1h --max-operations 40 --max-mutations 10 --max-shell 3
 npm run dex -- budget clear chatgpt
+npm run dex -- requests
+npm run dex -- request create chatgpt file.write --root "$HOME/projects" --for 20m --max-uses 1 --justification "edit one project file"
+npm run dex -- request approve <id>
+npm run dex -- request deny <id>
 npm run dex -- projects
 npm run dex -- dirty
 npm run dex -- project DEX-REACH info
@@ -179,6 +183,7 @@ npm run dex -- project Atlas_Of_One checkpoint
 - **Per-client caps** — ChatGPT, Claude, or another client can be restricted independently. A client cap can only reduce access, never increase it.
 - **Capability grants** — an enabled client can be switched into grant-required mode and limited to specific capabilities, filesystem roots, expiration times, and optional use counts. Grants never override OFF, READ-ONLY, or a stricter client ceiling.
 - **Rolling execution budgets** — the owner can cap operations, mutations, shell calls, requested write bytes, requested process time, and inflight concurrency over a rolling window, shared and/or per client. Budgets only narrow remaining capacity. They never grant authority, and usage counters do not change the owner policy hash.
+- **Capability requests** — AI may ask for a capability, roots, duration and optional use cap. That request is not authority. Only a local owner approval creates an ordinary capability grant, and the owner may narrow the request but cannot widen it.
 - **Policy assertions** — `npm run dex -- policy-check` validates the local grant schema plus hard OFF and READ-ONLY invariants before owner-managed policy changes are accepted.
 
 Newly enrolled second devices start **OFF**. Missing or corrupt access policy also means **OFF**.

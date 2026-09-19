@@ -41,7 +41,8 @@ export const DEX_RELEASE_INVARIANTS: readonly ReleaseInvariant[] = [
   { id: 'DEX-INV-026', capability: 'Coordination metadata carries no prompts, transcripts or credentials', evidenceClass: 'regression' },
   { id: 'DEX-INV-027', capability: 'Causal evidence links stages without exporting content', evidenceClass: 'regression' },
   { id: 'DEX-INV-028', capability: 'workspace-safe narrows execution and is narrowed by owner authority', evidenceClass: 'regression' },
-  { id: 'DEX-INV-029', capability: 'Rolling execution budgets only narrow authority', evidenceClass: 'regression' }
+  { id: 'DEX-INV-029', capability: 'Rolling execution budgets only narrow authority', evidenceClass: 'regression' },
+  { id: 'DEX-INV-030', capability: 'Capability requests never grant authority', evidenceClass: 'regression' }
 ] as const;
 
 export function invariantManifest() {

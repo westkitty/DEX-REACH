@@ -22,6 +22,8 @@ import {
 import { loadLocalSecrets, stateDir } from '../shared/local-env.js';
 import { authorizeOperation, loadAccessState, reserveOperation, snapshot } from '../shared/access.js';
 import { releaseBudgetConcurrency } from '../shared/budget-usage.js';
+import { createCapabilityRequest } from '../shared/capability-requests.js';
+import type { ReachCapability } from '../shared/capabilities.js';
 import { appendReceipt, listReceipts } from '../shared/receipts.js';
 import { consumePlan, createPlan, hashValue, sweepExpiredPlans } from '../shared/plans.js';
 import { writeRuntimeStatus } from './runtime-status.js';
@@ -82,6 +84,21 @@ async function executeOperation(operation: string, args: Record<string, unknown>
     });
   }
   if (operation === 'dex.receipts.list') return listReceipts(config.nodeId, Number(args.limit || 20));
+  if (operation === 'dex.capability.request') {
+    const capabilities = Array.isArray(args.capabilities)
+      ? args.capabilities.map(value => String(value) as ReachCapability)
+      : typeof args.capability === 'string' ? [args.capability as ReachCapability] : [];
+    const roots = Array.isArray(args.roots) ? args.roots.map(value => String(value)) : typeof args.root === 'string' ? [args.root] : [];
+    return createCapabilityRequest(config.nodeId, {
+      client: actor?.kind ?? 'other',
+      capabilities,
+      roots,
+      durationMs: Number(args.durationMs || 0),
+      maxUses: args.maxUses === undefined || args.maxUses === null ? null : Number(args.maxUses),
+      justification: String(args.justification || ''),
+      operation: typeof args.operation === 'string' ? args.operation : undefined
+    });
+  }
   return nativeCall(config.nodeId, operation, args, config.allowedRoots, profile);
 }
 

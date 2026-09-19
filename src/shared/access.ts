@@ -268,9 +268,10 @@ export async function consumeGrant(nodeId: string, grantId: string | undefined, 
   }, dir);
 }
 
-export function createGrant(state: AccessState, client: ClientKind, capabilities: ReachCapability[], roots: string[], durationMs: number, maxUses: number | null): AccessState {
+export function createGrant(state: AccessState, client: ClientKind, capabilities: ReachCapability[], roots: string[], durationMs: number, maxUses: number | null, id: string = crypto.randomUUID()): AccessState {
+  if (state.grants.some(grant => grant.id === id)) return state;
   const grant: CapabilityGrant = {
-    id: crypto.randomUUID(), client, capabilities, roots: roots.map(root => path.resolve(root)),
+    id, client, capabilities, roots: roots.map(root => path.resolve(root)),
     until: new Date(Date.now() + durationMs).toISOString(), maxUses, uses: 0, createdAt: new Date().toISOString()
   };
   return { ...state, grants: [...state.grants, grant], grantRequired: { ...state.grantRequired, [client]: true } };

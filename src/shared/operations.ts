@@ -68,6 +68,9 @@ export const DEX_OPERATIONS: readonly OperationDescriptor[] = [
   { operation: 'dex.file.read', capability: 'file.read', risk: 'inspect', mutation: false, supportsPlan: false, readOnlyAllowed: true, workspaceSafeAllowed: true, checkpointStrategy: 'none' },
   { operation: 'dex.result.read', capability: 'file.read', risk: 'inspect', mutation: false, supportsPlan: false, readOnlyAllowed: true, workspaceSafeAllowed: true, checkpointStrategy: 'none' },
   { operation: 'dex.receipts.list', capability: 'file.read', risk: 'inspect', mutation: false, supportsPlan: false, readOnlyAllowed: true, workspaceSafeAllowed: true, checkpointStrategy: 'none' },
+  // Asking for authority is not receiving it. READ-ONLY does not admit this operation so the
+  // pre-catalog READ-ONLY set stays exact; ON records a pending request that still cannot execute.
+  { operation: 'dex.capability.request', capability: 'inspect', risk: 'inspect', mutation: false, supportsPlan: false, readOnlyAllowed: false, workspaceSafeAllowed: true, checkpointStrategy: 'none' },
 
   { operation: 'dex.file.write', capability: 'file.write', risk: 'typed-mutate', mutation: true, supportsPlan: true, readOnlyAllowed: false, workspaceSafeAllowed: true, checkpointStrategy: 'git-if-available' },
   { operation: 'dex.checkpoint', capability: 'checkpoint', risk: 'typed-mutate', mutation: true, supportsPlan: true, readOnlyAllowed: false, workspaceSafeAllowed: true, checkpointStrategy: 'none' },

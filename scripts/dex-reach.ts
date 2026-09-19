@@ -32,6 +32,12 @@ import {
   type BudgetScope
 } from '../src/shared/budget-policy.js';
 import { loadBudgetUsage, resetBudgetUsage, usedInWindow } from '../src/shared/budget-usage.js';
+import {
+  approveCapabilityRequest,
+  createCapabilityRequest,
+  denyCapabilityRequest,
+  listCapabilityRequests
+} from '../src/shared/capability-requests.js';
 
 const execFileAsync = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -62,6 +68,11 @@ function usage(): never {
                                   [--max-operations N] [--max-mutations N] [--max-shell N]
                                   [--max-write-bytes N] [--max-process-ms N] [--max-concurrent N]
   budget clear <id>               remove one budget rule (shared, a client kind, or its id)
+  requests [--json]               list capability requests (pending/approved/denied/expired)
+  request create <client> <capability> --root PATH --for 30m [--max-uses N]
+                                  --justification TEXT [--operation NAME]
+  request approve <id> [--capability C] [--root PATH] [--for 30m] [--max-uses N]
+  request deny <id>               refuse a pending request; creates no grant
   uninstall [--purge-state --yes-delete-state]
 
 Shared-machine work coordination (resource admission only; grants no execution authority):
@@ -461,6 +472,76 @@ async function budgetSetCommand(): Promise<void> {
   console.log(`  revision ${next.revision}`);
 }
 
+async function requestsCommand(): Promise<void> {
+  const nodeId = await pickNodeId();
+  const requests = await listCapabilityRequests(nodeId);
+  if (flag('--json', argv)) { console.log(JSON.stringify({ nodeId, requests }, null, 2)); return; }
+  if (!requests.length) { console.log(`${nodeId}: no capability requests.`); return; }
+  console.log(`Capability requests for ${nodeId} (a request is not a grant):`);
+  for (const request of requests) {
+    console.log(`  ${request.id}  ${request.status.padEnd(8)} ${request.client}  ${request.capabilities.join(',')}  roots=${request.roots.join(',')}  for=${Math.round(request.durationMs / 60_000)}m  ${request.justification}`);
+  }
+}
+
+async function requestCreateCommand(): Promise<void> {
+  const kind = argv[2] as ClientKind | undefined;
+  const capability = argv[3] as ReachCapability | undefined;
+  if (!kind || !CLIENT_KINDS.includes(kind) || !capability || !REACH_CAPABILITIES.includes(capability)) {
+    throw new Error('usage: request create <client> <capability> --root PATH --for 30m --justification TEXT');
+  }
+  const root = arg('--root', argv);
+  const duration = arg('--for', argv);
+  const justification = arg('--justification', argv);
+  if (!root || !path.isAbsolute(root) || !duration || !justification) {
+    throw new Error('request create requires an absolute --root, --for duration, and --justification');
+  }
+  const maxRaw = arg('--max-uses', argv);
+  const maxUses = maxRaw ? Number(maxRaw) : null;
+  if (maxUses !== null && (!Number.isInteger(maxUses) || maxUses <= 0)) throw new Error('--max-uses must be a positive integer');
+  const nodeId = await pickNodeId();
+  const env = await readEnvFile(nodeEnvFile(nodeId));
+  const allowedRoots = (env.DEX_REACH_ALLOWED_ROOTS || os.homedir()).split(path.delimiter);
+  if (!pathAllowed(root, allowedRoots)) throw new Error("request root is outside this node's configured allowed roots");
+  const created = await createCapabilityRequest(nodeId, {
+    client: kind,
+    capabilities: [capability],
+    roots: [root],
+    durationMs: parseDuration(duration),
+    maxUses,
+    justification,
+    operation: arg('--operation', argv)
+  });
+  console.log(`${nodeId}: recorded request ${created.id} from ${kind} for ${capability}. This is not a grant. Approve locally with: npm run dex -- request approve ${created.id}`);
+}
+
+async function requestApproveCommand(): Promise<void> {
+  const id = argv[2];
+  if (!id) throw new Error('usage: request approve <id> [--capability C] [--root PATH] [--for 30m] [--max-uses N]');
+  const nodeId = await pickNodeId();
+  const capability = arg('--capability', argv) as ReachCapability | undefined;
+  if (capability && !REACH_CAPABILITIES.includes(capability)) throw new Error(`unknown capability ${capability}`);
+  const root = arg('--root', argv);
+  const duration = arg('--for', argv);
+  const maxRaw = arg('--max-uses', argv);
+  const maxUses = maxRaw ? Number(maxRaw) : undefined;
+  if (maxUses !== undefined && (!Number.isInteger(maxUses) || maxUses <= 0)) throw new Error('--max-uses must be a positive integer');
+  const result = await approveCapabilityRequest(nodeId, id, {
+    ...(capability ? { capabilities: [capability] } : {}),
+    ...(root ? { roots: [root] } : {}),
+    ...(duration ? { durationMs: parseDuration(duration) } : {}),
+    ...(maxUses !== undefined ? { maxUses } : {})
+  });
+  console.log(`${nodeId}: approved request ${id} as grant ${result.grantId}${result.request.narrowed ? ' (narrowed)' : ''}. Remote AI still cannot raise this grant.`);
+}
+
+async function requestDenyCommand(): Promise<void> {
+  const id = argv[2];
+  if (!id) throw new Error('usage: request deny <id>');
+  const nodeId = await pickNodeId();
+  const denied = await denyCapabilityRequest(nodeId, id);
+  console.log(`${nodeId}: denied request ${denied.id}. No grant was created.`);
+}
+
 async function budgetClearCommand(): Promise<void> {
   const id = argv[2];
   if (!id) throw new Error('usage: budget clear <id>');
@@ -555,6 +636,13 @@ try {
     case 'budget':
       if (argv[1] === 'set') await budgetSetCommand();
       else if (argv[1] === 'clear') await budgetClearCommand();
+      else usage();
+      break;
+    case 'requests': await requestsCommand(); break;
+    case 'request':
+      if (argv[1] === 'create') await requestCreateCommand();
+      else if (argv[1] === 'approve') await requestApproveCommand();
+      else if (argv[1] === 'deny') await requestDenyCommand();
       else usage();
       break;
     case 'uninstall': await uninstall(); break;
