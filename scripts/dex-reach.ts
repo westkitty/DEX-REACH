@@ -14,6 +14,7 @@ import { readRuntimeStatus, runtimeFile } from '../src/node/runtime-status.js';
 import { portfolio, resolveProject } from '../src/node/projects.js';
 import { createCheckpoint } from '../src/node/native.js';
 import type { AccessMode, ClientKind, ReachProfile } from '../src/shared/protocol.js';
+import { describeProfile, workspaceSafeOperationRefusal } from '../src/shared/profiles.js';
 import { arg, flag, localNodeIds, nodeEnvFile, readEnvFile } from './lib/node-files.js';
 import { WORK_ACCESS_CLASSES, WORK_EXECUTORS, WORK_WORKLOAD_CLASSES, acquireWork, cancelTicket, describeWorkStatus, heartbeat, redactWorkStatusForShare, releaseWork, workStatus } from '../src/shared/work-coordinator.js';
 import type { AccessClass, WorkloadClass } from '../src/shared/machine-capacity.js';
@@ -180,7 +181,18 @@ async function grantClearCommand(): Promise<void> {
 async function explainCommand(): Promise<void> {
   const kind = argv[1] as ClientKind | undefined; const operation = argv[2]; if (!kind || !CLIENT_KINDS.includes(kind) || !operation) usage();
   const nodeId = await pickNodeId(); const state = await loadAccessState(nodeId); const env = await readEnvFile(nodeEnvFile(nodeId)); const profile = (env.DEX_REACH_PROFILE || 'development') as ReachProfile; const args: Record<string, unknown> = {}; const p = arg('--path', argv); if (p) args.path = p;
-  const decision = authorizeOperation(state, { kind, clientId: 'local-explain', clientName: CLIENT_LABEL[kind] }, operation, profile, Date.now(), args); console.log(JSON.stringify({ nodeId, kind, operation, args, decision }, null, 2));
+  const decision = authorizeOperation(state, { kind, clientId: 'local-explain', clientName: CLIENT_LABEL[kind] }, operation, profile, Date.now(), args);
+  // The node's execution profile is a second narrowing the policy decision does not carry, so a
+  // report that showed only the policy answer would tell the owner an operation is permitted that
+  // the node would refuse. Both narrowings are reported, and the operation runs only if both allow.
+  const profileRefusal = workspaceSafeOperationRefusal(profile, operation);
+  const wouldRun = decision.allowed && !profileRefusal;
+  console.log(JSON.stringify({
+    nodeId, kind, operation, args,
+    policy: decision,
+    profile: { configured: profile, description: describeProfile(profile), refusal: profileRefusal },
+    wouldRun
+  }, null, 2));
 }
 async function policyCheckCommand(): Promise<void> {
   const nodeId = await pickNodeId();

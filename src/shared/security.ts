@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { ReachProfile } from './protocol.js';
+import { workspaceSafeToolRefusal } from './profiles.js';
 import { stateDir } from './local-env.js';
 
 const READ_ONLY_TOOLS = new Set([
@@ -100,6 +101,12 @@ export function commandGuard(command: string, profile: ReachProfile, roots: stri
   if (profile === 'read-only' && !parseReadonlyCommand(command, roots)) {
     return 'read-only profile permits only shell-free recognized inspection commands inside allowed roots';
   }
+  // workspace-safe has no shell at all, not a narrower one. The catalog already refuses
+  // dex.process.run and the process/session compatibility tools before execution reaches here; this
+  // repeats the refusal at the command grammar so no future caller can reach a shell by another path.
+  if (profile === 'workspace-safe') {
+    return 'workspace-safe profile does not permit shell commands';
+  }
   return null;
 }
 
@@ -109,6 +116,8 @@ export function toolGuard(tool: string, args: Record<string, unknown>, profile: 
   }
   if (tool === 'read_file' && args.isUrl === true) return 'compatibility URL reads are disabled; remote clients may not use the node as a URL fetch proxy';
   if (profile === 'read-only' && !READ_ONLY_TOOLS.has(tool)) return `tool ${tool} is not permitted by the read-only compatibility allowlist`;
+  const workspaceSafeBlocked = workspaceSafeToolRefusal(profile, tool);
+  if (workspaceSafeBlocked) return workspaceSafeBlocked;
   if (tool === 'start_process' && typeof args.command === 'string') {
     const blocked = commandGuard(args.command, profile, roots);
     if (blocked) return blocked;

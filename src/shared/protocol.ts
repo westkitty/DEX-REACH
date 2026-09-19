@@ -2,6 +2,9 @@ export const REACH_PROTOCOL_VERSION = 1;
 
 export type ReachProfile =
   | 'read-only'
+  // Typed project work without arbitrary shell: inspection, reads, typed writes, checkpoints and the
+  // declared-safe compatibility tools. It is an execution profile, not a fourth owner mode.
+  | 'workspace-safe'
   | 'development'
   | 'repository-maintenance'
   | 'android-adb'

@@ -31,6 +31,7 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 | DEX-INV-025 | Stale coordination state is reclaimed without terminating processes | Lease whose heartbeat expired, with its recorded PID alive or absent | A lease is reclaimed only when the heartbeat is well past due and the process is gone; a live PID is never reclaimed on heartbeat delay alone, and reclaiming never signals or kills another process | Coordinator regression tests | Verified by regression only; not yet exercised on the primary Mac | Coordinator lease lifecycle changes |
 | DEX-INV-026 | Coordination metadata carries no prompts, transcripts or credentials | Acquire, queue, heartbeat, release, and share-mode status | Persisted coordination files contain only the declared lease/ticket fields; label inputs are length- and charset-bounded, credential-shaped labels are refused, and share output omits repository paths, branches and PIDs | Coordinator regression tests + file content inspection | Verified by regression only; not yet exercised on the primary Mac | Coordinator schema, CLI, or share-report changes |
 | DEX-INV-027 | Causal evidence links stages without exporting content | Any traced request, its refusals, and any inbound `traceparent`/`tracestate` | A span carries only identifiers, stage, outcome and hashes; arguments, file content, stdout/stderr, plan arguments, refusal messages and credentials are never recorded; `baggage` is never accepted; malformed inbound trace context starts a fresh trace instead of being repaired or trusted; trace storage is bounded and OpenTelemetry export stays off unless the owner enables it | Tracing regression tests + span field inspection | Verified by regression only; no deployed gateway/node pair has produced a live trace | Tracing, span schema, or trace-export changes |
+| DEX-INV-028 | workspace-safe narrows execution and is narrowed by owner authority | A node configured with the `workspace-safe` execution profile, under every owner mode, client ceiling and grant | Owner modes stay exactly OFF/READ-ONLY/ON and no fourth mode appears; the profile admits inspection, reads, typed writes, checkpoints and the declared-safe compatibility tools, and refuses arbitrary shell, process/session tools, privileged, destructive and undeclared adapter surfaces; the refusal is evaluated against the node's own configured profile, so READ-ONLY cannot re-admit what the profile refuses; OFF, READ-ONLY, client ceilings and grants each still override or narrow it; a planned commit inherits its target's admission instead of laundering it | Workspace-safe regression tests | Verified by regression only; no node has run with the profile configured | Profile, execution-profile enforcement, or catalog workspace-safe changes |
 
 ## Mandatory validation subsets
 
@@ -58,6 +59,14 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 - `npm test`
 - `npm run build`
 - deployed `npm run smoke`
+
+### Any execution-profile change
+
+- DEX-INV-002, 006, 007, 028
+- `npm run typecheck`
+- `npm test`, including `tests/workspace-safe.test.ts`
+- `npm run invariants -- --check`
+- confirm no installed node's `DEX_REACH_PROFILE` changed value
 
 ### Any causal tracing change
 

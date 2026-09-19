@@ -24,7 +24,12 @@ export type OperationDescriptor = {
   /** Admitted by owner READ-ONLY mode. Admission is not execution: a shell operation admitted here
    *  still reaches the node's shell-free command grammar, which refuses anything that mutates. */
   readOnlyAllowed: boolean;
-  /** Reserved for the `workspace-safe` execution profile. Declared now, enforced in a later phase. */
+  /**
+   * Admitted by the `workspace-safe` execution profile. For an operation whose real target is only
+   * known later — a planned commit, or a compatibility call naming a tool — this flag is the ceiling
+   * used when no target is known, exactly as `risk` is, and it is deliberately the refusing value.
+   * Resolve the real answer with `effectiveWorkspaceSafe` or `compatibilityToolWorkspaceSafe`.
+   */
   workspaceSafeAllowed: boolean;
   checkpointStrategy: CheckpointStrategy;
   /**
@@ -34,6 +39,11 @@ export type OperationDescriptor = {
    * does not itself demand the capability its ceiling would otherwise imply.
    */
   riskInheritsFromTarget?: true;
+  /**
+   * The operation names a compatibility adapter tool, so workspace-safe admission is a property of
+   * that tool rather than of the operation. The executor must resolve the exact tool before acting.
+   */
+  workspaceSafeResolvedPerTool?: true;
 };
 
 /** Deterministic requested authority, used by rolling execution budgets in a later phase. */
@@ -72,7 +82,7 @@ export const DEX_OPERATIONS: readonly OperationDescriptor[] = [
   { operation: 'dex.process.run', capability: 'process.shell', risk: 'shell', mutation: true, supportsPlan: true, readOnlyAllowed: true, workspaceSafeAllowed: false, checkpointStrategy: 'git-if-available' },
   // A compatibility call's real risk depends on the exact tool; this is the ceiling for the
   // operation as a whole. Resolve the specific tool with compatibilityToolRisk().
-  { operation: 'dc.call', capability: 'compat', risk: 'shell', mutation: true, supportsPlan: true, readOnlyAllowed: true, workspaceSafeAllowed: false, checkpointStrategy: 'git-if-available' }
+  { operation: 'dc.call', capability: 'compat', risk: 'shell', mutation: true, supportsPlan: true, readOnlyAllowed: true, workspaceSafeAllowed: false, checkpointStrategy: 'git-if-available', workspaceSafeResolvedPerTool: true }
 ] as const;
 
 /**
@@ -135,6 +145,32 @@ export function effectiveRisk(operation: string, plannedTarget?: string): Operat
   if (!descriptor.riskInheritsFromTarget) return descriptor.risk;
   if (!plannedTarget) throw new Error(`${operation} risk requires the planned target operation`);
   return requireOperation(plannedTarget).risk;
+}
+
+/**
+ * Operations the `workspace-safe` profile admits outright, with no target still to resolve. An
+ * operation that resolves per plan target or per compatibility tool is deliberately absent: it is
+ * neither admitted nor refused here, because the answer is not knowable from the operation alone.
+ */
+export function workspaceSafeOperations(): string[] {
+  return DEX_OPERATIONS
+    .filter(d => d.workspaceSafeAllowed && !d.riskInheritsFromTarget && !d.workspaceSafeResolvedPerTool)
+    .map(d => d.operation);
+}
+
+/**
+ * Whether `workspace-safe` admits this operation, resolving an inheriting operation against the
+ * target it was planned for. Fails closed: an operation whose target is a compatibility tool cannot
+ * be answered here, and an inheriting operation with no known target is an error rather than a pass.
+ */
+export function effectiveWorkspaceSafe(operation: string, plannedTarget?: string): boolean {
+  const descriptor = requireOperation(operation);
+  if (descriptor.workspaceSafeResolvedPerTool) {
+    throw new Error(`${operation} workspace-safe admission is per compatibility tool; resolve the tool first`);
+  }
+  if (!descriptor.riskInheritsFromTarget) return descriptor.workspaceSafeAllowed;
+  if (!plannedTarget) throw new Error(`${operation} workspace-safe admission requires the planned target operation`);
+  return effectiveWorkspaceSafe(plannedTarget);
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +244,17 @@ export function compatibilityToolRisk(tool: string): OperationRiskClass {
 
 export function remoteBlockedCompatibilityTools(): string[] {
   return COMPATIBILITY_TOOLS.filter(descriptor => descriptor.remoteBlocked).map(descriptor => descriptor.tool);
+}
+
+/** Whether `workspace-safe` admits this compatibility tool. Fails closed on an unclassified tool. */
+export function compatibilityToolWorkspaceSafe(tool: string): boolean {
+  return requireCompatibilityTool(tool).workspaceSafeAllowed;
+}
+
+export function workspaceSafeCompatibilityTools(): string[] {
+  return COMPATIBILITY_TOOLS
+    .filter(descriptor => descriptor.workspaceSafeAllowed && !descriptor.remoteBlocked)
+    .map(descriptor => descriptor.tool);
 }
 
 export function remoteCompatibilityTools(): string[] {

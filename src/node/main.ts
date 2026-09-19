@@ -26,6 +26,7 @@ import { consumePlan, createPlan, hashValue, sweepExpiredPlans } from '../shared
 import { writeRuntimeStatus } from './runtime-status.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
 import { checkpointStrategyFor, plannableOperations } from '../shared/operations.js';
+import { workspaceSafeOperationRefusal, workspaceSafeToolRefusal } from '../shared/profiles.js';
 import { childSpan, recordSpan, traceContextFrom, type ReachTraceContext } from '../shared/trace.js';
 
 loadLocalSecrets();
@@ -47,6 +48,12 @@ async function currentAccess(): Promise<AccessSnapshot> {
 }
 
 async function executeOperation(operation: string, args: Record<string, unknown>, actor: RequestActor | undefined, profile: ReachProfile): Promise<unknown> {
+  // The node's configured profile is a standing constraint, evaluated here rather than through the
+  // effective profile an authorization decision produced. READ-ONLY replaces that effective profile,
+  // so reading the constraint from it would let READ-ONLY re-admit what workspace-safe refuses. Both
+  // narrowings must apply; neither may widen the other.
+  const profileBlocked = workspaceSafeOperationRefusal(config.profile, operation);
+  if (profileBlocked) throw new Error(profileBlocked);
   if (operation === 'dc.call') {
     const tool = String(args.tool || '');
     const toolArgs = (args.arguments || {}) as Record<string, unknown>;
@@ -54,6 +61,8 @@ async function executeOperation(operation: string, args: Record<string, unknown>
     if (tool === 'set_config_value' && profile !== 'full-local') {
       throw new Error('remote mutation of Desktop Commander safety configuration requires full-local profile');
     }
+    const toolBlocked = workspaceSafeToolRefusal(config.profile, tool);
+    if (toolBlocked) throw new Error(toolBlocked);
     const blocked = toolGuard(tool, toolArgs, profile, config.allowedRoots);
     if (blocked) throw new Error(blocked);
     return backend.callTool(tool, toolArgs);
@@ -99,6 +108,14 @@ async function buildPlan(actor: RequestActor | undefined, args: Record<string, u
   const operation = String(args.operation || '');
   const targetArgs = (args.arguments || {}) as Record<string, unknown>;
   if (!plannableOperations().includes(operation)) throw new Error(`plan target must be ${plannableOperations().join(', ')}`);
+  // Refuse at plan time rather than at commit time, so a workspace-safe node never issues a plan it
+  // would not honour and never takes a checkpoint for one.
+  const plannedBlocked = workspaceSafeOperationRefusal(config.profile, operation);
+  if (plannedBlocked) throw new Error(plannedBlocked);
+  if (operation === 'dc.call') {
+    const plannedTool = workspaceSafeToolRefusal(config.profile, String(targetArgs.tool || ''));
+    if (plannedTool) throw new Error(plannedTool);
+  }
   const state = await loadAccessState(config.nodeId);
   const decision = authorizeOperation(state, actor, operation, config.profile, Date.now(), targetArgs);
   if (!decision.allowed) throw new Error(decision.reason);
@@ -134,6 +151,14 @@ async function commitPlan(actor: RequestActor | undefined, args: Record<string, 
   if (plan.nodeId !== config.nodeId) throw new Error('execution plan targets a different node');
   if ((plan.actor?.clientId || null) !== (actor?.clientId || null) || (plan.actor?.kind || null) !== (actor?.kind || null)) {
     throw new Error('execution plan belongs to a different client');
+  }
+  // A plan issued before the owner narrowed this node to workspace-safe is stale authority, not
+  // grandfathered authority, so the commit is refused against the profile in force now.
+  const commitBlocked = workspaceSafeOperationRefusal(config.profile, 'dex.commitPlan', plan.operation);
+  if (commitBlocked) throw new Error(commitBlocked);
+  if (plan.operation === 'dc.call') {
+    const commitTool = workspaceSafeToolRefusal(config.profile, String((plan.args as Record<string, unknown>).tool || ''));
+    if (commitTool) throw new Error(commitTool);
   }
   if (!plan.fingerprint || !plan.fingerprintHash) throw new Error('execution plan predates identity binding; create a new plan');
   if (executionIdentityHash(plan.fingerprint) !== plan.fingerprintHash) throw new Error('stored execution identity is inconsistent; create a new plan');

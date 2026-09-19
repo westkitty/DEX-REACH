@@ -225,6 +225,39 @@ Waiting in the queue is a normal outcome, not a failure.
 
 ---
 
+## Execution Profiles
+
+Owner modes are and remain exactly three: **OFF**, **READ-ONLY**, **ON**. A profile is a separate axis — a standing local constraint the machine owner configures on the node itself with `DEX_REACH_PROFILE`, which narrows what ON can reach on that machine. A remote client cannot choose one.
+
+`workspace-safe` is the profile for typed project work without a shell.
+
+| | workspace-safe |
+| --- | --- |
+| Inspection, file reads, repo info, receipts | allowed |
+| Typed file writes | allowed |
+| Checkpoints and planning | allowed |
+| Declared-safe compatibility tools (read, list, search, write, edit, move, mkdir) | allowed |
+| `dex.process.run`, arbitrary shell | refused |
+| Process and session compatibility tools, terminate, kill | refused |
+| Safety-configuration mutation and vendor surfaces | refused |
+| Any adapter tool or operation the catalog does not classify | refused |
+
+**The two axes compose by intersection, never by union.** Both must allow an operation for it to run. The profile constraint is evaluated against the node's own configured profile, not against the effective profile an authorization decision produced — READ-ONLY replaces that effective value, and reading the constraint from it would let READ-ONLY re-admit the very shell the owner configured this node to refuse. A narrowing must never widen.
+
+So on a workspace-safe node: OFF refuses everything; READ-ONLY takes away the typed writes and checkpoints that workspace-safe adds, and does not hand back the shell; a client ceiling narrows a single client kind further; a grant narrows to named capabilities and roots. Each of those only subtracts.
+
+A plan committed on a workspace-safe node inherits its target's admission, so a plan cannot be used to launder a refused operation past the profile. A plan issued before the owner narrowed the node is stale authority rather than grandfathered authority, and is refused against the profile in force now.
+
+```bash
+npm run dex -- explain claude dex.process.run
+```
+
+`explain` reports the policy decision and the profile constraint separately, and says whether the operation would actually run. A policy answer alone could contradict what the node does.
+
+Adding this profile changes no installed node. Every node keeps the `DEX_REACH_PROFILE` it was configured with, and the default is still `development`.
+
+---
+
 ## Causal Tracing
 
 Every request carries a W3C Trace Context from the MCP edge through the gateway and node into authorization, planning, commit and execution. The node returns the `traceId` alongside the result, so a completed action can be reconstructed afterwards from evidence instead of from a description of what was supposed to happen.
@@ -448,7 +481,7 @@ Before changing execution, routing, authentication, policy, or install behavior,
 ├── src/
 │   ├── gateway/          # OAuth, MCP server, node registry, routing, audit
 │   ├── node/             # node connection, native execution, local enforcement
-│   └── shared/           # protocol, access policy, operation catalog, guardrails, work coordination, tracing
+│   └── shared/           # protocol, access policy, operation catalog, execution profiles, guardrails, work coordination, tracing
 ├── scripts/              # bootstrap, install, credentials, smoke, simulations, local CLI
 ├── tests/                # access, auth, routing, security, native, audit, result-store, coordinator tests
 ├── docs/

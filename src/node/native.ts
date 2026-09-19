@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { executionFingerprint } from '../shared/fingerprint.js';
 import { canonicalPathForScope, commandGuard, pathAllowed, parseReadonlyCommand } from '../shared/security.js';
 import type { ReachProfile } from '../shared/protocol.js';
+import { workspaceSafeOperationRefusal } from '../shared/profiles.js';
 import { stateDir } from '../shared/local-env.js';
 import { describeOperation } from '../shared/operations.js';
 
@@ -160,6 +161,10 @@ export async function nativeCall(nodeId: string, operation: string, args: Record
   if (profile === 'read-only' && descriptor && !descriptor.readOnlyAllowed) {
     throw new Error(`read-only profile does not permit ${operation}`);
   }
+  // The same repetition for workspace-safe. nativeCall never receives a planned commit or a
+  // compatibility call, so no target resolution is needed here.
+  const workspaceSafeBlocked = workspaceSafeOperationRefusal(profile, operation);
+  if (workspaceSafeBlocked) throw new Error(workspaceSafeBlocked);
   switch (operation) {
     case 'dex.fingerprint':
       return executionFingerprint(nodeId, scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd'));
