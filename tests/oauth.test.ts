@@ -4,8 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { Response } from 'express';
-import type { AuthorizationParams } from '@modelcontextprotocol/sdk/server/auth/provider.js';
-import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js';
+import type { AuthorizationParams } from '@modelcontextprotocol/server-legacy/auth';
+import type { OAuthClientInformationFull } from '@modelcontextprotocol/server';
 import { ReachOAuthProvider } from '../src/gateway/auth.js';
 
 test('OAuth approval page escapes untrusted dynamic client names', async () => {

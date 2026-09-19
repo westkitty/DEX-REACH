@@ -21,10 +21,18 @@ import {
 } from '../shared/protocol.js';
 import { loadLocalSecrets, stateDir } from '../shared/local-env.js';
 import { authorizeOperation, loadAccessState, reserveOperation, snapshot } from '../shared/access.js';
+import { releaseBudgetConcurrency } from '../shared/budget-usage.js';
+import { createCapabilityRequest } from '../shared/capability-requests.js';
+import type { ReachCapability } from '../shared/capabilities.js';
 import { appendReceipt, listReceipts } from '../shared/receipts.js';
 import { consumePlan, createPlan, hashValue, sweepExpiredPlans } from '../shared/plans.js';
 import { writeRuntimeStatus } from './runtime-status.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
+import { checkpointStrategyFor, plannableOperations } from '../shared/operations.js';
+import { workspaceSafeOperationRefusal, workspaceSafeToolRefusal } from '../shared/profiles.js';
+import { childSpan, recordSpan, traceContextFrom, type ReachTraceContext } from '../shared/trace.js';
+import { loadTransportKeys } from './transport-keys.js';
+import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -45,6 +53,12 @@ async function currentAccess(): Promise<AccessSnapshot> {
 }
 
 async function executeOperation(operation: string, args: Record<string, unknown>, actor: RequestActor | undefined, profile: ReachProfile): Promise<unknown> {
+  // The node's configured profile is a standing constraint, evaluated here rather than through the
+  // effective profile an authorization decision produced. READ-ONLY replaces that effective profile,
+  // so reading the constraint from it would let READ-ONLY re-admit what workspace-safe refuses. Both
+  // narrowings must apply; neither may widen the other.
+  const profileBlocked = workspaceSafeOperationRefusal(config.profile, operation);
+  if (profileBlocked) throw new Error(profileBlocked);
   if (operation === 'dc.call') {
     const tool = String(args.tool || '');
     const toolArgs = (args.arguments || {}) as Record<string, unknown>;
@@ -52,6 +66,8 @@ async function executeOperation(operation: string, args: Record<string, unknown>
     if (tool === 'set_config_value' && profile !== 'full-local') {
       throw new Error('remote mutation of Desktop Commander safety configuration requires full-local profile');
     }
+    const toolBlocked = workspaceSafeToolRefusal(config.profile, tool);
+    if (toolBlocked) throw new Error(toolBlocked);
     const blocked = toolGuard(tool, toolArgs, profile, config.allowedRoots);
     if (blocked) throw new Error(blocked);
     return backend.callTool(tool, toolArgs);
@@ -70,6 +86,21 @@ async function executeOperation(operation: string, args: Record<string, unknown>
     });
   }
   if (operation === 'dex.receipts.list') return listReceipts(config.nodeId, Number(args.limit || 20));
+  if (operation === 'dex.capability.request') {
+    const capabilities = Array.isArray(args.capabilities)
+      ? args.capabilities.map(value => String(value) as ReachCapability)
+      : typeof args.capability === 'string' ? [args.capability as ReachCapability] : [];
+    const roots = Array.isArray(args.roots) ? args.roots.map(value => String(value)) : typeof args.root === 'string' ? [args.root] : [];
+    return createCapabilityRequest(config.nodeId, {
+      client: actor?.kind ?? 'other',
+      capabilities,
+      roots,
+      durationMs: Number(args.durationMs || 0),
+      maxUses: args.maxUses === undefined || args.maxUses === null ? null : Number(args.maxUses),
+      justification: String(args.justification || ''),
+      operation: typeof args.operation === 'string' ? args.operation : undefined
+    });
+  }
   return nativeCall(config.nodeId, operation, args, config.allowedRoots, profile);
 }
 
@@ -84,7 +115,7 @@ function identityCwdForPlan(args: Record<string, unknown>): string {
 }
 
 async function checkpointForPlan(operation: string, args: Record<string, unknown>): Promise<string | null> {
-  if (!['dex.file.write', 'dex.process.run', 'dc.call'].includes(operation)) return null;
+  if (checkpointStrategyFor(operation) === 'none') return null;
   const cwdCandidate = identityCwdForPlan(args);
   try {
     return String((await createCheckpoint(cwdCandidate) as { id: string }).id);
@@ -96,7 +127,15 @@ async function checkpointForPlan(operation: string, args: Record<string, unknown
 async function buildPlan(actor: RequestActor | undefined, args: Record<string, unknown>): Promise<unknown> {
   const operation = String(args.operation || '');
   const targetArgs = (args.arguments || {}) as Record<string, unknown>;
-  if (!['dex.file.write', 'dex.process.run', 'dex.checkpoint', 'dc.call'].includes(operation)) throw new Error('plan target must be dex.file.write, dex.process.run, dex.checkpoint, or dc.call');
+  if (!plannableOperations().includes(operation)) throw new Error(`plan target must be ${plannableOperations().join(', ')}`);
+  // Refuse at plan time rather than at commit time, so a workspace-safe node never issues a plan it
+  // would not honour and never takes a checkpoint for one.
+  const plannedBlocked = workspaceSafeOperationRefusal(config.profile, operation);
+  if (plannedBlocked) throw new Error(plannedBlocked);
+  if (operation === 'dc.call') {
+    const plannedTool = workspaceSafeToolRefusal(config.profile, String(targetArgs.tool || ''));
+    if (plannedTool) throw new Error(plannedTool);
+  }
   const state = await loadAccessState(config.nodeId);
   const decision = authorizeOperation(state, actor, operation, config.profile, Date.now(), targetArgs);
   if (!decision.allowed) throw new Error(decision.reason);
@@ -133,6 +172,14 @@ async function commitPlan(actor: RequestActor | undefined, args: Record<string, 
   if ((plan.actor?.clientId || null) !== (actor?.clientId || null) || (plan.actor?.kind || null) !== (actor?.kind || null)) {
     throw new Error('execution plan belongs to a different client');
   }
+  // A plan issued before the owner narrowed this node to workspace-safe is stale authority, not
+  // grandfathered authority, so the commit is refused against the profile in force now.
+  const commitBlocked = workspaceSafeOperationRefusal(config.profile, 'dex.commitPlan', plan.operation);
+  if (commitBlocked) throw new Error(commitBlocked);
+  if (plan.operation === 'dc.call') {
+    const commitTool = workspaceSafeToolRefusal(config.profile, String((plan.args as Record<string, unknown>).tool || ''));
+    if (commitTool) throw new Error(commitTool);
+  }
   if (!plan.fingerprint || !plan.fingerprintHash) throw new Error('execution plan predates identity binding; create a new plan');
   if (executionIdentityHash(plan.fingerprint) !== plan.fingerprintHash) throw new Error('stored execution identity is inconsistent; create a new plan');
   const currentFingerprint = await executionFingerprint(config.nodeId, plan.fingerprint.cwd);
@@ -145,15 +192,19 @@ async function commitPlan(actor: RequestActor | undefined, args: Record<string, 
     plan.args,
     { expectedPolicyHash: plan.policyHash }
   );
-  const value = await executeOperation(plan.operation, plan.args, actor, reservation.decision.effectiveProfile);
-  return {
-    planId: plan.id,
-    operation: plan.operation,
-    requestHash: plan.requestHash,
-    policyHash: plan.policyHash,
-    checkpointId: plan.checkpointId,
-    result: value
-  };
+  try {
+    const value = await executeOperation(plan.operation, plan.args, actor, reservation.decision.effectiveProfile);
+    return {
+      planId: plan.id,
+      operation: plan.operation,
+      requestHash: plan.requestHash,
+      policyHash: plan.policyHash,
+      checkpointId: plan.checkpointId,
+      result: value
+    };
+  } finally {
+    await releaseBudgetConcurrency(config.nodeId, reservation.budgetReservationId);
+  }
 }
 
 async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> {
@@ -161,11 +212,31 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
   const actor = request.actor;
   let policy: unknown = null;
   let receiptCheckpoint: string | null = null;
+  let budgetReservationId: string | undefined;
+  // Continue the caller's trace when it supplied a valid W3C context, otherwise start one here.
+  // A malformed inbound header never fails the request and never propagates.
+  const trace: ReachTraceContext = traceContextFrom({
+    traceparent: typeof request.traceparent === 'string' ? request.traceparent : undefined,
+    tracestate: typeof request.tracestate === 'string' ? request.tracestate : undefined
+  });
+  await recordSpan({
+    traceId: trace.traceId, spanId: trace.spanId, parentSpanId: trace.parentSpanId,
+    stage: 'node', at: new Date().toISOString(), operation: request.operation,
+    nodeId: config.nodeId, actorKind: actor?.kind
+  });
   try {
     // The final authorization reservation happens immediately before execution and is serialized with
     // owner policy updates. OFF therefore wins over stale remote state instead of being overwritten.
     const reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args);
+    budgetReservationId = reservation.budgetReservationId;
     policy = reservation.policy;
+    const authorizeSpan = childSpan(trace);
+    await recordSpan({
+      traceId: authorizeSpan.traceId, spanId: authorizeSpan.spanId, parentSpanId: authorizeSpan.parentSpanId,
+      stage: 'authorize', at: new Date().toISOString(), operation: request.operation,
+      nodeId: config.nodeId, actorKind: actor?.kind, ok: true,
+      policyHash: hashValue(reservation.policy)
+    });
     let value: unknown;
     if (request.operation === 'dex.plan') {
       value = await buildPlan(actor, request.args);
@@ -178,6 +249,15 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     }
     const result = results.bound(value);
     const durationMs = Date.now() - started;
+    const executeSpan = childSpan(trace);
+    await recordSpan({
+      traceId: executeSpan.traceId, spanId: executeSpan.spanId, parentSpanId: executeSpan.parentSpanId,
+      stage: request.operation === 'dex.plan' ? 'plan' : request.operation === 'dex.commitPlan' ? 'commit' : 'execute',
+      at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId,
+      actorKind: actor?.kind, ok: true, durationMs,
+      requestHash: hashValue({ operation: request.operation, args: request.args }),
+      ...(receiptCheckpoint ? { checkpointId: receiptCheckpoint } : {})
+    });
     await audit.append({
       at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor,
       operation: request.operation, ok: true, durationMs, args: request.args
@@ -186,10 +266,19 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: true,
       result: value, durationMs, policy, checkpointId: receiptCheckpoint
     });
-    return { type: 'response', id: request.id, ok: true, result };
+    return { type: 'response', id: request.id, ok: true, result, traceId: trace.traceId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const durationMs = Date.now() - started;
+    const failSpan = childSpan(trace);
+    await recordSpan({
+      traceId: failSpan.traceId, spanId: failSpan.spanId, parentSpanId: failSpan.parentSpanId,
+      stage: 'execute', at: new Date().toISOString(), operation: request.operation,
+      nodeId: config.nodeId, actorKind: actor?.kind, ok: false, durationMs,
+      // Refusal classification only. The refusal message can quote a path or a command, so it is
+      // deliberately not traced; the audit log already holds the redacted detail.
+      outcome: 'refused'
+    });
     await audit.append({
       at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor,
       operation: request.operation, ok: false, durationMs, args: request.args, error: message
@@ -198,7 +287,9 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: false,
       error: message, durationMs, policy: policy ?? { unavailable: true }, checkpointId: receiptCheckpoint
     }).catch(() => undefined);
-    return { type: 'response', id: request.id, ok: false, error: message };
+    return { type: 'response', id: request.id, ok: false, error: message, traceId: trace.traceId };
+  } finally {
+    await releaseBudgetConcurrency(config.nodeId, budgetReservationId).catch(() => undefined);
   }
 }
 
@@ -229,7 +320,15 @@ async function connect(): Promise<void> {
   if (stopped) return;
   const url = new URL(config.gatewayWs);
   url.searchParams.set('nodeId', config.nodeId);
-  const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${config.token}` } });
+  const headers: Record<string, string> = {};
+  const transport = await loadTransportKeys(config.nodeId);
+  if (transport) {
+    const proof = signNodeProof(transport.privateKey, expectedProofDefaults(config.nodeId));
+    headers.Authorization = encodeAuthorizationProof(proof);
+  } else {
+    headers.Authorization = `Bearer ${config.token}`;
+  }
+  const ws = new WebSocket(url, { headers });
   let lastAliveAt = Date.now();
   ws.on('pong', () => { lastAliveAt = Date.now(); });
 

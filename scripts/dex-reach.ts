@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { stateDir } from '../src/shared/local-env.js';
 import { pathAllowed } from '../src/shared/security.js';
-import { ACCESS_MODES, accessFile, authorizeOperation, createGrant, inspectAccessPolicyFile, isAccessMode, loadAccessState, modeForActor, parseDuration, resolveMode, updateAccessState } from '../src/shared/access.js';
+import { ACCESS_MODES, accessFile, authorizeOperation, createGrant, inspectAccessPolicyFile, isAccessMode, loadAccessState, modeForActor, parseDuration, resolveMode, restorePolicyRevision, updateAccessState } from '../src/shared/access.js';
 import { REACH_CAPABILITIES, type ReachCapability } from '../src/shared/capabilities.js';
 import { AuditLog, auditFile } from '../src/shared/audit.js';
 import { listReceipts, verifyReceipt } from '../src/shared/receipts.js';
@@ -14,7 +14,32 @@ import { readRuntimeStatus, runtimeFile } from '../src/node/runtime-status.js';
 import { portfolio, resolveProject } from '../src/node/projects.js';
 import { createCheckpoint } from '../src/node/native.js';
 import type { AccessMode, ClientKind, ReachProfile } from '../src/shared/protocol.js';
+import { describeProfile, workspaceSafeOperationRefusal } from '../src/shared/profiles.js';
 import { arg, flag, localNodeIds, nodeEnvFile, readEnvFile } from './lib/node-files.js';
+import { WORK_ACCESS_CLASSES, WORK_EXECUTORS, WORK_WORKLOAD_CLASSES, acquireWork, cancelTicket, describeWorkStatus, heartbeat, redactWorkStatusForShare, releaseWork, workStatus } from '../src/shared/work-coordinator.js';
+import type { AccessClass, WorkloadClass } from '../src/shared/machine-capacity.js';
+import type { WorkExecutor } from '../src/shared/work-coordinator.js';
+import { describeTrace, isValidTraceId, listTraces, otelExportEnabled, readTrace } from '../src/shared/trace.js';
+import {
+  BUDGET_SCOPES,
+  clearBudgetRule,
+  inspectBudgetPolicy,
+  isBudgetScope,
+  listBudgetRules,
+  makeBudgetRule,
+  policyRestricts,
+  upsertBudgetRule,
+  type BudgetScope
+} from '../src/shared/budget-policy.js';
+import { loadBudgetUsage, resetBudgetUsage, usedInWindow } from '../src/shared/budget-usage.js';
+import {
+  approveCapabilityRequest,
+  createCapabilityRequest,
+  denyCapabilityRequest,
+  listCapabilityRequests
+} from '../src/shared/capability-requests.js';
+import { addPolicyAssertion, clearPolicyAssertion, listPolicyHistory, loadPolicyAssertions } from '../src/shared/policy-assertions.js';
+import { collectDoctorReport, formatDoctorReport } from '../src/shared/doctor.js';
 
 const execFileAsync = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -40,7 +65,41 @@ function usage(): never {
   grant-clear <client>            remove grants and stop requiring grants for that client
   explain <client> <operation> [--path PATH]
   policy-check                    validate policy schema and built-in safety assertions
+  budgets [--json]                show rolling execution budgets and current usage
+  budget set <shared|chatgpt|claude|smoke|other> --window 1h
+                                  [--max-operations N] [--max-mutations N] [--max-shell N]
+                                  [--max-write-bytes N] [--max-process-ms N] [--max-concurrent N]
+  budget clear <id>               remove one budget rule (shared, a client kind, or its id)
+  requests [--json]               list capability requests (pending/approved/denied/expired)
+  request create <client> <capability> --root PATH --for 30m [--max-uses N]
+                                  --justification TEXT [--operation NAME]
+  request approve <id> [--capability C] [--root PATH] [--for 30m] [--max-uses N]
+  request deny <id>               refuse a pending request; creates no grant
+  assertions [--json]             list custom policy assertions
+  assertion add <client> --note TEXT [--forbid CAP] [--write-root PATH]
+  assertion clear <id>
+  policy-history [--limit 20] [--json]
+  policy-restore <revision>       restore an old policy as a NEW revision
+  doctor [--json] [--deep] [--share]  read-only diagnostics; --share redacts local paths
   uninstall [--purge-state --yes-delete-state]
+
+Shared-machine work coordination (resource admission only; grants no execution authority):
+  work-status [--json] [--share]  machine capacity, active leases, queue depth, observed load
+  work-queue [--json]             queued tickets in FIFO order
+  work-acquire --repo PATH --access read|mutate|exclusive --workload light|medium|heavy
+                [--executor claude-code|chatgpt|codex|grok|human|other] [--phase LABEL]
+                [--pid N] [--branch NAME] [--json]
+                --pid names the long-lived process that owns the work. Without it the lease is
+                owned by this short-lived command and must be kept alive by work-heartbeat.
+  work-release <lease-id> [--force]
+  work-wait <ticket-id> [--timeout 30m]   bounded polling until the ticket is admitted
+  work-cancel <ticket-id>
+  work-heartbeat <lease-or-ticket-id>
+
+Causal tracing (evidence only; never arguments, file contents or process output):
+  trace <trace-id> [--json]       reconstruct one causal chain across MCP, node, plan, commit,
+                                  execution, receipt and checkpoint
+  traces [--limit 20] [--json]    recent trace ids
 
 Capabilities: ${REACH_CAPABILITIES.join(', ')}
 Options: --node <id> when more than one node credential exists locally.`);
@@ -158,7 +217,18 @@ async function grantClearCommand(): Promise<void> {
 async function explainCommand(): Promise<void> {
   const kind = argv[1] as ClientKind | undefined; const operation = argv[2]; if (!kind || !CLIENT_KINDS.includes(kind) || !operation) usage();
   const nodeId = await pickNodeId(); const state = await loadAccessState(nodeId); const env = await readEnvFile(nodeEnvFile(nodeId)); const profile = (env.DEX_REACH_PROFILE || 'development') as ReachProfile; const args: Record<string, unknown> = {}; const p = arg('--path', argv); if (p) args.path = p;
-  const decision = authorizeOperation(state, { kind, clientId: 'local-explain', clientName: CLIENT_LABEL[kind] }, operation, profile, Date.now(), args); console.log(JSON.stringify({ nodeId, kind, operation, args, decision }, null, 2));
+  const decision = authorizeOperation(state, { kind, clientId: 'local-explain', clientName: CLIENT_LABEL[kind] }, operation, profile, Date.now(), args);
+  // The node's execution profile is a second narrowing the policy decision does not carry, so a
+  // report that showed only the policy answer would tell the owner an operation is permitted that
+  // the node would refuse. Both narrowings are reported, and the operation runs only if both allow.
+  const profileRefusal = workspaceSafeOperationRefusal(profile, operation);
+  const wouldRun = decision.allowed && !profileRefusal;
+  console.log(JSON.stringify({
+    nodeId, kind, operation, args,
+    policy: decision,
+    profile: { configured: profile, description: describeProfile(profile), refusal: profileRefusal },
+    wouldRun
+  }, null, 2));
 }
 async function policyCheckCommand(): Promise<void> {
   const nodeId = await pickNodeId();
@@ -253,6 +323,381 @@ async function uninstall(): Promise<void> {
   else console.log(`Local state under ${stateDir()} was preserved.`);
 }
 
+
+// --- Shared-machine work coordination -------------------------------------
+// These commands answer "can this run now?". They never answer "is this allowed?": owner mode,
+// client ceilings, grants, roots, profiles and plans are unaffected by any lease (DEX-INV-022).
+
+function workOption<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
+  const value = arg(name, argv);
+  if (value === undefined) return fallback;
+  if (!(allowed as readonly string[]).includes(value)) throw new Error(`${name} must be one of: ${allowed.join(', ')}`);
+  return value as T;
+}
+
+async function workStatusCommand(): Promise<void> {
+  const status = await workStatus();
+  if (flag('--share', argv)) { console.log(JSON.stringify(redactWorkStatusForShare(status), null, 2)); return; }
+  if (flag('--json', argv)) { console.log(JSON.stringify(status, null, 2)); return; }
+  console.log(describeWorkStatus(status).join('\n'));
+  console.log(`\nAdmission for a new medium mutating job: ${status.capacity.canAdmit ? 'AVAILABLE' : 'QUEUE'}`);
+  for (const reason of status.capacity.reasons) console.log(`  ${reason}`);
+  console.log('\nMachine admission is not execution authority. Run `dex explain` for the authorization question.');
+}
+
+async function workQueueCommand(): Promise<void> {
+  const status = await workStatus();
+  if (flag('--json', argv)) { console.log(JSON.stringify(status.tickets, null, 2)); return; }
+  if (!status.tickets.length) { console.log('Work queue is empty.'); return; }
+  console.log(`Work queue (FIFO, ${status.tickets.length} waiting):`);
+  status.tickets.forEach((ticket, index) => {
+    const where = ticket.repositoryRoot ? path.basename(ticket.repositoryRoot) : 'machine';
+    console.log(`  ${String(index + 1).padStart(2)}. ${ticket.id}  ${ticket.executor.padEnd(11)} ${where} / ${ticket.workload} / ${ticket.access}  since ${ticket.enqueuedAt.replace('T', ' ').slice(0, 19)}`);
+  });
+}
+
+function workPid(): number | undefined {
+  const value = arg('--pid', argv);
+  if (value === undefined) return undefined;
+  const pid = Number.parseInt(value, 10);
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error('--pid must be a positive process id');
+  return pid;
+}
+
+async function workAcquireCommand(): Promise<void> {
+  const result = await acquireWork({
+    executor: workOption<WorkExecutor>('--executor', WORK_EXECUTORS, 'other'),
+    access: workOption<AccessClass>('--access', WORK_ACCESS_CLASSES, 'read'),
+    workload: workOption<WorkloadClass>('--workload', WORK_WORKLOAD_CLASSES, 'light'),
+    repositoryRoot: arg('--repo', argv),
+    branch: arg('--branch', argv),
+    phase: arg('--phase', argv),
+    ticketId: arg('--ticket', argv),
+    pid: workPid()
+  });
+  if (flag('--json', argv)) { console.log(JSON.stringify(result, null, 2)); if (result.status === 'queued') process.exitCode = 3; return; }
+  if (result.status === 'acquired') {
+    console.log(`ADMITTED  lease ${result.lease.id}`);
+    console.log(`  ${result.lease.workload} / ${result.lease.access}${result.lease.repositoryRoot ? ` on ${result.lease.repositoryRoot}` : ''}`);
+    console.log(`  Owning process: ${result.lease.pid}`);
+    console.log(`  Heartbeat with: npm run dex -- work-heartbeat ${result.lease.id}  (every ~30s, or the lease expires after 2.5 minutes without one)`);
+    console.log(`  Release with:   npm run dex -- work-release ${result.lease.id}`);
+    console.log('  This lease reserves machine capacity only; it grants no execution authority.');
+    return;
+  }
+  console.log(`QUEUED    ticket ${result.ticket.id} (position ${result.position})`);
+  for (const reason of result.reasons) console.log(`  ${reason}`);
+  console.log(`  Wait with: npm run dex -- work-wait ${result.ticket.id}`);
+  process.exitCode = 3;
+}
+
+async function workReleaseCommand(): Promise<void> {
+  const id = argv[1];
+  if (!id) throw new Error('usage: work-release <lease-id> [--force]');
+  const result = await releaseWork(id, { force: flag('--force', argv) });
+  if (!result.released) throw new Error(result.reason || `could not release ${id}`);
+  console.log(`Released ${id}.`);
+}
+
+async function workCancelCommand(): Promise<void> {
+  const id = argv[1];
+  if (!id) throw new Error('usage: work-cancel <ticket-id>');
+  if (!(await cancelTicket(id))) throw new Error(`no queued ticket ${id}`);
+  console.log(`Cancelled ${id}. Other waiters keep their positions.`);
+}
+
+async function workHeartbeatCommand(): Promise<void> {
+  const id = argv[1];
+  if (!id) throw new Error('usage: work-heartbeat <lease-or-ticket-id>');
+  if (!(await heartbeat(id))) throw new Error(`no active lease or ticket ${id}`);
+  console.log(`Heartbeat recorded for ${id}.`);
+}
+
+function optionalCeiling(name: string): number | null {
+  const raw = arg(name, argv);
+  if (raw === undefined) return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) throw new Error(`${name} must be a non-negative integer`);
+  return value;
+}
+
+function describeBudgetRule(rule: ReturnType<typeof listBudgetRules>[number], usage: Awaited<ReturnType<typeof loadBudgetUsage>>, now: number): string {
+  const used = usedInWindow(usage, rule.id === 'shared' ? 'shared' : rule.id as ClientKind, rule.windowMs, now);
+  const parts: string[] = [];
+  const show = (label: string, max: number | null, current: number) => {
+    if (max === null) return;
+    parts.push(`${label} ${current}/${max}`);
+  };
+  show('ops', rule.maxOperations, used.operations);
+  show('mutations', rule.maxMutations, used.mutations);
+  show('shell', rule.maxShellCalls, used.shellCalls);
+  show('write-bytes', rule.maxRequestedWriteBytes, used.requestedWriteBytes);
+  show('process-ms', rule.maxRequestedProcessMs, used.requestedProcessMs);
+  if (rule.maxConcurrent !== null) {
+    const active = rule.id === 'shared' ? usage.inflight.length : usage.inflight.filter(entry => entry.client === rule.id).length;
+    parts.push(`concurrent ${active}/${rule.maxConcurrent}`);
+  }
+  const windowMin = rule.windowMs / 60_000;
+  const window = windowMin >= 60 ? `${windowMin / 60}h` : `${windowMin}m`;
+  return `  ${rule.id.padEnd(8)} window=${window}  ${parts.join(', ') || '(no ceilings)'}`;
+}
+
+async function budgetsCommand(): Promise<void> {
+  const nodeId = await pickNodeId();
+  const inspection = await inspectBudgetPolicy(nodeId);
+  const usage = inspection.unrestricted ? { version: 1 as const, samples: [], inflight: [] } : await loadBudgetUsage(nodeId).catch(() => ({ version: 1 as const, samples: [], inflight: [] }));
+  if (flag('--json', argv)) {
+    console.log(JSON.stringify({ nodeId, unrestricted: inspection.unrestricted, valid: inspection.valid, exists: inspection.exists, policy: inspection.policy, usage, errors: inspection.errors }, null, 2));
+    return;
+  }
+  if (inspection.unrestricted) {
+    console.log(`${nodeId}: no execution budget configured. Owner mode, client ceilings, grants, roots and profile still govern authority.`);
+    if (!inspection.valid) console.log(`  note: ${inspection.errors.join('; ')}`);
+    return;
+  }
+  const now = Date.now();
+  console.log(`Execution budgets for ${nodeId} (restrictions only; they never grant authority):`);
+  for (const rule of listBudgetRules(inspection.policy)) console.log(describeBudgetRule(rule, usage, now));
+  console.log(`  inflight slots: ${usage.inflight.length}`);
+}
+
+async function budgetSetCommand(): Promise<void> {
+  const scope = argv[2];
+  if (!isBudgetScope(scope)) throw new Error(`usage: budget set <${BUDGET_SCOPES.join('|')}> --window 1h [--max-operations N] ...`);
+  const windowRaw = arg('--window', argv);
+  if (!windowRaw) throw new Error('budget set requires --window (e.g. 1h, 30m)');
+  const rule = makeBudgetRule(scope, parseDuration(windowRaw), {
+    maxOperations: optionalCeiling('--max-operations'),
+    maxMutations: optionalCeiling('--max-mutations'),
+    maxShellCalls: optionalCeiling('--max-shell'),
+    maxRequestedWriteBytes: optionalCeiling('--max-write-bytes'),
+    maxRequestedProcessMs: optionalCeiling('--max-process-ms'),
+    maxConcurrent: optionalCeiling('--max-concurrent')
+  });
+  const nodeId = await pickNodeId();
+  const next = await upsertBudgetRule(nodeId, scope as BudgetScope, rule);
+  console.log(`${nodeId}: budget ${rule.id} now restricts ${scope} (window ${windowRaw}). Budgets only narrow authority; they never grant it.`);
+  console.log(`  revision ${next.revision}`);
+}
+
+async function requestsCommand(): Promise<void> {
+  const nodeId = await pickNodeId();
+  const requests = await listCapabilityRequests(nodeId);
+  if (flag('--json', argv)) { console.log(JSON.stringify({ nodeId, requests }, null, 2)); return; }
+  if (!requests.length) { console.log(`${nodeId}: no capability requests.`); return; }
+  console.log(`Capability requests for ${nodeId} (a request is not a grant):`);
+  for (const request of requests) {
+    console.log(`  ${request.id}  ${request.status.padEnd(8)} ${request.client}  ${request.capabilities.join(',')}  roots=${request.roots.join(',')}  for=${Math.round(request.durationMs / 60_000)}m  ${request.justification}`);
+  }
+}
+
+async function requestCreateCommand(): Promise<void> {
+  const kind = argv[2] as ClientKind | undefined;
+  const capability = argv[3] as ReachCapability | undefined;
+  if (!kind || !CLIENT_KINDS.includes(kind) || !capability || !REACH_CAPABILITIES.includes(capability)) {
+    throw new Error('usage: request create <client> <capability> --root PATH --for 30m --justification TEXT');
+  }
+  const root = arg('--root', argv);
+  const duration = arg('--for', argv);
+  const justification = arg('--justification', argv);
+  if (!root || !path.isAbsolute(root) || !duration || !justification) {
+    throw new Error('request create requires an absolute --root, --for duration, and --justification');
+  }
+  const maxRaw = arg('--max-uses', argv);
+  const maxUses = maxRaw ? Number(maxRaw) : null;
+  if (maxUses !== null && (!Number.isInteger(maxUses) || maxUses <= 0)) throw new Error('--max-uses must be a positive integer');
+  const nodeId = await pickNodeId();
+  const env = await readEnvFile(nodeEnvFile(nodeId));
+  const allowedRoots = (env.DEX_REACH_ALLOWED_ROOTS || os.homedir()).split(path.delimiter);
+  if (!pathAllowed(root, allowedRoots)) throw new Error("request root is outside this node's configured allowed roots");
+  const created = await createCapabilityRequest(nodeId, {
+    client: kind,
+    capabilities: [capability],
+    roots: [root],
+    durationMs: parseDuration(duration),
+    maxUses,
+    justification,
+    operation: arg('--operation', argv)
+  });
+  console.log(`${nodeId}: recorded request ${created.id} from ${kind} for ${capability}. This is not a grant. Approve locally with: npm run dex -- request approve ${created.id}`);
+}
+
+async function requestApproveCommand(): Promise<void> {
+  const id = argv[2];
+  if (!id) throw new Error('usage: request approve <id> [--capability C] [--root PATH] [--for 30m] [--max-uses N]');
+  const nodeId = await pickNodeId();
+  const capability = arg('--capability', argv) as ReachCapability | undefined;
+  if (capability && !REACH_CAPABILITIES.includes(capability)) throw new Error(`unknown capability ${capability}`);
+  const root = arg('--root', argv);
+  const duration = arg('--for', argv);
+  const maxRaw = arg('--max-uses', argv);
+  const maxUses = maxRaw ? Number(maxRaw) : undefined;
+  if (maxUses !== undefined && (!Number.isInteger(maxUses) || maxUses <= 0)) throw new Error('--max-uses must be a positive integer');
+  const result = await approveCapabilityRequest(nodeId, id, {
+    ...(capability ? { capabilities: [capability] } : {}),
+    ...(root ? { roots: [root] } : {}),
+    ...(duration ? { durationMs: parseDuration(duration) } : {}),
+    ...(maxUses !== undefined ? { maxUses } : {})
+  });
+  console.log(`${nodeId}: approved request ${id} as grant ${result.grantId}${result.request.narrowed ? ' (narrowed)' : ''}. Remote AI still cannot raise this grant.`);
+}
+
+async function assertionsCommand(): Promise<void> {
+  const nodeId = await pickNodeId();
+  const assertions = await loadPolicyAssertions(nodeId);
+  if (flag('--json', argv)) { console.log(JSON.stringify({ nodeId, assertions }, null, 2)); return; }
+  if (!assertions.length) { console.log(`${nodeId}: no custom policy assertions.`); return; }
+  console.log(`Policy assertions for ${nodeId} (regression tests against the real policy engine):`);
+  for (const assertion of assertions) {
+    const forbid = assertion.forbidCapabilities.length ? ` forbid=${assertion.forbidCapabilities.join(',')}` : '';
+    const roots = assertion.writeRoots.length ? ` write-roots=${assertion.writeRoots.join(',')}` : '';
+    console.log(`  ${assertion.id}  ${assertion.client}${forbid}${roots}  ${assertion.note}`);
+  }
+}
+
+async function assertionAddCommand(): Promise<void> {
+  const kind = argv[2] as ClientKind | undefined;
+  if (!kind || !CLIENT_KINDS.includes(kind)) throw new Error('usage: assertion add <client> --note TEXT [--forbid CAP] [--write-root PATH]');
+  const note = arg('--note', argv);
+  if (!note) throw new Error('assertion add requires --note');
+  const forbid = arg('--forbid', argv) as ReachCapability | undefined;
+  if (forbid && !REACH_CAPABILITIES.includes(forbid)) throw new Error(`unknown capability ${forbid}`);
+  const writeRoot = arg('--write-root', argv);
+  const nodeId = await pickNodeId();
+  const created = await addPolicyAssertion(nodeId, {
+    client: kind,
+    note,
+    ...(forbid ? { forbidCapabilities: [forbid] } : {}),
+    ...(writeRoot ? { writeRoots: [writeRoot] } : {})
+  });
+  console.log(`${nodeId}: assertion ${created.id} will refuse owner-policy writes that violate: ${created.note}`);
+}
+
+async function assertionClearCommand(): Promise<void> {
+  const id = argv[2];
+  if (!id) throw new Error('usage: assertion clear <id>');
+  const nodeId = await pickNodeId();
+  await clearPolicyAssertion(nodeId, id);
+  console.log(`${nodeId}: cleared assertion ${id}.`);
+}
+
+async function policyHistoryCommand(): Promise<void> {
+  const nodeId = await pickNodeId();
+  const limit = Number(arg('--limit', argv) || 20);
+  const entries = await listPolicyHistory(nodeId, Number.isFinite(limit) && limit > 0 ? limit : 20);
+  if (flag('--json', argv)) { console.log(JSON.stringify(entries.map(({ state, ...rest }) => rest), null, 2)); return; }
+  if (!entries.length) { console.log(`${nodeId}: no policy history yet.`); return; }
+  console.log(`Policy history for ${nodeId} (append-only; restore creates a new revision):`);
+  for (const entry of entries) {
+    console.log(`  rev ${String(entry.revision).padStart(4)}  ${entry.at.replace('T', ' ').slice(0, 19)}  ${entry.hash.slice(0, 12)}…${entry.restoredFrom !== null ? `  restored-from ${entry.restoredFrom}` : ''}`);
+  }
+}
+
+async function doctorCommand(): Promise<void> {
+  const nodeId = await pickNodeId().catch(() => undefined);
+  const report = await collectDoctorReport({
+    json: flag('--json', argv),
+    deep: flag('--deep', argv),
+    share: flag('--share', argv),
+    repoRoot: process.cwd(),
+    nodeId
+  });
+  if (flag('--json', argv) || flag('--share', argv)) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  console.log(formatDoctorReport(report).join('\n'));
+}
+
+async function policyRestoreCommand(): Promise<void> {
+  const revision = Number(argv[1]);
+  if (!Number.isInteger(revision) || revision < 0) throw new Error('usage: policy-restore <revision>');
+  const nodeId = await pickNodeId();
+  const next = await restorePolicyRevision(nodeId, revision);
+  console.log(`${nodeId}: restored policy from revision ${revision} as new revision ${next.revision}. History was not rewritten.`);
+}
+
+async function requestDenyCommand(): Promise<void> {
+  const id = argv[2];
+  if (!id) throw new Error('usage: request deny <id>');
+  const nodeId = await pickNodeId();
+  const denied = await denyCapabilityRequest(nodeId, id);
+  console.log(`${nodeId}: denied request ${denied.id}. No grant was created.`);
+}
+
+async function budgetClearCommand(): Promise<void> {
+  const id = argv[2];
+  if (!id) throw new Error('usage: budget clear <id>');
+  const nodeId = await pickNodeId();
+  const next = await clearBudgetRule(nodeId, id);
+  if (!policyRestricts(next)) await resetBudgetUsage(nodeId);
+  console.log(`${nodeId}: cleared budget ${id}.${policyRestricts(next) ? '' : ' No remaining budget rules; usage counters reset.'}`);
+}
+
+async function workWaitCommand(): Promise<void> {
+  const ticketId = argv[1];
+  if (!ticketId) throw new Error('usage: work-wait <ticket-id> [--timeout 30m]');
+  const timeoutMs = parseDuration(arg('--timeout', argv) || '30m');
+  const deadline = Date.now() + timeoutMs;
+  const pollMs = 25_000;
+  const status = await workStatus();
+  const ticket = status.tickets.find(entry => entry.id === ticketId);
+  if (!ticket) throw new Error(`no queued ticket ${ticketId}`);
+
+  // Bounded low-cost polling. Waiting is a valid outcome, not a failure.
+  while (true) {
+    const result = await acquireWork({
+      executor: ticket.executor,
+      access: ticket.access,
+      workload: ticket.workload,
+      repositoryRoot: ticket.repositoryRoot,
+      phase: ticket.phase,
+      ticketId
+    });
+    if (result.status === 'acquired') {
+      console.log(`ADMITTED  lease ${result.lease.id}`);
+      console.log(`  Release with: npm run dex -- work-release ${result.lease.id}`);
+      return;
+    }
+    if (Date.now() >= deadline) {
+      console.log(`STILL QUEUED  ticket ${ticketId} (position ${result.position}) after waiting.`);
+      console.log('  The ticket remains valid. This is QUEUED, not FAILED.');
+      process.exitCode = 3;
+      return;
+    }
+    console.log(`  queued at position ${result.position}: ${result.reasons[0] ?? 'waiting'}`);
+    await new Promise(resolve => setTimeout(resolve, Math.min(pollMs, Math.max(1000, deadline - Date.now()))));
+  }
+}
+
+
+
+// --- Causal tracing ---------------------------------------------------------
+
+async function traceCommand(): Promise<void> {
+  const traceId = argv[1];
+  if (!traceId) throw new Error('usage: trace <trace-id> [--json]');
+  if (!isValidTraceId(traceId)) throw new Error('trace id must be 32 lowercase hex characters');
+  const spans = await readTrace(traceId);
+  if (flag('--json', argv)) { console.log(JSON.stringify(spans, null, 2)); return; }
+  console.log(describeTrace(spans).join('\n'));
+  if (!spans.length) return;
+  console.log(`OpenTelemetry export: ${otelExportEnabled() ? 'ENABLED by DEX_REACH_OTEL_EXPORT' : 'off (default)'}`);
+}
+
+async function tracesCommand(): Promise<void> {
+  const limit = Number(arg('--limit', argv) || 20);
+  const traces = await listTraces(Number.isFinite(limit) && limit > 0 ? limit : 20);
+  if (flag('--json', argv)) { console.log(JSON.stringify(traces, null, 2)); return; }
+  if (!traces.length) { console.log('No traces recorded.'); return; }
+  console.log(`Recent traces (${traces.length}):`);
+  for (const entry of traces) {
+    console.log(`  ${entry.traceId}  ${String(entry.spans).padStart(3)} steps  last ${entry.at.replace('T', ' ').slice(0, 19)}`);
+  }
+  console.log('\nInspect one with: npm run dex -- trace <trace-id>');
+}
+
+
 try {
   switch (command) {
     case 'status': await status(); break;
@@ -270,7 +715,38 @@ try {
     case 'grant-clear': await grantClearCommand(); break;
     case 'explain': await explainCommand(); break;
     case 'policy-check': await policyCheckCommand(); break;
+    case 'budgets': await budgetsCommand(); break;
+    case 'budget':
+      if (argv[1] === 'set') await budgetSetCommand();
+      else if (argv[1] === 'clear') await budgetClearCommand();
+      else usage();
+      break;
+    case 'requests': await requestsCommand(); break;
+    case 'request':
+      if (argv[1] === 'create') await requestCreateCommand();
+      else if (argv[1] === 'approve') await requestApproveCommand();
+      else if (argv[1] === 'deny') await requestDenyCommand();
+      else usage();
+      break;
+    case 'assertions': await assertionsCommand(); break;
+    case 'assertion':
+      if (argv[1] === 'add') await assertionAddCommand();
+      else if (argv[1] === 'clear') await assertionClearCommand();
+      else usage();
+      break;
+    case 'policy-history': await policyHistoryCommand(); break;
+    case 'policy-restore': await policyRestoreCommand(); break;
+    case 'doctor': await doctorCommand(); break;
     case 'uninstall': await uninstall(); break;
+    case 'work-status': await workStatusCommand(); break;
+    case 'work-queue': await workQueueCommand(); break;
+    case 'work-acquire': await workAcquireCommand(); break;
+    case 'work-release': await workReleaseCommand(); break;
+    case 'work-cancel': await workCancelCommand(); break;
+    case 'work-heartbeat': await workHeartbeatCommand(); break;
+    case 'work-wait': await workWaitCommand(); break;
+    case 'trace': await traceCommand(); break;
+    case 'traces': await tracesCommand(); break;
     case 'modes': console.log(ACCESS_MODES.join('\n')); break;
     default: usage();
   }

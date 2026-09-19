@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { Server } from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
-import type { NodeAuthStore } from './node-auth.js';
+import { parseNodeAuthorization, type NodeAuthStore } from './node-auth.js';
 import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor } from '../shared/protocol.js';
 import { addRevokedNode, loadRevokedNodes } from '../shared/revoked-nodes.js';
 
@@ -60,7 +60,7 @@ export class NodeRegistry {
       const url = new URL(req.url || '/', 'http://localhost');
       if (url.pathname !== '/node') return socket.destroy();
       const auth = req.headers.authorization || '';
-      const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+      const parsed = parseNodeAuthorization(auth);
       const nodeId = url.searchParams.get('nodeId') || '';
       if (!nodeId) return socket.destroy();
       try {
@@ -70,7 +70,14 @@ export class NodeRegistry {
           if (await this.nodeAuth.isRevoked(nodeId)) return socket.destroy();
           this.revoked.delete(nodeId);
         }
-        if (!(await this.nodeAuth.authenticate(nodeId, token))) return socket.destroy();
+        if (parsed.kind === 'proof') {
+          const result = await this.nodeAuth.authenticateProof(nodeId, parsed.encoded, url.pathname);
+          if (!result.ok) return socket.destroy();
+        } else if (parsed.kind === 'bearer') {
+          if (!(await this.nodeAuth.authenticate(nodeId, parsed.token))) return socket.destroy();
+        } else {
+          return socket.destroy();
+        }
       } catch {
         return socket.destroy();
       }

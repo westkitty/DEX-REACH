@@ -158,9 +158,23 @@ npm run dex -- client claude read-only
 npm run dex -- client chatgpt default
 npm run dex -- audit --limit 50
 npm run dex -- policy-check
+npm run dex -- doctor
+npm run dex -- doctor --json --deep
+npm run dex -- doctor --share
+npm run dex -- assertions
+npm run dex -- assertion add chatgpt --forbid process.shell --note "ChatGPT must never have shell"
+npm run dex -- policy-history
+npm run dex -- policy-restore 1
 npm run dex -- grant chatgpt file.write --root "$HOME/projects" --for 20m --max-uses 6
 npm run dex -- explain chatgpt dex.file.write --path "$HOME/projects/example.txt"
 npm run dex -- grants
+npm run dex -- budgets
+npm run dex -- budget set chatgpt --window 1h --max-operations 40 --max-mutations 10 --max-shell 3
+npm run dex -- budget clear chatgpt
+npm run dex -- requests
+npm run dex -- request create chatgpt file.write --root "$HOME/projects" --for 20m --max-uses 1 --justification "edit one project file"
+npm run dex -- request approve <id>
+npm run dex -- request deny <id>
 npm run dex -- projects
 npm run dex -- dirty
 npm run dex -- project DEX-REACH info
@@ -175,11 +189,109 @@ npm run dex -- project Atlas_Of_One checkpoint
 - **Timed access** — access automatically returns to the prior safe state when the window expires.
 - **Per-client caps** — ChatGPT, Claude, or another client can be restricted independently. A client cap can only reduce access, never increase it.
 - **Capability grants** — an enabled client can be switched into grant-required mode and limited to specific capabilities, filesystem roots, expiration times, and optional use counts. Grants never override OFF, READ-ONLY, or a stricter client ceiling.
+- **Rolling execution budgets** — the owner can cap operations, mutations, shell calls, requested write bytes, requested process time, and inflight concurrency over a rolling window, shared and/or per client. Budgets only narrow remaining capacity. They never grant authority, and usage counters do not change the owner policy hash.
+- **Capability requests** — AI may ask for a capability, roots, duration and optional use cap. That request is not authority. Only a local owner approval creates an ordinary capability grant, and the owner may narrow the request but cannot widen it.
 - **Policy assertions** — `npm run dex -- policy-check` validates the local grant schema plus hard OFF and READ-ONLY invariants before owner-managed policy changes are accepted.
 
 Newly enrolled second devices start **OFF**. Missing or corrupt access policy also means **OFF**.
 
 None of the local enable/disable commands require the gateway or internet access.
+
+---
+
+## Shared-Machine Work Coordination
+
+One computer often serves several AI sessions at once: a Claude Code session, a ChatGPT request through DEX, Codex, another agent, plus whatever the owner is doing. Terminal access is not ownership of the machine. DEX//REACH keeps a local work coordinator so those jobs queue instead of racing.
+
+```bash
+npm run dex -- work-status
+npm run dex -- work-queue
+
+npm run dex -- work-acquire \
+  --repo "$HOME/DEX-REACH" \
+  --access mutate \
+  --workload heavy \
+  --executor claude-code \
+  --phase phase-0a
+
+npm run dex -- work-heartbeat <lease-id>
+npm run dex -- work-release <lease-id>
+npm run dex -- work-wait <ticket-id>
+npm run dex -- work-cancel <ticket-id>
+```
+
+`work-status` measures the actual host rather than assuming a machine specification, and prints the slot ceilings, live memory/CPU/thermal pressure, active leases, queue depth, and any substantial workloads running without a lease.
+
+**What the coordinator decides.** Two rules do most of the work:
+
+- **Only one mutating owner per repository.** A second agent asking to mutate the same repository is queued, including when it spells the path differently or reaches it through a symlink. Reads still proceed alongside.
+- **Capacity is a ceiling, not a target.** Memory is the primary limiter and CPU the secondary one. A host at or under 12 GiB gets one substantive job; larger hosts scale up to a bounded number. Live memory pressure, CPU saturation, or thermal throttling queue new heavy work even when the static ceiling would allow it, and an unmeasurable reading is treated as a reason to wait rather than a reason to proceed.
+
+Installation and deployment (`install:macos`, service replacement, credential or node-authentication migration) take `--access exclusive`, which requires an otherwise idle machine.
+
+Jobs that carry no lease are still counted. Another agent's build or test run is visible in the process table and reduces available capacity as an **uncoordinated observed workload**. DEX reads only the process table for this; it never inspects another conversation's content, and a process it cannot attribute stays anonymous.
+
+**What a lease is not.** A lease answers *can this run now?* It never answers *is this allowed?* Holding one grants no filesystem, process, or network authority and does not bypass OFF, READ-ONLY, client ceilings, grants, roots, budgets, or plan rules. A job can be authorized and still queued, and it can have machine capacity and still be refused. Both checks must pass. A lease record contains only coordination metadata — no prompts, no conversation content, no command output, no credentials — and lives under `~/.dex-reach/coordinator/`, outside Git.
+
+**Staleness.** A lease heartbeats about every 30 seconds and becomes reclaimable only after several missed heartbeats *and* the recorded process being gone. Reclaiming means the coordination claim expired; it never terminates another process. A live process is never evicted for being slow. If your workflow has no long-lived process to name with `--pid`, heartbeat the lease or it expires after about two and a half minutes.
+
+If coordinator state is unreadable or corrupt, admission falls back to a single substantive job rather than unlimited concurrency, and `work-status` reports the problem so the owner can repair it.
+
+Waiting in the queue is a normal outcome, not a failure.
+
+---
+
+## Execution Profiles
+
+Owner modes are and remain exactly three: **OFF**, **READ-ONLY**, **ON**. A profile is a separate axis — a standing local constraint the machine owner configures on the node itself with `DEX_REACH_PROFILE`, which narrows what ON can reach on that machine. A remote client cannot choose one.
+
+`workspace-safe` is the profile for typed project work without a shell.
+
+| | workspace-safe |
+| --- | --- |
+| Inspection, file reads, repo info, receipts | allowed |
+| Typed file writes | allowed |
+| Checkpoints and planning | allowed |
+| Declared-safe compatibility tools (read, list, search, write, edit, move, mkdir) | allowed |
+| `dex.process.run`, arbitrary shell | refused |
+| Process and session compatibility tools, terminate, kill | refused |
+| Safety-configuration mutation and vendor surfaces | refused |
+| Any adapter tool or operation the catalog does not classify | refused |
+
+**The two axes compose by intersection, never by union.** Both must allow an operation for it to run. The profile constraint is evaluated against the node's own configured profile, not against the effective profile an authorization decision produced — READ-ONLY replaces that effective value, and reading the constraint from it would let READ-ONLY re-admit the very shell the owner configured this node to refuse. A narrowing must never widen.
+
+So on a workspace-safe node: OFF refuses everything; READ-ONLY takes away the typed writes and checkpoints that workspace-safe adds, and does not hand back the shell; a client ceiling narrows a single client kind further; a grant narrows to named capabilities and roots. Each of those only subtracts.
+
+A plan committed on a workspace-safe node inherits its target's admission, so a plan cannot be used to launder a refused operation past the profile. A plan issued before the owner narrowed the node is stale authority rather than grandfathered authority, and is refused against the profile in force now.
+
+```bash
+npm run dex -- explain claude dex.process.run
+```
+
+`explain` reports the policy decision and the profile constraint separately, and says whether the operation would actually run. A policy answer alone could contradict what the node does.
+
+Adding this profile changes no installed node. Every node keeps the `DEX_REACH_PROFILE` it was configured with, and the default is still `development`.
+
+---
+
+## Causal Tracing
+
+Every request carries a W3C Trace Context from the MCP edge through the gateway and node into authorization, planning, commit and execution. The node returns the `traceId` alongside the result, so a completed action can be reconstructed afterwards from evidence instead of from a description of what was supposed to happen.
+
+```bash
+npm run dex -- traces            # recent traces, newest first
+npm run dex -- trace <trace-id>  # the ordered causal chain for one request
+```
+
+A trace shows the stages an action passed through, the operation, the node, the actor kind, whether each stage succeeded, and the hashes and identifiers that tie the stages together — the policy hash that authorized it, the request hash, the plan, checkpoint and receipt ids.
+
+**What a span cannot carry.** Spans are an explicit allowlist of identifiers, stage, outcome and hashes. Arguments, file content, process output, raw plan arguments, tokens and credentials are structurally refused rather than filtered out after the fact. A refusal is traced as an outcome class only: the refusal message can quote a path or a command, so it is deliberately not traced, and the local audit log remains the place that holds the redacted detail.
+
+**Inbound context.** A well-formed `traceparent` is continued so a caller's trace and DEX's evidence join up. A malformed one starts a fresh trace rather than being repaired or trusted. `tracestate` is accepted only when every member validates and the whole stays within the W3C bounds. `baggage` is never accepted at all: it is arbitrary caller-controlled key/value data, and a control plane has no reason to propagate it.
+
+**Where it goes.** Traces are local, bounded, and outside Git, under `~/.dex-reach/traces/`. OpenTelemetry export is off unless the owner sets `DEX_REACH_OTEL_EXPORT=1`, and telemetry is never enabled by default.
+
+Tracing observes decisions. It never makes one, and it grants no authority.
 
 ---
 
@@ -240,6 +352,8 @@ npm run nodes -- enroll second-laptop --profile development
 ```
 
 This creates a private node environment file under `~/.dex-reach/nodes/`. Transfer that file privately to the device owner. Do not put it in Git, ChatGPT, email, or a public paste.
+
+Working nodes can later migrate to Ed25519 transport authentication without a flag-day. That keypair is not the receipt-signing key. The owner issues a one-use enrollment token (`npm run nodes -- enroll-token <node>`), the node creates the private key locally, and `complete-migration` disables bearer tokens. Gateway state stores only the public key. File-backed 0600 storage is the proven local store; Keychain-backed storage is not claimed.
 
 ### 2. Device owner installs the node
 
@@ -385,9 +499,9 @@ Before changing execution, routing, authentication, policy, or install behavior,
 ├── src/
 │   ├── gateway/          # OAuth, MCP server, node registry, routing, audit
 │   ├── node/             # node connection, native execution, local enforcement
-│   └── shared/           # protocol, access policy, guardrails, shared helpers
+│   └── shared/           # protocol, access policy, operation catalog, execution profiles, guardrails, work coordination, tracing
 ├── scripts/              # bootstrap, install, credentials, smoke, simulations, local CLI
-├── tests/                # access, auth, routing, security, native, audit, result-store tests
+├── tests/                # access, auth, routing, security, native, audit, result-store, coordinator tests
 ├── docs/
 │   ├── GOLDEN_WORKER.md
 │   ├── INVARIANTS.md

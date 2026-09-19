@@ -6,6 +6,9 @@ import { stateDir } from './local-env.js';
 import { operationCapability, requestPaths, rootsCover, type CapabilityGrant, type ReachCapability } from './capabilities.js';
 import { atomicWriteFile, withFileLock } from './state-io.js';
 import { hashValue } from './hash.js';
+import { describeOperation, readOnlyDelegatedOperations, readOnlyInspectOperations, requestedAuthorityCost } from './operations.js';
+import { releaseBudgetConcurrency, reserveBudgetUsage } from './budget-usage.js';
+import { appendPolicyHistory, evaluateCustomAssertions, historyEntry, loadPolicyAssertions } from './policy-assertions.js';
 
 export type AccessState = {
   version: 3;
@@ -21,14 +24,19 @@ export type AccessState = {
 
 export const ACCESS_MODES: readonly AccessMode[] = ['off', 'read-only', 'on'];
 const RANK: Record<AccessMode, number> = { off: 0, 'read-only': 1, on: 2 };
-const READ_OPERATIONS = new Set(['dex.fingerprint', 'dex.trustReport', 'dex.repoInfo', 'dex.adbDevices', 'dex.file.read', 'dex.result.read', 'dex.receipts.list']);
+// READ-ONLY admission is derived from the operation catalog rather than restated here. Inspect
+// operations are served directly; delegated ones (shell and compatibility calls) are admitted by
+// policy and then constrained by the node's shell-free grammar and tool allowlist.
+const READ_OPERATIONS = new Set(readOnlyInspectOperations());
+const READ_DELEGATED_OPERATIONS = new Set(readOnlyDelegatedOperations());
 
 export function isAccessMode(value: unknown): value is AccessMode {
   return typeof value === 'string' && (ACCESS_MODES as string[]).includes(value);
 }
 export function minMode(a: AccessMode, b: AccessMode): AccessMode { return RANK[a] <= RANK[b] ? a : b; }
 export function accessFile(nodeId: string, dir = stateDir()): string { return path.join(dir, 'nodes', `${nodeId}.access.json`); }
-function accessLockFile(nodeId: string, dir = stateDir()): string { return `${accessFile(nodeId, dir)}.lock`; }
+/** Owner-policy lock. Canonical order is this lock, then the budget lock. Never acquire this from inside a budget lock. */
+export function accessLockFile(nodeId: string, dir = stateDir()): string { return `${accessFile(nodeId, dir)}.lock`; }
 
 export function defaultAccessState(now = new Date()): AccessState {
   const initial = process.env.DEX_REACH_INITIAL_ACCESS;
@@ -107,15 +115,32 @@ export async function loadAccessState(nodeId: string, dir = stateDir()): Promise
 
 export async function inspectAccessPolicyFile(nodeId: string, dir = stateDir()): Promise<{ valid: boolean; exists: boolean; state: AccessState; errors: string[] }> {
   const read = await readAccessStateUnlocked(nodeId, dir);
-  const errors = read.exists && read.valid ? policyCheck(read.state) : [read.exists ? 'policy file is corrupt and therefore fails closed' : 'policy file is missing and therefore fails closed'];
-  return { valid: read.exists && read.valid && errors.length === 0, exists: read.exists, state: read.state, errors };
+  if (!(read.exists && read.valid)) {
+    return { valid: false, exists: read.exists, state: read.state, errors: [read.exists ? 'policy file is corrupt and therefore fails closed' : 'policy file is missing and therefore fails closed'] };
+  }
+  let assertions;
+  try {
+    assertions = await loadPolicyAssertions(nodeId, dir);
+  } catch (error) {
+    return { valid: false, exists: read.exists, state: read.state, errors: [error instanceof Error ? error.message : String(error)] };
+  }
+  const errors = [...policyCheck(read.state), ...evaluateCustomAssertions(read.state, assertions)];
+  return { valid: errors.length === 0, exists: read.exists, state: read.state, errors };
 }
 
-async function writeAccessStateUnlocked(nodeId: string, state: AccessState, revision: number, dir: string): Promise<AccessState> {
+async function writeAccessStateUnlocked(
+  nodeId: string,
+  state: AccessState,
+  revision: number,
+  dir: string,
+  options: { recordHistory?: boolean; restoredFrom?: number | null } = {}
+): Promise<AccessState> {
   const next: AccessState = { ...state, version: 3, revision, updatedAt: new Date().toISOString() };
-  const errors = policyCheck(next);
+  const assertions = await loadPolicyAssertions(nodeId, dir);
+  const errors = [...policyCheck(next), ...evaluateCustomAssertions(next, assertions)];
   if (errors.length) throw new Error(`policy assertions failed: ${errors.join('; ')}`);
   await atomicWriteFile(accessFile(nodeId, dir), JSON.stringify(next, null, 2) + '\n', 0o600);
+  if (options.recordHistory !== false) await appendPolicyHistory(nodeId, next, options.restoredFrom ?? null, dir);
   return next;
 }
 
@@ -138,12 +163,16 @@ export async function saveAccessState(nodeId: string, state: AccessState, dir = 
 export async function updateAccessState(
   nodeId: string,
   mutate: (current: AccessState) => AccessState | Promise<AccessState>,
-  dir = stateDir()
+  dir = stateDir(),
+  options: { restoredFrom?: number | null; recordHistory?: boolean } = {}
 ): Promise<AccessState> {
   return withFileLock(accessLockFile(nodeId, dir), async () => {
     const current = (await readAccessStateUnlocked(nodeId, dir)).state;
     const proposed = await mutate(current);
-    return writeAccessStateUnlocked(nodeId, proposed, current.revision + 1, dir);
+    return writeAccessStateUnlocked(nodeId, proposed, current.revision + 1, dir, {
+      restoredFrom: options.restoredFrom ?? null,
+      recordHistory: options.recordHistory
+    });
   });
 }
 
@@ -178,7 +207,7 @@ export function authorizeOperation(state: AccessState, actor: RequestActor | und
   if (mode === 'off') return { allowed: false, reason: `NODE OWNER has disabled remote AI execution ${scope}; ${operation} from ${who} was refused locally` };
   if (mode === 'read-only') {
     if (READ_OPERATIONS.has(operation)) return { allowed: true, effectiveProfile: 'read-only' };
-    if (operation === 'dex.process.run' || operation === 'dc.call') return { allowed: true, effectiveProfile: 'read-only' };
+    if (READ_DELEGATED_OPERATIONS.has(operation)) return { allowed: true, effectiveProfile: 'read-only' };
     return { allowed: false, reason: `NODE OWNER limited remote AI access to read-only ${scope}; ${operation} from ${who} is a mutation and was refused locally` };
   }
   const kind = actor?.kind ?? 'other';
@@ -191,9 +220,18 @@ export function authorizeOperation(state: AccessState, actor: RequestActor | und
   return { allowed: true, effectiveProfile: profile };
 }
 
+export type OperationReservation = {
+  decision: Extract<AccessDecision, { allowed: true }>;
+  policy: AccessState;
+  /** Present only when a configured budget reserved an inflight slot. Rolling cost is not refunded. */
+  budgetReservationId?: string;
+};
+
 /**
- * Final authorization reservation immediately before execution. The policy and optional max-use grant
- * are evaluated and reserved under the same lock, so a concurrent local OFF switch cannot be overwritten.
+ * Final authorization reservation immediately before execution. Canonical lock order is owner
+ * access lock, then budget lock. A preauthorization denial consumes no budget. A successful
+ * reservation consumes rolling authority cost even if later execution fails; only the inflight
+ * concurrency slot is released afterwards.
  */
 export async function reserveOperation(
   nodeId: string,
@@ -202,7 +240,7 @@ export async function reserveOperation(
   profile: ReachProfile,
   args: Record<string, unknown> = {},
   options: { expectedPolicyHash?: string; dir?: string } = {}
-): Promise<{ decision: Extract<AccessDecision, { allowed: true }>; policy: AccessState }> {
+): Promise<OperationReservation> {
   const dir = options.dir ?? stateDir();
   return withFileLock(accessLockFile(nodeId, dir), async () => {
     const state = (await readAccessStateUnlocked(nodeId, dir)).state;
@@ -211,15 +249,32 @@ export async function reserveOperation(
     }
     const decision = authorizeOperation(state, actor, operation, profile, Date.now(), args);
     if (!decision.allowed) throw new Error(decision.reason);
+    const descriptor = describeOperation(operation);
+    let budgetReservationId: string | undefined;
+    // Indirect wrappers such as dex.commitPlan inherit cost at the inner target reservation.
+    // Charging the wrapper here would either double-count or let a cheaper wrapper classification
+    // launder the real target.
+    if (!descriptor?.riskInheritsFromTarget) {
+      const cost = requestedAuthorityCost(operation, args);
+      const budget = await reserveBudgetUsage(nodeId, actor?.kind ?? 'other', cost, { dir });
+      if (!budget.allowed) throw new Error(budget.reason);
+      budgetReservationId = budget.id;
+    }
     if (decision.grantId) {
       const grant = state.grants.find(candidate => candidate.id === decision.grantId);
       if (!grant || Date.parse(grant.until) <= Date.now() || (grant.maxUses !== null && grant.uses >= grant.maxUses)) {
+        if (budgetReservationId) await releaseBudgetConcurrency(nodeId, budgetReservationId, dir);
         throw new Error('capability grant expired or exhausted before execution');
       }
       const grants = state.grants.map(candidate => candidate.id === grant.id ? { ...candidate, uses: candidate.uses + 1 } : candidate);
-      await writeAccessStateUnlocked(nodeId, { ...state, grants }, state.revision + 1, dir);
+      try {
+        await writeAccessStateUnlocked(nodeId, { ...state, grants }, state.revision + 1, dir, { recordHistory: false });
+      } catch (error) {
+        if (budgetReservationId) await releaseBudgetConcurrency(nodeId, budgetReservationId, dir);
+        throw error;
+      }
     }
-    return { decision, policy: state };
+    return { decision, policy: state, budgetReservationId };
   });
 }
 
@@ -232,12 +287,13 @@ export async function consumeGrant(nodeId: string, grantId: string | undefined, 
       throw new Error('capability grant expired or exhausted before execution');
     }
     return { ...state, grants: state.grants.map(candidate => candidate.id === grantId ? { ...candidate, uses: candidate.uses + 1 } : candidate) };
-  }, dir);
+  }, dir, { recordHistory: false });
 }
 
-export function createGrant(state: AccessState, client: ClientKind, capabilities: ReachCapability[], roots: string[], durationMs: number, maxUses: number | null): AccessState {
+export function createGrant(state: AccessState, client: ClientKind, capabilities: ReachCapability[], roots: string[], durationMs: number, maxUses: number | null, id: string = crypto.randomUUID()): AccessState {
+  if (state.grants.some(grant => grant.id === id)) return state;
   const grant: CapabilityGrant = {
-    id: crypto.randomUUID(), client, capabilities, roots: roots.map(root => path.resolve(root)),
+    id, client, capabilities, roots: roots.map(root => path.resolve(root)),
     until: new Date(Date.now() + durationMs).toISOString(), maxUses, uses: 0, createdAt: new Date().toISOString()
   };
   return { ...state, grants: [...state.grants, grant], grantRequired: { ...state.grantRequired, [client]: true } };
@@ -257,6 +313,12 @@ export function policyCheck(state: AccessState): string[] {
   if (authorizeOperation({ ...state, mode: 'off' }, undefined, 'dex.fingerprint', 'full-local').allowed) errors.push('OFF invariant failed');
   if (authorizeOperation({ ...state, mode: 'read-only' }, undefined, 'dex.file.write', 'full-local').allowed) errors.push('READ-ONLY mutation invariant failed');
   return errors;
+}
+
+export async function restorePolicyRevision(nodeId: string, revision: number, dir = stateDir()): Promise<AccessState> {
+  const entry = await historyEntry(nodeId, revision, dir);
+  const restored = decodeAccessState(entry.state);
+  return updateAccessState(nodeId, () => restored, dir, { restoredFrom: revision });
 }
 
 export function parseDuration(text: string): number {

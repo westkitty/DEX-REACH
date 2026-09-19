@@ -1,11 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import type { ReachProfile } from '../shared/protocol.js';
-
-const profiles: ReachProfile[] = [
-  'read-only', 'development', 'repository-maintenance',
-  'android-adb', 'remote-server', 'full-local'
-];
+import { isReachProfile } from '../shared/profiles.js';
 
 function cleanNodeId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
@@ -22,8 +18,9 @@ export type NodeConfig = {
 export function loadNodeConfig(): NodeConfig {
   const token = process.env.DEX_REACH_NODE_TOKEN?.trim();
   if (!token || token.length < 24) throw new Error('DEX_REACH_NODE_TOKEN must contain at least 24 characters');
-  const requestedProfile = (process.env.DEX_REACH_PROFILE || 'development') as ReachProfile;
-  if (!profiles.includes(requestedProfile)) throw new Error(`invalid DEX_REACH_PROFILE: ${requestedProfile}`);
+  // Unchanged default: adding workspace-safe does not alter an already-installed node's profile.
+  const requestedProfile = process.env.DEX_REACH_PROFILE || 'development';
+  if (!isReachProfile(requestedProfile)) throw new Error(`invalid DEX_REACH_PROFILE: ${requestedProfile}`);
   const rawRoots = process.env.DEX_REACH_ALLOWED_ROOTS || os.homedir();
   const allowedRoots = rawRoots.split(path.delimiter).map(v => v.trim()).filter(Boolean).map(v => path.resolve(v));
   if (!allowedRoots.length) throw new Error('DEX_REACH_ALLOWED_ROOTS must contain at least one absolute filesystem root');

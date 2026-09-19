@@ -33,7 +33,19 @@ export const DEX_RELEASE_INVARIANTS: readonly ReleaseInvariant[] = [
   { id: 'DEX-INV-018', capability: 'ADB availability is not faked', evidenceClass: 'live-runtime' },
   { id: 'DEX-INV-019', capability: 'Simulation stays labeled simulation', evidenceClass: 'external' },
   { id: 'DEX-INV-020', capability: 'Planned mutations bind execution identity', evidenceClass: 'mixed' },
-  { id: 'DEX-INV-021', capability: 'Live trust reports remain evidence-scoped', evidenceClass: 'mixed' }
+  { id: 'DEX-INV-021', capability: 'Live trust reports remain evidence-scoped', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-022', capability: 'Machine workload admission grants no execution authority', evidenceClass: 'regression' },
+  { id: 'DEX-INV-023', capability: 'Repository mutation ownership is exclusive', evidenceClass: 'regression' },
+  { id: 'DEX-INV-024', capability: 'Exhausted machine capacity queues rather than oversubscribes', evidenceClass: 'regression' },
+  { id: 'DEX-INV-025', capability: 'Stale coordination state is reclaimed without terminating processes', evidenceClass: 'regression' },
+  { id: 'DEX-INV-026', capability: 'Coordination metadata carries no prompts, transcripts or credentials', evidenceClass: 'regression' },
+  { id: 'DEX-INV-027', capability: 'Causal evidence links stages without exporting content', evidenceClass: 'regression' },
+  { id: 'DEX-INV-028', capability: 'workspace-safe narrows execution and is narrowed by owner authority', evidenceClass: 'regression' },
+  { id: 'DEX-INV-029', capability: 'Rolling execution budgets only narrow authority', evidenceClass: 'regression' },
+  { id: 'DEX-INV-030', capability: 'Capability requests never grant authority', evidenceClass: 'regression' },
+  { id: 'DEX-INV-031', capability: 'Policy assertions and append-only policy history', evidenceClass: 'regression' },
+  { id: 'DEX-INV-032', capability: 'Node transport authentication is a separate cryptographic domain from receipt signing', evidenceClass: 'regression' },
+  { id: 'DEX-INV-033', capability: 'A node transport proof cannot be replayed within its validity window', evidenceClass: 'regression' }
 ] as const;
 
 export function invariantManifest() {
