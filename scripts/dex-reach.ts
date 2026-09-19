@@ -11,6 +11,7 @@ import { REACH_CAPABILITIES, type ReachCapability } from '../src/shared/capabili
 import { listSecretAliases, removeSecret, setSecret } from '../src/shared/secrets.js';
 import { AuditLog, auditFile } from '../src/shared/audit.js';
 import { listReceipts, verifyReceipt } from '../src/shared/receipts.js';
+import { exportEvidenceBundle, formatEvidenceVerification, serializeEvidenceBundle, verifyEvidenceBundle, type EvidenceDisclosure } from '../src/shared/evidence.js';
 import { readRuntimeStatus, runtimeFile } from '../src/node/runtime-status.js';
 import { portfolio, resolveProject } from '../src/node/projects.js';
 import { createCheckpoint } from '../src/node/native.js';
@@ -757,6 +758,82 @@ async function traceCommand(): Promise<void> {
   console.log(`OpenTelemetry export: ${otelExportEnabled() ? 'ENABLED by DEX_REACH_OTEL_EXPORT' : 'off (default)'}`);
 }
 
+
+// ---------------------------------------------------------------------------
+// Portable evidence bundles
+// ---------------------------------------------------------------------------
+
+/** Every value given for a repeatable flag, so `--receipt a --receipt b` means both, not the last. */
+function repeated(name: string, source = argv): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === name && source[index + 1]) values.push(source[index + 1]!);
+  }
+  return values;
+}
+
+async function evidenceExportCommand(): Promise<void> {
+  const nodeId = await pickNodeId();
+  const traceId = arg('--trace', argv);
+  const receiptIds = repeated('--receipt');
+  const limitArg = Number(arg('--limit', argv) || 100);
+  const disclosePath = arg('--disclose', argv);
+
+  // A disclosure publishes the exact arguments of a request. It is read from a file the owner wrote
+  // deliberately rather than inferred, because nothing should decide on the owner's behalf that a
+  // command line is safe to hand to a third party.
+  let disclosures: EvidenceDisclosure[] | undefined;
+  if (disclosePath) {
+    const parsed = JSON.parse(await fs.readFile(path.resolve(disclosePath), 'utf8')) as unknown;
+    const entries = Array.isArray(parsed) ? parsed : [parsed];
+    disclosures = entries.map(entry => {
+      const item = entry as Partial<EvidenceDisclosure>;
+      if (typeof item.receiptId !== 'string' || typeof item.operation !== 'string' || !item.args || typeof item.args !== 'object') {
+        throw new Error('each disclosure needs receiptId, operation and args');
+      }
+      return { receiptId: item.receiptId, operation: item.operation, args: item.args as Record<string, unknown> };
+    });
+  }
+
+  const bundle = await exportEvidenceBundle({
+    nodeId,
+    ...(traceId ? { traceId } : {}),
+    ...(receiptIds.length ? { receiptIds } : {}),
+    limit: Number.isFinite(limitArg) && limitArg > 0 ? limitArg : 100,
+    ...(disclosures ? { disclosures } : {})
+  });
+
+  const serialized = serializeEvidenceBundle(bundle);
+  const out = arg('--out', argv);
+  if (out) await fs.writeFile(path.resolve(out), serialized, { encoding: 'utf8', mode: 0o644 });
+  if (flag('--json', argv)) { process.stdout.write(serialized); return; }
+  console.log(`Evidence bundle ${bundle.bundleId}`);
+  console.log(`  node ${bundle.nodeId}, signing key ${bundle.receiptPublicKeyFingerprint.slice(0, 16)}...`);
+  console.log(`  ${bundle.receipts.length} signed receipt(s), ${bundle.spans.length} trace span(s), ${bundle.disclosures.length} disclosure(s)`);
+  if (out) console.log(`  written to ${path.resolve(out)}`);
+  else console.log('  not written anywhere; pass --out FILE to save it, or --json to print it');
+  console.log('  It carries hashes, not contents. Verify it with: npm run dex -- evidence verify <file>');
+}
+
+async function evidenceVerifyCommand(): Promise<void> {
+  const file = argv[2];
+  if (!file) throw new Error('usage: evidence verify <file>');
+  const parsed = JSON.parse(await fs.readFile(path.resolve(file), 'utf8')) as unknown;
+  const result = verifyEvidenceBundle(parsed);
+  if (flag('--json', argv)) { console.log(JSON.stringify(result, null, 2)); }
+  else { for (const line of formatEvidenceVerification(result)) console.log(line); }
+  // A failed claim is a failed check, so the exit status says so. Not-included and not-proven are
+  // normal outcomes for a privacy-preserving bundle and must never be reported as failures.
+  if (result.summary.fail > 0) process.exitCode = 1;
+}
+
+async function evidenceCommand(): Promise<void> {
+  const sub = argv[1];
+  if (sub === 'export') return evidenceExportCommand();
+  if (sub === 'verify') return evidenceVerifyCommand();
+  throw new Error('usage: evidence export [...] | evidence verify <file>');
+}
+
 async function tracesCommand(): Promise<void> {
   const limit = Number(arg('--limit', argv) || 20);
   const traces = await listTraces(Number.isFinite(limit) && limit > 0 ? limit : 20);
@@ -823,6 +900,7 @@ try {
     case 'work-cancel': await workCancelCommand(); break;
     case 'work-heartbeat': await workHeartbeatCommand(); break;
     case 'work-wait': await workWaitCommand(); break;
+    case 'evidence': await evidenceCommand(); break;
     case 'trace': await traceCommand(); break;
     case 'traces': await tracesCommand(); break;
     case 'modes': console.log(ACCESS_MODES.join('\n')); break;

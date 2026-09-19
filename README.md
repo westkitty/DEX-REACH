@@ -337,6 +337,40 @@ This feature is **experimental**: it is proven by regression only, and no deploy
 
 ---
 
+## Portable Evidence
+
+A completed action leaves a signed receipt on the node. `dex evidence export` turns a range of those, and the trace that links them, into one JSON file a third party can check offline.
+
+```bash
+npm run dex -- evidence export --trace <trace-id> --out bundle.json
+npm run dex -- evidence verify bundle.json
+```
+
+A bundle carries identifiers, hashes, signed receipts, sanitized trace spans and its own list of limitations. It carries no file content, no standard output or error, no credentials, no private keys, no secret values, no raw owner policy and no raw request arguments. Verification reads the file and nothing else: no node, no network, no state directory.
+
+**There is no overall VERIFIED, on purpose.** Different facts in a bundle are provable to very different degrees, and one word for all of them is how evidence gets over-read. Verification answers each claim separately and says what each answer does not mean:
+
+```text
+bundle integrity                PASS
+receipt signatures              PASS
+signing key consistency         PASS
+node id consistency             PASS
+node identity                   NOT PROVEN
+receipt chain                   PASS
+chain anchored to node genesis  NOT INCLUDED
+bundle completeness             NOT PROVEN
+trace linkage                   PASS
+request hash                    NOT INCLUDED
+execution output                NOT INCLUDED
+external side effect            NOT PROVEN
+```
+
+Three of those never become PASS, whatever a bundle contains. **Node identity**: signatures verify against the key the bundle itself carries, so a forger can produce an internally flawless bundle with their own key; binding one to a real node means comparing its key fingerprint against a key you already trust, which only you can do. **Bundle completeness**: receipts removed from either end leave no gap, so an unbroken chain does not prove nothing was left out. **External side effect**: a receipt records what the node was asked to do and what it reported, not that a file, a repository or a remote system actually changed.
+
+**Disclosures are opt-in.** A request hash cannot be recomputed without the arguments, and the arguments are what a privacy-preserving bundle withholds. When you are willing to state what was run, `--disclose` attaches it and the verifier recomputes the hash and compares, so a disclosure that understates what happened fails rather than being believed. Attaching one publishes those arguments.
+
+---
+
 ## Install and Run
 
 ### Requirements
