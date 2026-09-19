@@ -59,6 +59,7 @@ export type ProofFailure =
   | 'wrong-node-id'
   | 'wrong-path'
   | 'incompatible-protocol'
+  | 'nonce-capacity'
   | 'malformed';
 
 export function decodeNodeProof(raw: string): NodeAuthProof | null {

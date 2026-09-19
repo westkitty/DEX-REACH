@@ -347,15 +347,59 @@ export type AuthorityCostContext = {
   plannedArgs?: Record<string, unknown>;
 };
 
+/**
+ * Argument names that carry a write payload, and those that carry a process timeout, in either
+ * camelCase or snake_case. DEX-native operations name them `text` and `timeoutMs`; the compatibility
+ * adapter names them `content`, `new_string` and `timeout_ms`, and nests them under `arguments`.
+ */
+const WRITE_PAYLOAD_KEY = /^(text|content|contents|data|body|new_string)$/;
+const TIMEOUT_KEY = /^(timeout_ms|timeout)$/;
+
+function normalizeCostKey(key: string): string {
+  return key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+}
+
+/**
+ * Total bytes of every write-payload argument at any depth.
+ *
+ * Reading only the top level was a budget-laundering path: a `dc.call` carries its real payload under
+ * `arguments.content`, so a write-bytes budget could be exceeded by routing the same write through the
+ * compatibility adapter instead of `dex.file.write`. Recursion mirrors `extractPaths` in security.ts,
+ * which walks nested arguments for exactly the same reason. Summing is deterministic and errs toward
+ * charging more, never less.
+ */
+export function requestedWriteBytesIn(value: unknown, key = ''): number {
+  if (typeof value === 'string') return WRITE_PAYLOAD_KEY.test(normalizeCostKey(key)) ? Buffer.byteLength(value, 'utf8') : 0;
+  if (Array.isArray(value)) return value.reduce<number>((total, child) => total + requestedWriteBytesIn(child, key), 0);
+  if (value && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .reduce<number>((total, [childKey, child]) => total + requestedWriteBytesIn(child, childKey), 0);
+  }
+  return 0;
+}
+
+/** Largest process timeout requested at any depth, for the same reason as the write payload above. */
+export function requestedProcessMsIn(value: unknown, key = ''): number {
+  if (typeof value === 'number' || typeof value === 'string') {
+    if (!TIMEOUT_KEY.test(normalizeCostKey(key))) return 0;
+    const ms = Number(value);
+    return Number.isFinite(ms) && ms > 0 ? Math.floor(ms) : 0;
+  }
+  if (Array.isArray(value)) return value.reduce<number>((max, child) => Math.max(max, requestedProcessMsIn(child, key)), 0);
+  if (value && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .reduce<number>((max, [childKey, child]) => Math.max(max, requestedProcessMsIn(child, childKey)), 0);
+  }
+  return 0;
+}
+
 function costFrom(mutation: boolean, risk: OperationRiskClass, args: Record<string, unknown>): AuthorityCost {
-  const text = typeof args.text === 'string' ? args.text : '';
-  const timeoutMs = Number(args.timeoutMs);
   return {
     operations: 1,
     mutations: mutation ? 1 : 0,
     shellCalls: risk === 'shell' ? 1 : 0,
-    requestedWriteBytes: mutation && text ? Buffer.byteLength(text, 'utf8') : 0,
-    requestedProcessMs: risk === 'shell' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 0
+    requestedWriteBytes: mutation ? requestedWriteBytesIn(args) : 0,
+    requestedProcessMs: risk === 'shell' ? requestedProcessMsIn(args) : 0
   };
 }
 

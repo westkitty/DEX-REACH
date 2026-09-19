@@ -53,6 +53,22 @@ export type RequestNarrowing = {
   maxUses?: number | null;
 };
 
+/**
+ * A corrupt request file is refused rather than silently replaced with an empty list.
+ *
+ * Returning an empty list read as "no requests", and the next createCapabilityRequest then wrote that
+ * empty list back plus the new entry, destroying every existing record — including records of
+ * approved requests whose grants are still live in AccessState, which is precisely the evidence that
+ * explains why those grants exist. AccessState and budget usage both refuse corrupt state; requests
+ * now agree with them.
+ */
+export class CapabilityRequestCorruptError extends Error {
+  constructor(file: string) {
+    super(`capability request file is corrupt and was not overwritten: ${file}. Move it aside to start a fresh request log.`);
+    this.name = 'CapabilityRequestCorruptError';
+  }
+}
+
 const CLIENT_KINDS: readonly ClientKind[] = ['chatgpt', 'claude', 'smoke', 'other'];
 const MAX_JUSTIFICATION = 240;
 const MAX_PENDING_MS = 24 * 3_600_000;
@@ -114,13 +130,23 @@ function decodeFile(parsed: unknown): CapabilityRequestFile | null {
 }
 
 async function readUnlocked(nodeId: string, dir: string): Promise<CapabilityRequestFile> {
+  let raw: string;
   try {
-    const parsed = JSON.parse(await fs.readFile(capabilityRequestFile(nodeId, dir), 'utf8')) as unknown;
-    return decodeFile(parsed) ?? emptyFile();
+    raw = await fs.readFile(capabilityRequestFile(nodeId, dir), 'utf8');
   } catch (error) {
+    // Absent is the ordinary first-run case and genuinely means no requests yet.
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyFile();
-    return emptyFile();
+    throw new CapabilityRequestCorruptError(capabilityRequestFile(nodeId, dir));
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new CapabilityRequestCorruptError(capabilityRequestFile(nodeId, dir));
+  }
+  const decoded = decodeFile(parsed);
+  if (!decoded) throw new CapabilityRequestCorruptError(capabilityRequestFile(nodeId, dir));
+  return decoded;
 }
 
 async function writeUnlocked(nodeId: string, file: CapabilityRequestFile, dir: string): Promise<void> {

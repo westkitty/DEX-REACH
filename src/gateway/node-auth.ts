@@ -93,6 +93,10 @@ export class NodeAuthStore {
       if (record.revoked) return { ok: false as const, reason: 'revoked' as const };
       if (record.authMode === 'bearer' || !record.transport) return { ok: false as const, reason: 'unknown-node' as const };
       if (this.state.nonces[proof.nonce]) return { ok: false as const, reason: 'replay' as const };
+      // Expired entries are already gone; if the cache is still full every slot is a live nonce, and
+      // admitting this proof would mean forgetting one that can still be replayed. Refuse instead.
+      this.pruneNonces();
+      if (this.nonceCacheFull()) return { ok: false as const, reason: 'nonce-capacity' as const };
       const keys = [record.transport, ...record.previousTransport.filter(slot => slot.validUntil && slot.validUntil > Date.now())];
       const matched = keys.some(slot => slot && verifyNodeProofSignature(slot.publicKey, proof));
       if (!matched) return { ok: false as const, reason: 'wrong-key' as const };
@@ -289,17 +293,25 @@ export class NodeAuthStore {
     this.pruneNonces();
   }
 
+  /**
+   * Drop only nonces whose replay window has closed.
+   *
+   * This used to evict the oldest entries by expiry once the map exceeded MAX_NONCES, which could
+   * delete a nonce that was still inside its five-minute validity window. The replay check is purely
+   * presence in this map, so an evicted-but-still-valid nonce became replayable — the eviction policy
+   * silently converted a full cache into a replay window. Capacity is now enforced by refusing new
+   * proofs (see authenticateProof), which fails closed instead.
+   */
   private pruneNonces(): void {
     const now = Date.now();
-    const entries = Object.entries(this.state.nonces).sort((a, b) => a[1].expiresAt - b[1].expiresAt);
-    for (const [nonce, record] of entries) {
+    for (const [nonce, record] of Object.entries(this.state.nonces)) {
       if (record.expiresAt <= now) delete this.state.nonces[nonce];
     }
-    const remaining = Object.entries(this.state.nonces).sort((a, b) => a[1].expiresAt - b[1].expiresAt);
-    while (remaining.length > MAX_NONCES) {
-      const oldest = remaining.shift();
-      if (oldest) delete this.state.nonces[oldest[0]];
-    }
+  }
+
+  /** True when every slot is held by a nonce that is still replayable. */
+  private nonceCacheFull(): boolean {
+    return Object.keys(this.state.nonces).length >= MAX_NONCES;
   }
 
   private async persistUnlocked(): Promise<void> {

@@ -44,7 +44,8 @@ export const DEX_RELEASE_INVARIANTS: readonly ReleaseInvariant[] = [
   { id: 'DEX-INV-029', capability: 'Rolling execution budgets only narrow authority', evidenceClass: 'regression' },
   { id: 'DEX-INV-030', capability: 'Capability requests never grant authority', evidenceClass: 'regression' },
   { id: 'DEX-INV-031', capability: 'Policy assertions and append-only policy history', evidenceClass: 'regression' },
-  { id: 'DEX-INV-032', capability: 'Node transport authentication is a separate cryptographic domain from receipt signing', evidenceClass: 'regression' }
+  { id: 'DEX-INV-032', capability: 'Node transport authentication is a separate cryptographic domain from receipt signing', evidenceClass: 'regression' },
+  { id: 'DEX-INV-033', capability: 'A node transport proof cannot be replayed within its validity window', evidenceClass: 'regression' }
 ] as const;
 
 export function invariantManifest() {

@@ -45,6 +45,8 @@ export type BudgetInflight = {
   id: string;
   client: ClientKind;
   at: number;
+  /** Process holding the slot, so a crashed holder can be reclaimed without guessing from age. */
+  pid?: number;
 };
 
 export type BudgetUsage = {
@@ -99,7 +101,11 @@ function decodeUsage(parsed: unknown): BudgetUsage | null {
     if (typeof item.id !== 'string' || !item.id) return null;
     if (typeof item.at !== 'number' || !Number.isFinite(item.at)) return null;
     if (!['chatgpt', 'claude', 'smoke', 'other'].includes(String(item.client))) return null;
-    inflight.push({ id: item.id, client: item.client as ClientKind, at: item.at });
+    if (item.pid !== undefined && (typeof item.pid !== 'number' || !Number.isInteger(item.pid) || item.pid <= 0)) return null;
+    inflight.push({
+      id: item.id, client: item.client as ClientKind, at: item.at,
+      ...(item.pid === undefined ? {} : { pid: item.pid })
+    });
   }
   return { version: 1, samples, inflight };
 }
@@ -120,13 +126,45 @@ async function writeUsageUnlocked(nodeId: string, usage: BudgetUsage, dir: strin
   await atomicWriteFile(budgetUsageFile(nodeId, dir), JSON.stringify({ ...usage, version: 1 }, null, 2) + '\n', 0o600);
 }
 
+/**
+ * How long an inflight slot may go unreleased before its holder is checked for liveness. A slot is
+ * reclaimed only when it is both well past due AND its recorded process is gone, which is the same
+ * rule the work coordinator uses (DEX-INV-025). Reclaiming never signals the other process, and a
+ * live holder is never evicted for being slow, so the concurrency ceiling still holds for real work.
+ */
+export const INFLIGHT_STALE_MS = 15 * 60_000;
+
+/** EPERM means the process exists under another user, so it counts as alive. */
+export function inflightHolderAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * A slot with no recorded pid predates pid recording and cannot be liveness-checked, so it is
+ * reclaimed on age alone once well past due. Leaving it forever would let one crash permanently
+ * consume a concurrency slot; the whole budget would then refuse every request until the owner reset
+ * usage by hand.
+ */
+export function inflightIsReclaimable(entry: BudgetInflight, now = Date.now()): boolean {
+  if (now - entry.at <= INFLIGHT_STALE_MS) return false;
+  return entry.pid === undefined ? true : !inflightHolderAlive(entry.pid);
+}
+
 export function pruneUsage(usage: BudgetUsage, policy: BudgetPolicy, now = Date.now()): BudgetUsage {
   const windows = [policy.shared, ...Object.values(policy.clients)]
     .filter((rule): rule is BudgetRule => Boolean(rule))
     .map(rule => rule.windowMs);
   const keepMs = windows.length ? Math.max(...windows) : 0;
+  // Samples outside every window are dropped. Samples still inside one are never dropped, however
+  // many there are: discarding an in-window sample would refund consumed authority.
   const samples = keepMs > 0 ? usage.samples.filter(sample => now - sample.at < keepMs) : [];
-  return { version: 1, samples, inflight: usage.inflight };
+  const inflight = usage.inflight.filter(entry => !inflightIsReclaimable(entry, now));
+  return { version: 1, samples, inflight };
 }
 
 function sumCost(samples: BudgetSample[]): AuthorityCost {
@@ -162,7 +200,12 @@ function evaluateRule(
   client: ClientKind,
   now: number
 ): string | null {
-  const inWindow = samples.filter(sample => now - sample.at < rule.windowMs);
+  // A shared rule measures every client together; a per-client rule measures only its own client.
+  // Filtering by window alone charged one client's rolling cost against another client's ceiling,
+  // which turned a per-client budget into a second, stricter shared budget. `maxConcurrent` below
+  // already scoped itself by client; the rolling dimensions now agree with it.
+  const scoped = rule.id === 'shared' ? samples : samples.filter(sample => sample.client === client);
+  const inWindow = scoped.filter(sample => now - sample.at < rule.windowMs);
   const used = sumCost(inWindow);
   const who = rule.id === 'shared' ? 'this node' : `${rule.id} clients`;
   const checks: Array<[keyof AuthorityCost, number | null, number]> = [
@@ -222,7 +265,7 @@ export async function reserveBudgetUsage(
     const next: BudgetUsage = {
       version: 1,
       samples: [...usage.samples, { at: now, client, ...cost }],
-      inflight: [...usage.inflight, { id, client, at: now }]
+      inflight: [...usage.inflight, { id, client, at: now, pid: process.pid }]
     };
     await writeUsageUnlocked(nodeId, next, dir);
     return { allowed: true as const, id, usage: next };

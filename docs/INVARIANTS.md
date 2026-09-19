@@ -36,6 +36,7 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 | DEX-INV-030 | Capability requests never grant authority | AI-created capability request, owner approve/deny/expiry, and owner narrowing | Creating a request does not create a grant or change the owner policy hash; only local owner approval creates an ordinary CapabilityGrant; owner approval may narrow and cannot widen; deny and expiry create no grant; OFF still refuses execution after approval; raw secret-bearing arguments are not stored; an explicit unknown operation is refused rather than recorded as inspect; capability-only requests carry the highest catalog-derived risk of the requested capabilities and never default to inspect | Capability-request regression tests | Verified by regression only; not advertised as a public MCP action | Capability-request store, approval, or grant creation changes |
 | DEX-INV-031 | Policy assertions and append-only policy history | Owner policy mutation, custom assertions, grant-use counters, and restore | Candidate owner policy is checked with built-in policyCheck plus custom assertions before persist; a violating write is refused; history is append-only; restoring an old revision creates a new revision; grant-use counters do not append history | Policy-assertion regression tests | Verified by regression only | Policy assertion, history, or owner persist changes |
 | DEX-INV-032 | Node transport authentication is a separate cryptographic domain from receipt signing | Enrollment token, transport Ed25519 proof, legacy bearer coexistence, revocation, and gateway persistence | Transport keys are not receipt keys; gateway state stores only public keys; private keys never persist in node-auth.json; unknown/revoked/wrong-key/tampered/stale/future/replay/wrong-node/wrong-path/incompatible-protocol proofs fail; enrollment tokens are one-use; a migrated asymmetric node cannot silently downgrade to bearer; legacy bearer remains valid during an explicit migrating state | Node-transport-auth regression tests | Verified by regression only; no live gateway/node pair has completed asymmetric enrollment on the primary Mac | Node transport auth, enrollment, or node websocket authentication changes |
+| DEX-INV-033 | A node transport proof cannot be replayed within its validity window | Any accepted `/node` transport proof, including when the gateway's nonce cache is full | A nonce is remembered for the whole proof validity window and a second presentation is refused as `replay`; the cache drops only nonces whose window has closed, and when every slot holds a still-replayable nonce a new proof is refused as `nonce-capacity` rather than evicting a live entry | Transport-auth and correction regression tests | Verified by regression only; no live gateway has served an asymmetric node | Node transport authentication, nonce cache, or proof timing changes |
 
 ## Mandatory validation subsets
 
@@ -71,6 +72,14 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 - `npm test`, including `tests/workspace-safe.test.ts`
 - `npm run invariants -- --check`
 - confirm no installed node's `DEX_REACH_PROFILE` changed value
+
+### Any node transport authentication change
+
+- DEX-INV-009, 013, 032, 033
+- `npm run typecheck`
+- `npm test`, including `tests/node-transport-auth.test.ts` and `tests/phase-6-10-corrections.test.ts`
+- `npm run invariants -- --check`
+- confirm no private key material is written to gateway state, receipts, audit or docs
 
 ### Any causal tracing change
 
