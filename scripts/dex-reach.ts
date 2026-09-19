@@ -20,6 +20,18 @@ import { WORK_ACCESS_CLASSES, WORK_EXECUTORS, WORK_WORKLOAD_CLASSES, acquireWork
 import type { AccessClass, WorkloadClass } from '../src/shared/machine-capacity.js';
 import type { WorkExecutor } from '../src/shared/work-coordinator.js';
 import { describeTrace, isValidTraceId, listTraces, otelExportEnabled, readTrace } from '../src/shared/trace.js';
+import {
+  BUDGET_SCOPES,
+  clearBudgetRule,
+  inspectBudgetPolicy,
+  isBudgetScope,
+  listBudgetRules,
+  makeBudgetRule,
+  policyRestricts,
+  upsertBudgetRule,
+  type BudgetScope
+} from '../src/shared/budget-policy.js';
+import { loadBudgetUsage, resetBudgetUsage, usedInWindow } from '../src/shared/budget-usage.js';
 
 const execFileAsync = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -45,6 +57,11 @@ function usage(): never {
   grant-clear <client>            remove grants and stop requiring grants for that client
   explain <client> <operation> [--path PATH]
   policy-check                    validate policy schema and built-in safety assertions
+  budgets [--json]                show rolling execution budgets and current usage
+  budget set <shared|chatgpt|claude|smoke|other> --window 1h
+                                  [--max-operations N] [--max-mutations N] [--max-shell N]
+                                  [--max-write-bytes N] [--max-process-ms N] [--max-concurrent N]
+  budget clear <id>               remove one budget rule (shared, a client kind, or its id)
   uninstall [--purge-state --yes-delete-state]
 
 Shared-machine work coordination (resource admission only; grants no execution authority):
@@ -377,6 +394,82 @@ async function workHeartbeatCommand(): Promise<void> {
   console.log(`Heartbeat recorded for ${id}.`);
 }
 
+function optionalCeiling(name: string): number | null {
+  const raw = arg(name, argv);
+  if (raw === undefined) return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) throw new Error(`${name} must be a non-negative integer`);
+  return value;
+}
+
+function describeBudgetRule(rule: ReturnType<typeof listBudgetRules>[number], usage: Awaited<ReturnType<typeof loadBudgetUsage>>, now: number): string {
+  const used = usedInWindow(usage, rule.id === 'shared' ? 'shared' : rule.id as ClientKind, rule.windowMs, now);
+  const parts: string[] = [];
+  const show = (label: string, max: number | null, current: number) => {
+    if (max === null) return;
+    parts.push(`${label} ${current}/${max}`);
+  };
+  show('ops', rule.maxOperations, used.operations);
+  show('mutations', rule.maxMutations, used.mutations);
+  show('shell', rule.maxShellCalls, used.shellCalls);
+  show('write-bytes', rule.maxRequestedWriteBytes, used.requestedWriteBytes);
+  show('process-ms', rule.maxRequestedProcessMs, used.requestedProcessMs);
+  if (rule.maxConcurrent !== null) {
+    const active = rule.id === 'shared' ? usage.inflight.length : usage.inflight.filter(entry => entry.client === rule.id).length;
+    parts.push(`concurrent ${active}/${rule.maxConcurrent}`);
+  }
+  const windowMin = rule.windowMs / 60_000;
+  const window = windowMin >= 60 ? `${windowMin / 60}h` : `${windowMin}m`;
+  return `  ${rule.id.padEnd(8)} window=${window}  ${parts.join(', ') || '(no ceilings)'}`;
+}
+
+async function budgetsCommand(): Promise<void> {
+  const nodeId = await pickNodeId();
+  const inspection = await inspectBudgetPolicy(nodeId);
+  const usage = inspection.unrestricted ? { version: 1 as const, samples: [], inflight: [] } : await loadBudgetUsage(nodeId).catch(() => ({ version: 1 as const, samples: [], inflight: [] }));
+  if (flag('--json', argv)) {
+    console.log(JSON.stringify({ nodeId, unrestricted: inspection.unrestricted, valid: inspection.valid, exists: inspection.exists, policy: inspection.policy, usage, errors: inspection.errors }, null, 2));
+    return;
+  }
+  if (inspection.unrestricted) {
+    console.log(`${nodeId}: no execution budget configured. Owner mode, client ceilings, grants, roots and profile still govern authority.`);
+    if (!inspection.valid) console.log(`  note: ${inspection.errors.join('; ')}`);
+    return;
+  }
+  const now = Date.now();
+  console.log(`Execution budgets for ${nodeId} (restrictions only; they never grant authority):`);
+  for (const rule of listBudgetRules(inspection.policy)) console.log(describeBudgetRule(rule, usage, now));
+  console.log(`  inflight slots: ${usage.inflight.length}`);
+}
+
+async function budgetSetCommand(): Promise<void> {
+  const scope = argv[2];
+  if (!isBudgetScope(scope)) throw new Error(`usage: budget set <${BUDGET_SCOPES.join('|')}> --window 1h [--max-operations N] ...`);
+  const windowRaw = arg('--window', argv);
+  if (!windowRaw) throw new Error('budget set requires --window (e.g. 1h, 30m)');
+  const rule = makeBudgetRule(scope, parseDuration(windowRaw), {
+    maxOperations: optionalCeiling('--max-operations'),
+    maxMutations: optionalCeiling('--max-mutations'),
+    maxShellCalls: optionalCeiling('--max-shell'),
+    maxRequestedWriteBytes: optionalCeiling('--max-write-bytes'),
+    maxRequestedProcessMs: optionalCeiling('--max-process-ms'),
+    maxConcurrent: optionalCeiling('--max-concurrent')
+  });
+  const nodeId = await pickNodeId();
+  const next = await upsertBudgetRule(nodeId, scope as BudgetScope, rule);
+  console.log(`${nodeId}: budget ${rule.id} now restricts ${scope} (window ${windowRaw}). Budgets only narrow authority; they never grant it.`);
+  console.log(`  revision ${next.revision}`);
+}
+
+async function budgetClearCommand(): Promise<void> {
+  const id = argv[2];
+  if (!id) throw new Error('usage: budget clear <id>');
+  const nodeId = await pickNodeId();
+  const next = await clearBudgetRule(nodeId, id);
+  if (!policyRestricts(next)) await resetBudgetUsage(nodeId);
+  console.log(`${nodeId}: cleared budget ${id}.${policyRestricts(next) ? '' : ' No remaining budget rules; usage counters reset.'}`);
+}
+
 async function workWaitCommand(): Promise<void> {
   const ticketId = argv[1];
   if (!ticketId) throw new Error('usage: work-wait <ticket-id> [--timeout 30m]');
@@ -458,6 +551,12 @@ try {
     case 'grant-clear': await grantClearCommand(); break;
     case 'explain': await explainCommand(); break;
     case 'policy-check': await policyCheckCommand(); break;
+    case 'budgets': await budgetsCommand(); break;
+    case 'budget':
+      if (argv[1] === 'set') await budgetSetCommand();
+      else if (argv[1] === 'clear') await budgetClearCommand();
+      else usage();
+      break;
     case 'uninstall': await uninstall(); break;
     case 'work-status': await workStatusCommand(); break;
     case 'work-queue': await workQueueCommand(); break;

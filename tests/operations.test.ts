@@ -268,3 +268,23 @@ test('cost never grants anything: it is a number, not a decision', () => {
   assert.equal(typeof cost.operations, 'number');
   assert.equal(Object.keys(cost).sort().join(','), 'mutations,operations,requestedProcessMs,requestedWriteBytes,shellCalls');
 });
+
+test('plan commit inherits the target cost and cannot launder a higher-risk operation', () => {
+  const run = requestedAuthorityCost('dex.process.run', { command: 'ls', timeoutMs: 9000 });
+  const throughCommit = requestedAuthorityCost('dex.commitPlan', { planId: 'p1' }, {
+    plannedTarget: 'dex.process.run',
+    plannedArgs: { command: 'ls', timeoutMs: 9000 }
+  });
+  assert.deepEqual(throughCommit, run);
+  assert.equal(throughCommit.shellCalls, 1);
+  assert.equal(throughCommit.requestedProcessMs, 9000);
+  const write = requestedAuthorityCost('dex.file.write', { text: 'hello' });
+  const writeCommit = requestedAuthorityCost('dex.commitPlan', { planId: 'p2' }, {
+    plannedTarget: 'dex.file.write',
+    plannedArgs: { text: 'hello' }
+  });
+  assert.deepEqual(writeCommit, write);
+  assert.equal(writeCommit.shellCalls, 0);
+  const unknownTargetCeiling = requestedAuthorityCost('dex.commitPlan', { planId: 'p3' });
+  assert.equal(unknownTargetCeiling.shellCalls, 1);
+});

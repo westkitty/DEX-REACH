@@ -21,6 +21,7 @@ import {
 } from '../shared/protocol.js';
 import { loadLocalSecrets, stateDir } from '../shared/local-env.js';
 import { authorizeOperation, loadAccessState, reserveOperation, snapshot } from '../shared/access.js';
+import { releaseBudgetConcurrency } from '../shared/budget-usage.js';
 import { appendReceipt, listReceipts } from '../shared/receipts.js';
 import { consumePlan, createPlan, hashValue, sweepExpiredPlans } from '../shared/plans.js';
 import { writeRuntimeStatus } from './runtime-status.js';
@@ -172,15 +173,19 @@ async function commitPlan(actor: RequestActor | undefined, args: Record<string, 
     plan.args,
     { expectedPolicyHash: plan.policyHash }
   );
-  const value = await executeOperation(plan.operation, plan.args, actor, reservation.decision.effectiveProfile);
-  return {
-    planId: plan.id,
-    operation: plan.operation,
-    requestHash: plan.requestHash,
-    policyHash: plan.policyHash,
-    checkpointId: plan.checkpointId,
-    result: value
-  };
+  try {
+    const value = await executeOperation(plan.operation, plan.args, actor, reservation.decision.effectiveProfile);
+    return {
+      planId: plan.id,
+      operation: plan.operation,
+      requestHash: plan.requestHash,
+      policyHash: plan.policyHash,
+      checkpointId: plan.checkpointId,
+      result: value
+    };
+  } finally {
+    await releaseBudgetConcurrency(config.nodeId, reservation.budgetReservationId);
+  }
 }
 
 async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> {
@@ -188,6 +193,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
   const actor = request.actor;
   let policy: unknown = null;
   let receiptCheckpoint: string | null = null;
+  let budgetReservationId: string | undefined;
   // Continue the caller's trace when it supplied a valid W3C context, otherwise start one here.
   // A malformed inbound header never fails the request and never propagates.
   const trace: ReachTraceContext = traceContextFrom({
@@ -203,6 +209,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     // The final authorization reservation happens immediately before execution and is serialized with
     // owner policy updates. OFF therefore wins over stale remote state instead of being overwritten.
     const reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args);
+    budgetReservationId = reservation.budgetReservationId;
     policy = reservation.policy;
     const authorizeSpan = childSpan(trace);
     await recordSpan({
@@ -262,6 +269,8 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       error: message, durationMs, policy: policy ?? { unavailable: true }, checkpointId: receiptCheckpoint
     }).catch(() => undefined);
     return { type: 'response', id: request.id, ok: false, error: message, traceId: trace.traceId };
+  } finally {
+    await releaseBudgetConcurrency(config.nodeId, budgetReservationId).catch(() => undefined);
   }
 }
 

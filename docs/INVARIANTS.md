@@ -32,6 +32,7 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 | DEX-INV-026 | Coordination metadata carries no prompts, transcripts or credentials | Acquire, queue, heartbeat, release, and share-mode status | Persisted coordination files contain only the declared lease/ticket fields; label inputs are length- and charset-bounded, credential-shaped labels are refused, and share output omits repository paths, branches and PIDs | Coordinator regression tests + file content inspection | Verified by regression only; not yet exercised on the primary Mac | Coordinator schema, CLI, or share-report changes |
 | DEX-INV-027 | Causal evidence links stages without exporting content | Any traced request, its refusals, and any inbound `traceparent`/`tracestate` | A span carries only identifiers, stage, outcome and hashes; arguments, file content, stdout/stderr, plan arguments, refusal messages and credentials are never recorded; `baggage` is never accepted; malformed inbound trace context starts a fresh trace instead of being repaired or trusted; trace storage is bounded and OpenTelemetry export stays off unless the owner enables it | Tracing regression tests + span field inspection | Verified by regression only; no deployed gateway/node pair has produced a live trace | Tracing, span schema, or trace-export changes |
 | DEX-INV-028 | workspace-safe narrows execution and is narrowed by owner authority | A node configured with the `workspace-safe` execution profile, under every owner mode, client ceiling and grant | Owner modes stay exactly OFF/READ-ONLY/ON and no fourth mode appears; the profile admits inspection, reads, typed writes, checkpoints and the declared-safe compatibility tools, and refuses arbitrary shell, process/session tools, privileged, destructive and undeclared adapter surfaces; the refusal is evaluated against the node's own configured profile, so READ-ONLY cannot re-admit what the profile refuses; OFF, READ-ONLY, client ceilings and grants each still override or narrow it; a planned commit inherits its target's admission instead of laundering it | Workspace-safe regression tests | Verified by regression only; no node has run with the profile configured | Profile, execution-profile enforcement, or catalog workspace-safe changes |
+| DEX-INV-029 | Rolling execution budgets only narrow authority | Owner-configured shared and per-client rolling budgets, including missing/corrupt budget files and concurrent reservations | A budget never transforms DENY into ALLOW; OFF, READ-ONLY, workspace-safe, client ceilings and grants still win; shared and per-client ceilings intersect by minimum; usage counters do not change the owner policy hash; a preauthorization denial consumes nothing; a successful reservation keeps its rolling cost after execution failure while releasing only the inflight concurrency slot; missing/corrupt budget policy is unrestricted because owner policy remains the authority source; corrupt usage with a real policy fails closed; plan/commit inherit the target's cost | Budget regression tests | Verified by regression only; no deployed node has enforced a live budget | Budget policy/usage, reservation, or CLI changes |
 
 ## Mandatory validation subsets
 
@@ -76,6 +77,14 @@ These are release-blocking behavioral invariants, not aspirations. Each entry st
 - `npm run invariants -- --check`
 - inspect a recorded span file directly and confirm it holds no arguments, content, output or credentials
 - confirm `DEX_REACH_OTEL_EXPORT` is unset in any shipped configuration
+
+### Any execution-budget change
+
+- DEX-INV-002, 003, 010, 012, 029
+- `npm run typecheck`
+- `npm test`, including `tests/budget.test.ts`
+- `npm run invariants -- --check`
+- confirm budget usage files are not tracked by Git and that policy-hash tests still pass without grant consumption
 
 ### Any shared-machine coordination change
 

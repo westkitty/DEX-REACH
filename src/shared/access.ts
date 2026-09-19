@@ -6,7 +6,8 @@ import { stateDir } from './local-env.js';
 import { operationCapability, requestPaths, rootsCover, type CapabilityGrant, type ReachCapability } from './capabilities.js';
 import { atomicWriteFile, withFileLock } from './state-io.js';
 import { hashValue } from './hash.js';
-import { readOnlyDelegatedOperations, readOnlyInspectOperations } from './operations.js';
+import { describeOperation, readOnlyDelegatedOperations, readOnlyInspectOperations, requestedAuthorityCost } from './operations.js';
+import { releaseBudgetConcurrency, reserveBudgetUsage } from './budget-usage.js';
 
 export type AccessState = {
   version: 3;
@@ -33,7 +34,8 @@ export function isAccessMode(value: unknown): value is AccessMode {
 }
 export function minMode(a: AccessMode, b: AccessMode): AccessMode { return RANK[a] <= RANK[b] ? a : b; }
 export function accessFile(nodeId: string, dir = stateDir()): string { return path.join(dir, 'nodes', `${nodeId}.access.json`); }
-function accessLockFile(nodeId: string, dir = stateDir()): string { return `${accessFile(nodeId, dir)}.lock`; }
+/** Owner-policy lock. Canonical order is this lock, then the budget lock. Never acquire this from inside a budget lock. */
+export function accessLockFile(nodeId: string, dir = stateDir()): string { return `${accessFile(nodeId, dir)}.lock`; }
 
 export function defaultAccessState(now = new Date()): AccessState {
   const initial = process.env.DEX_REACH_INITIAL_ACCESS;
@@ -196,9 +198,18 @@ export function authorizeOperation(state: AccessState, actor: RequestActor | und
   return { allowed: true, effectiveProfile: profile };
 }
 
+export type OperationReservation = {
+  decision: Extract<AccessDecision, { allowed: true }>;
+  policy: AccessState;
+  /** Present only when a configured budget reserved an inflight slot. Rolling cost is not refunded. */
+  budgetReservationId?: string;
+};
+
 /**
- * Final authorization reservation immediately before execution. The policy and optional max-use grant
- * are evaluated and reserved under the same lock, so a concurrent local OFF switch cannot be overwritten.
+ * Final authorization reservation immediately before execution. Canonical lock order is owner
+ * access lock, then budget lock. A preauthorization denial consumes no budget. A successful
+ * reservation consumes rolling authority cost even if later execution fails; only the inflight
+ * concurrency slot is released afterwards.
  */
 export async function reserveOperation(
   nodeId: string,
@@ -207,7 +218,7 @@ export async function reserveOperation(
   profile: ReachProfile,
   args: Record<string, unknown> = {},
   options: { expectedPolicyHash?: string; dir?: string } = {}
-): Promise<{ decision: Extract<AccessDecision, { allowed: true }>; policy: AccessState }> {
+): Promise<OperationReservation> {
   const dir = options.dir ?? stateDir();
   return withFileLock(accessLockFile(nodeId, dir), async () => {
     const state = (await readAccessStateUnlocked(nodeId, dir)).state;
@@ -216,15 +227,32 @@ export async function reserveOperation(
     }
     const decision = authorizeOperation(state, actor, operation, profile, Date.now(), args);
     if (!decision.allowed) throw new Error(decision.reason);
+    const descriptor = describeOperation(operation);
+    let budgetReservationId: string | undefined;
+    // Indirect wrappers such as dex.commitPlan inherit cost at the inner target reservation.
+    // Charging the wrapper here would either double-count or let a cheaper wrapper classification
+    // launder the real target.
+    if (!descriptor?.riskInheritsFromTarget) {
+      const cost = requestedAuthorityCost(operation, args);
+      const budget = await reserveBudgetUsage(nodeId, actor?.kind ?? 'other', cost, { dir });
+      if (!budget.allowed) throw new Error(budget.reason);
+      budgetReservationId = budget.id;
+    }
     if (decision.grantId) {
       const grant = state.grants.find(candidate => candidate.id === decision.grantId);
       if (!grant || Date.parse(grant.until) <= Date.now() || (grant.maxUses !== null && grant.uses >= grant.maxUses)) {
+        if (budgetReservationId) await releaseBudgetConcurrency(nodeId, budgetReservationId, dir);
         throw new Error('capability grant expired or exhausted before execution');
       }
       const grants = state.grants.map(candidate => candidate.id === grant.id ? { ...candidate, uses: candidate.uses + 1 } : candidate);
-      await writeAccessStateUnlocked(nodeId, { ...state, grants }, state.revision + 1, dir);
+      try {
+        await writeAccessStateUnlocked(nodeId, { ...state, grants }, state.revision + 1, dir);
+      } catch (error) {
+        if (budgetReservationId) await releaseBudgetConcurrency(nodeId, budgetReservationId, dir);
+        throw error;
+      }
     }
-    return { decision, policy: state };
+    return { decision, policy: state, budgetReservationId };
   });
 }
 

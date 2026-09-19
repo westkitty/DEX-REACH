@@ -269,23 +269,48 @@ export const ZERO_AUTHORITY_COST: AuthorityCost = {
   operations: 0, mutations: 0, shellCalls: 0, requestedWriteBytes: 0, requestedProcessMs: 0
 };
 
-/**
- * Deterministic cost of what a request *asks for*, computed from the request itself rather than from
- * what execution turns out to do. Budgets in a later phase reserve against this, so the same request
- * must always cost the same.
- */
-export function requestedAuthorityCost(operation: string, args: Record<string, unknown> = {}): AuthorityCost {
-  const descriptor = requireOperation(operation);
+export type AuthorityCostContext = {
+  /** For operations whose risk inherits from a plan target, the real operation being committed. */
+  plannedTarget?: string;
+  plannedArgs?: Record<string, unknown>;
+};
+
+function costFrom(mutation: boolean, risk: OperationRiskClass, args: Record<string, unknown>): AuthorityCost {
   const text = typeof args.text === 'string' ? args.text : '';
   const timeoutMs = Number(args.timeoutMs);
-
   return {
     operations: 1,
-    mutations: descriptor.mutation ? 1 : 0,
-    shellCalls: descriptor.risk === 'shell' ? 1 : 0,
-    requestedWriteBytes: descriptor.mutation && text ? Buffer.byteLength(text, 'utf8') : 0,
-    requestedProcessMs: descriptor.risk === 'shell' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 0
+    mutations: mutation ? 1 : 0,
+    shellCalls: risk === 'shell' ? 1 : 0,
+    requestedWriteBytes: mutation && text ? Buffer.byteLength(text, 'utf8') : 0,
+    requestedProcessMs: risk === 'shell' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 0
   };
+}
+
+/**
+ * Deterministic cost of what a request *asks for*, computed from the request itself rather than from
+ * what execution turns out to do. Budgets reserve against this, so the same request must always
+ * cost the same. Indirect operations inherit their real target; they cannot launder a higher-risk
+ * action through a cheaper wrapper classification.
+ */
+export function requestedAuthorityCost(
+  operation: string,
+  args: Record<string, unknown> = {},
+  context: AuthorityCostContext = {}
+): AuthorityCost {
+  const descriptor = requireOperation(operation);
+  if (descriptor.riskInheritsFromTarget) {
+    if (!context.plannedTarget) return costFrom(descriptor.mutation, descriptor.risk, args);
+    return requestedAuthorityCost(context.plannedTarget, context.plannedArgs ?? args);
+  }
+  if (descriptor.workspaceSafeResolvedPerTool) {
+    const tool = typeof args.tool === 'string' ? args.tool : '';
+    if (tool) {
+      const toolDesc = requireCompatibilityTool(tool);
+      return costFrom(toolDesc.mutation, toolDesc.risk, args);
+    }
+  }
+  return costFrom(descriptor.mutation, descriptor.risk, args);
 }
 
 export function addAuthorityCost(a: AuthorityCost, b: AuthorityCost): AuthorityCost {
