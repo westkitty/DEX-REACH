@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { saveAccessState, type AccessState } from '../src/shared/access.js';
+import { loadAccessState, saveAccessState, type AccessState } from '../src/shared/access.js';
 import { requestedAuthorityCost, requestedProcessMsIn, requestedWriteBytesIn } from '../src/shared/operations.js';
 import { makeBudgetRule, upsertBudgetRule } from '../src/shared/budget-policy.js';
 import {
@@ -17,10 +17,12 @@ import {
 import { emptyBudgetPolicy } from '../src/shared/budget-policy.js';
 import {
   CapabilityRequestCorruptError,
+  approveCapabilityRequest,
   capabilityRequestFile,
   createCapabilityRequest,
   listCapabilityRequests
 } from '../src/shared/capability-requests.js';
+import { addPolicyAssertion } from '../src/shared/policy-assertions.js';
 import { NodeAuthStore } from '../src/gateway/node-auth.js';
 import { encodeNodeProof, expectedProofDefaults, generateTransportKeyPair, signNodeProof } from '../src/shared/node-transport-auth.js';
 
@@ -256,5 +258,109 @@ test('a full nonce cache refuses new proofs instead of forgetting replayable one
     assert.equal(replayAfterFull.ok ? '' : replayAfterFull.reason, 'replay');
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Regression for a defect introduced by the correction above. Failing closed at capacity is right,
+ * but the capacity was counted across every node at once, so one node's ordinary traffic refused
+ * every other node's proofs. A node must only ever exhaust its own share.
+ */
+test('one node filling its nonce share does not lock another node out', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-fix-nonce-scope-'));
+  try {
+    const store = new NodeAuthStore(dir);
+    await store.initialize();
+    const enrolled = new Map<string, string>();
+    for (const nodeId of ['node-busy', 'node-quiet']) {
+      const keys = generateTransportKeyPair();
+      await store.consumeEnrollment(nodeId, await store.createEnrollmentToken(nodeId), keys.publicKey);
+      enrolled.set(nodeId, keys.privateKey);
+    }
+    const proofFor = (nodeId: string) =>
+      encodeNodeProof(signNodeProof(enrolled.get(nodeId) as string, expectedProofDefaults(nodeId)));
+
+    assert.equal((await store.authenticateProof('node-quiet', proofFor('node-quiet'))).ok, true);
+
+    // node-busy is a well-behaved node doing a lot of work: every proof is correctly signed.
+    let sawCapacity = false;
+    for (let i = 0; i < 6000; i += 1) {
+      const result = await store.authenticateProof('node-busy', proofFor('node-busy'));
+      if (!result.ok && result.reason === 'nonce-capacity') { sawCapacity = true; break; }
+      assert.equal(result.ok, true, `node-busy proof ${i} should authenticate or hit its own capacity`);
+    }
+    assert.equal(sawCapacity, true, 'a node must still fail closed once its own share is exhausted');
+
+    // The node that did nothing is unaffected. A shared ceiling refused it here.
+    const quiet = await store.authenticateProof('node-quiet', proofFor('node-quiet'));
+    assert.equal(quiet.ok, true, 'one node must not be able to deny another node authentication');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Approval must record the decision before it creates authority.
+ *
+ * The grant used to be written first. Any failure of the decision step then left a live capability
+ * grant in owner policy while the request still read `pending` or `expired` with `grantId: null`,
+ * and the owner had been told the approval failed: authority with no record explaining it.
+ */
+test('a failed approval never leaves a grant the request does not record', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-fix-approve-'));
+  const node = 'approve-node';
+  try {
+    await saveAccessState(node, base('on'), dir);
+    // An owner assertion that this client must never hold file.write makes grant creation fail.
+    await addPolicyAssertion(node, { client: 'claude', forbidCapabilities: ['file.write'], note: 'no writes for claude' }, dir);
+    const request = await createCapabilityRequest(node, {
+      client: 'claude', capabilities: ['file.write'], roots: [path.join(dir, 'project')],
+      durationMs: 2 * 3_600_000, maxUses: null, justification: 'regression'
+    }, dir);
+
+    await assert.rejects(() => approveCapabilityRequest(node, request.id, {}, dir));
+
+    // No authority was created, and the decision that was attempted is on the record.
+    const state = await loadAccessState(node, dir);
+    assert.equal(state.grants.length, 0, 'a refused grant must not exist in owner policy');
+    const recorded = (await listCapabilityRequests(node, dir)).find(entry => entry.id === request.id);
+    assert.equal(recorded?.status, 'approved', 'the decision must be durable before any grant is written');
+    assert.equal(recorded?.grantId, request.id);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The same property across the expiry boundary, where the old ordering actually leaked: the request
+ * was pending when approval started and expired before the decision was recorded. This sweep only
+ * fails when a leak is observed, so it can miss the window but never fails spuriously.
+ */
+test('approval across the request expiry boundary never grants authority it does not record', async () => {
+  for (let lead = 0; lead <= 12; lead += 1) {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-fix-approve-race-'));
+    const node = 'race-node';
+    try {
+      await saveAccessState(node, base('on'), dir);
+      const request = await createCapabilityRequest(node, {
+        client: 'claude', capabilities: ['file.write'], roots: [path.join(dir, 'project')],
+        durationMs: 600, maxUses: null, justification: 'regression'
+      }, dir);
+      const target = Date.parse(request.expiresAt) - lead;
+      while (Date.now() < target) { /* spin to the exact boundary */ }
+
+      let failed = false;
+      try { await approveCapabilityRequest(node, request.id, {}, dir); } catch { failed = true; }
+      if (!failed) continue;
+
+      const state = await loadAccessState(node, dir);
+      const recorded = (await listCapabilityRequests(node, dir)).find(entry => entry.id === request.id);
+      assert.equal(
+        state.grants.length, 0,
+        `a failed approval left ${state.grants.length} live grant(s) while the request records ${recorded?.status} grantId=${recorded?.grantId}`
+      );
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   }
 });

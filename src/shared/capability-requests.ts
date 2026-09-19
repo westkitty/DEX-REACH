@@ -289,10 +289,23 @@ export async function approveCapabilityRequest(
   if (request.status !== 'pending') throw new Error(`capability request is already ${request.status}`);
   const approved = assertNarrowing(request, narrowing);
   const grantId = request.id;
-  await updateAccessState(nodeId, state => (
-    createGrant(state, request.client, approved.capabilities, approved.roots, approved.durationMs, approved.maxUses, grantId)
-  ), dir);
+  // Record the decision before creating the grant. Authority must never exist ahead of the record
+  // that explains it. With the grant written first, any failure of this step -- the request expiring
+  // in the interval, a corrupt request file, a lock timeout -- left a live capability grant in owner
+  // policy while the request still read `pending` or `expired` with no grantId, and the owner had
+  // been told the approval failed. Recording first fails closed instead: a failure below leaves the
+  // decision recorded and no authority granted.
   const next = await decideCapabilityRequest(nodeId, id, 'approved', grantId, approved.narrowed, dir);
+  try {
+    await updateAccessState(nodeId, state => (
+      createGrant(state, request.client, approved.capabilities, approved.roots, approved.durationMs, approved.maxUses, grantId)
+    ), dir);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `request ${id} is recorded as approved but the grant was not created: ${reason}. No authority was granted; issue the grant directly if you still want it.`
+    );
+  }
   return { request: next, grantId };
 }
 

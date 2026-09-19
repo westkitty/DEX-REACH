@@ -39,7 +39,19 @@ type PersistedNodeAuth = {
 type LegacyPersisted = { version: 1; nodes: Record<string, { active: CredentialSlot; previous: CredentialSlot[]; revoked: boolean; updatedAt: number }> };
 
 const EMPTY_STATE: PersistedNodeAuth = { version: 2, nodes: {}, enrollment: {}, nonces: {} };
-const MAX_NONCES = 4096;
+/**
+ * Replay-window nonce capacity, counted per node.
+ *
+ * The cap must be per node, not global. A single shared ceiling let one node's ordinary traffic fill
+ * every slot and lock every *other* node out of authentication entirely, because the capacity check
+ * runs before signature verification and nothing is evicted until a nonce's window closes. That made
+ * one node's burst a denial of service against its peers. A node can now only exhaust its own share.
+ *
+ * MAX_NONCES remains as a hard bound on the persisted map. It is set well above the per-node cap, so
+ * no single node can reach it alone; it binds only when many nodes are simultaneously at full burst.
+ */
+const MAX_NONCES_PER_NODE = 4096;
+const MAX_NONCES = 65_536;
 const DEFAULT_ENROLL_TTL_MS = 15 * 60_000;
 const MAX_ENROLL_TTL_MS = 60 * 60_000;
 
@@ -96,7 +108,7 @@ export class NodeAuthStore {
       // Expired entries are already gone; if the cache is still full every slot is a live nonce, and
       // admitting this proof would mean forgetting one that can still be replayed. Refuse instead.
       this.pruneNonces();
-      if (this.nonceCacheFull()) return { ok: false as const, reason: 'nonce-capacity' as const };
+      if (this.nonceCacheFull(nodeId)) return { ok: false as const, reason: 'nonce-capacity' as const };
       const keys = [record.transport, ...record.previousTransport.filter(slot => slot.validUntil && slot.validUntil > Date.now())];
       const matched = keys.some(slot => slot && verifyNodeProofSignature(slot.publicKey, proof));
       if (!matched) return { ok: false as const, reason: 'wrong-key' as const };
@@ -296,7 +308,7 @@ export class NodeAuthStore {
   /**
    * Drop only nonces whose replay window has closed.
    *
-   * This used to evict the oldest entries by expiry once the map exceeded MAX_NONCES, which could
+   * This used to evict the oldest entries by expiry once the map was over capacity, which could
    * delete a nonce that was still inside its five-minute validity window. The replay check is purely
    * presence in this map, so an evicted-but-still-valid nonce became replayable — the eviction policy
    * silently converted a full cache into a replay window. Capacity is now enforced by refusing new
@@ -309,9 +321,18 @@ export class NodeAuthStore {
     }
   }
 
-  /** True when every slot is held by a nonce that is still replayable. */
-  private nonceCacheFull(): boolean {
-    return Object.keys(this.state.nonces).length >= MAX_NONCES;
+  /**
+   * True when this node's share of replay-window slots is exhausted, or the whole map is at its hard
+   * bound. Counting per node keeps one node's burst from refusing another node's proofs.
+   */
+  private nonceCacheFull(nodeId: string): boolean {
+    const records = Object.values(this.state.nonces);
+    if (records.length >= MAX_NONCES) return true;
+    let held = 0;
+    for (const record of records) {
+      if (record.nodeId === nodeId && (held += 1) >= MAX_NONCES_PER_NODE) return true;
+    }
+    return false;
   }
 
   private async persistUnlocked(): Promise<void> {
