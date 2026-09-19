@@ -13,6 +13,19 @@ export type OperationRiskClass =
   | 'privileged'
   | 'destructive';
 
+/**
+ * Explicit severity order for composing risks. Higher index is strictly more severe.
+ * A later, more permissive class must never win when several apply.
+ */
+export const OPERATION_RISK_ORDER: readonly OperationRiskClass[] = [
+  'inspect',
+  'typed-mutate',
+  'network',
+  'shell',
+  'privileged',
+  'destructive'
+];
+
 export type CheckpointStrategy = 'none' | 'git-if-available' | 'required';
 
 export type OperationDescriptor = {
@@ -148,6 +161,62 @@ export function effectiveRisk(operation: string, plannedTarget?: string): Operat
   if (!descriptor.riskInheritsFromTarget) return descriptor.risk;
   if (!plannedTarget) throw new Error(`${operation} risk requires the planned target operation`);
   return requireOperation(plannedTarget).risk;
+}
+
+export function riskRank(risk: OperationRiskClass): number {
+  const rank = OPERATION_RISK_ORDER.indexOf(risk);
+  if (rank < 0) throw new Error(`unknown risk class "${risk}"; classification fails closed`);
+  return rank;
+}
+
+export function highestRisk(risks: readonly OperationRiskClass[]): OperationRiskClass {
+  if (!risks.length) throw new Error('risk classification fails closed: no risk classes to compare');
+  return risks.reduce((current, next) => (riskRank(next) > riskRank(current) ? next : current));
+}
+
+/**
+ * Conservative floor for granting a capability, derived from the operation catalog rather than a
+ * second table. Wrappers that inherit risk are excluded. Operations that declare the inspect
+ * capability while carrying a higher risk (planning) do not raise the floor of inspect itself.
+ */
+export function riskFloorForCapability(capability: ReachCapability): OperationRiskClass {
+  const ops = DEX_OPERATIONS.filter(descriptor =>
+    descriptor.capability === capability &&
+    !descriptor.riskInheritsFromTarget &&
+    (capability !== 'inspect' || descriptor.risk === 'inspect')
+  );
+  if (!ops.length) throw new Error(`unclassifiable capability "${capability}"; classification fails closed`);
+  return highestRisk(ops.map(descriptor => descriptor.risk));
+}
+
+/**
+ * Owner-review risk for a capability request. This is evidence, not authorization.
+ * An explicit unknown operation is refused. Capability-only requests take the highest floor
+ * of the requested capabilities and never default to inspect.
+ */
+export function classifyRequestedRisk(
+  capabilities: readonly ReachCapability[],
+  operation?: string | null,
+  args: Record<string, unknown> = {}
+): OperationRiskClass {
+  if (operation) {
+    const descriptor = requireOperation(operation);
+    if (descriptor.riskInheritsFromTarget) {
+      const target = typeof args.plannedTarget === 'string' ? args.plannedTarget
+        : typeof args.operation === 'string' && args.operation !== operation ? args.operation
+        : undefined;
+      if (target) return effectiveRisk(operation, target);
+      return descriptor.risk;
+    }
+    if (descriptor.workspaceSafeResolvedPerTool) {
+      const tool = typeof args.tool === 'string' ? args.tool : '';
+      if (tool) return compatibilityToolRisk(tool);
+      return descriptor.risk;
+    }
+    return descriptor.risk;
+  }
+  if (!capabilities.length) throw new Error('risk classification fails closed: no capabilities');
+  return highestRisk(capabilities.map(riskFloorForCapability));
 }
 
 /**

@@ -161,6 +161,72 @@ test('justification cannot carry credential-shaped material', async () => {
   }
 });
 
+test('known operations classify request risk from the catalog and unknown operations fail closed', async () => {
+  const ctx = await isolated();
+  try {
+    const inspect = await createCapabilityRequest(ctx.node, {
+      client: 'chatgpt', capabilities: ['inspect'], roots: [ctx.root],
+      durationMs: 60_000, maxUses: 1, justification: 'fingerprint the node',
+      operation: 'dex.fingerprint'
+    }, ctx.dir);
+    assert.equal(inspect.risk, 'inspect');
+
+    const write = await createCapabilityRequest(ctx.node, {
+      client: 'chatgpt', capabilities: ['file.write'], roots: [ctx.root],
+      durationMs: 60_000, maxUses: 1, justification: 'typed write',
+      operation: 'dex.file.write'
+    }, ctx.dir);
+    assert.equal(write.risk, 'typed-mutate');
+
+    const shell = await createCapabilityRequest(ctx.node, {
+      client: 'chatgpt', capabilities: ['process.shell'], roots: [ctx.root],
+      durationMs: 60_000, maxUses: 1, justification: 'run a command',
+      operation: 'dex.process.run'
+    }, ctx.dir);
+    assert.equal(shell.risk, 'shell');
+
+    await assert.rejects(createCapabilityRequest(ctx.node, {
+      client: 'chatgpt', capabilities: ['inspect'], roots: [ctx.root],
+      durationMs: 60_000, maxUses: 1, justification: 'unknown op',
+      operation: 'dex.notARealOperation'
+    }, ctx.dir), /fails closed/);
+  } finally {
+    await ctx.restore();
+  }
+});
+
+test('capability-only requests take the highest capability risk and never default to inspect', async () => {
+  const ctx = await isolated();
+  try {
+    const shell = await createCapabilityRequest(ctx.node, {
+      client: 'chatgpt', capabilities: ['process.shell'], roots: [ctx.root],
+      durationMs: 60_000, maxUses: 1, justification: 'shell without naming an operation'
+    }, ctx.dir);
+    assert.equal(shell.risk, 'shell');
+    assert.equal(shell.operation, null);
+
+    const write = await createCapabilityRequest(ctx.node, {
+      client: 'chatgpt', capabilities: ['file.write'], roots: [ctx.root],
+      durationMs: 60_000, maxUses: 1, justification: 'write without naming an operation'
+    }, ctx.dir);
+    assert.equal(write.risk, 'typed-mutate');
+
+    const mixed = await createCapabilityRequest(ctx.node, {
+      client: 'chatgpt', capabilities: ['inspect', 'file.write', 'process.shell'], roots: [ctx.root],
+      durationMs: 60_000, maxUses: 1, justification: 'several capabilities'
+    }, ctx.dir);
+    assert.equal(mixed.risk, 'shell');
+
+    const inspect = await createCapabilityRequest(ctx.node, {
+      client: 'chatgpt', capabilities: ['inspect', 'file.read'], roots: [ctx.root],
+      durationMs: 60_000, maxUses: 1, justification: 'inspect only'
+    }, ctx.dir);
+    assert.equal(inspect.risk, 'inspect');
+  } finally {
+    await ctx.restore();
+  }
+});
+
 test('retried approval does not mint a second grant', async () => {
   const ctx = await isolated();
   try {
@@ -175,4 +241,10 @@ test('retried approval does not mint a second grant', async () => {
   } finally {
     await ctx.restore();
   }
+});
+
+test('capability-request repair does not expand the public MCP surface', async () => {
+  const source = await fs.readFile('src/gateway/mcp.ts', 'utf8');
+  const registered = [...source.matchAll(/server\.registerTool\('([a-z_]+)'/g)].map(match => match[1]!);
+  assert.equal(registered.length, 16);
 });

@@ -5,7 +5,7 @@ import type { ClientKind } from './protocol.js';
 import type { ReachCapability } from './capabilities.js';
 import { REACH_CAPABILITIES } from './capabilities.js';
 import type { OperationRiskClass } from './operations.js';
-import { describeOperation } from './operations.js';
+import { classifyRequestedRisk } from './operations.js';
 import { stateDir } from './local-env.js';
 import { atomicWriteFile, withFileLock } from './state-io.js';
 import { hashValue } from './hash.js';
@@ -174,7 +174,7 @@ export async function createCapabilityRequest(nodeId: string, input: NewCapabili
   }
   const justification = sanitizeJustification(input.justification);
   const operation = input.operation ? String(input.operation) : null;
-  const risk: OperationRiskClass = (operation && describeOperation(operation)?.risk) || 'inspect';
+  const risk = classifyRequestedRisk(input.capabilities, operation, input.args ?? {});
   // Never persist raw target arguments. A hash is enough to bind an exact later plan.
   const requestHash = input.args ? hashValue({ operation, args: input.args }) : null;
   const now = Date.now();

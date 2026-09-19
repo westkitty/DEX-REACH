@@ -24,7 +24,10 @@ import {
   remoteCompatibilityTools,
   requestedAuthorityCost,
   requireCompatibilityTool,
-  requireOperation
+  requireOperation,
+  classifyRequestedRisk,
+  highestRisk,
+  riskFloorForCapability
 } from '../src/shared/operations.js';
 
 // --- The catalog is internally coherent -------------------------------------
@@ -267,6 +270,21 @@ test('cost never grants anything: it is a number, not a decision', () => {
   const cost = requestedAuthorityCost('dex.process.run', { command: 'rm -rf /', timeoutMs: 1 });
   assert.equal(typeof cost.operations, 'number');
   assert.equal(Object.keys(cost).sort().join(','), 'mutations,operations,requestedProcessMs,requestedWriteBytes,shellCalls');
+});
+
+test('requested-risk classification is catalog-derived and fail-closed', () => {
+  assert.equal(classifyRequestedRisk(['inspect'], 'dex.fingerprint'), 'inspect');
+  assert.equal(classifyRequestedRisk(['file.write'], 'dex.file.write'), 'typed-mutate');
+  assert.equal(classifyRequestedRisk(['process.shell'], 'dex.process.run'), 'shell');
+  assert.throws(() => classifyRequestedRisk(['inspect'], 'dex.notAThing'), /fails closed/);
+  assert.equal(riskFloorForCapability('process.shell'), 'shell');
+  assert.equal(riskFloorForCapability('file.write'), 'typed-mutate');
+  assert.equal(riskFloorForCapability('inspect'), 'inspect');
+  assert.equal(classifyRequestedRisk(['process.shell']), 'shell');
+  assert.equal(classifyRequestedRisk(['inspect', 'file.write', 'process.shell']), 'shell');
+  assert.equal(highestRisk(['inspect', 'typed-mutate', 'shell']), 'shell');
+  assert.equal(classifyRequestedRisk(['inspect'], 'dex.commitPlan'), 'shell');
+  assert.equal(classifyRequestedRisk(['file.write'], 'dex.commitPlan', { plannedTarget: 'dex.file.write' }), 'typed-mutate');
 });
 
 test('plan commit inherits the target cost and cannot launder a higher-risk operation', () => {
