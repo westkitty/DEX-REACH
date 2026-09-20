@@ -18,7 +18,8 @@ import { createCheckpoint } from '../src/node/native.js';
 import type { AccessMode, ClientKind, ReachProfile } from '../src/shared/protocol.js';
 import { describeProfile, workspaceSafeOperationRefusal } from '../src/shared/profiles.js';
 import { arg, flag, localNodeIds, nodeEnvFile, readEnvFile } from './lib/node-files.js';
-import { WORK_ACCESS_CLASSES, WORK_EXECUTORS, WORK_WORKLOAD_CLASSES, acquireWork, cancelTicket, describeWorkStatus, heartbeat, redactWorkStatusForShare, releaseWork, workStatus } from '../src/shared/work-coordinator.js';
+import { WORK_ACCESS_CLASSES, WORK_EXECUTORS, WORK_WORKLOAD_CLASSES, describeWorkStatus, redactWorkStatusForShare } from '../src/shared/work-coordinator.js';
+import { coordinatedAcquire as acquireWork, coordinatedCancel as cancelTicket, coordinatedHeartbeat as heartbeat, coordinatedRelease as releaseWork, coordinatedStatus as workStatus } from '../src/coordinator/client.js';
 import type { AccessClass, WorkloadClass } from '../src/shared/machine-capacity.js';
 import type { WorkExecutor } from '../src/shared/work-coordinator.js';
 import { CAPACITY_PROFILES, loadCapacityProfile, setCapacityProfile, type CapacityProfile } from '../src/shared/capacity-profile.js';
@@ -533,7 +534,8 @@ async function workRunCommand(): Promise<void> {
     workload: workRunOption<WorkloadClass>('--workload', WORK_WORKLOAD_CLASSES, 'light'),
     repositoryRoot: workRunArg('--repo'),
     branch: workRunArg('--branch'),
-    phase: workRunArg('--phase')
+    phase: workRunArg('--phase'),
+    ticketId: workRunArg('--ticket')
   }, child[0]!, child.slice(1));
   if (result.status === 'queued') {
     console.log(`QUEUED    ticket ${result.ticket.id} (position ${result.position})`);

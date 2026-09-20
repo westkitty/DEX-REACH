@@ -150,6 +150,21 @@ test('heavy slots are enforced independently of substantive slots', () => {
   assert.match(third.reasons.join(' '), /heavy slots exhausted/);
 });
 
+test('resource-aware work bundles persist and reject an exhausted vector budget', async () => {
+  const host = snapshot({ physicalMemoryBytes: 64 * GIB, logicalCpuCount: 16 });
+  const oversized = { cpuUnits: 2, memoryMiB: 30_000, io: 'normal' as const, network: 'light' as const, repositoryWrite: true, machineExclusive: false };
+  const first = decideAdmission(emptyState({ leases: [lease({ bundle: oversized })] }), host, { access: 'mutate', workload: 'medium', repositoryRoot: '/a', bundle: oversized });
+  assert.equal(first.admit, false);
+  assert.match(first.reasons.join(' '), /memory bundle budget exhausted/);
+
+  await withStateDir(async dir => {
+    const repo = path.join(dir, 'repo'); await fs.mkdir(repo);
+    const result = await acquireWork({ snapshot: host, executor: 'codex', access: 'mutate', workload: 'medium', repositoryRoot: repo });
+    assert.equal(result.status, 'acquired');
+    if (result.status === 'acquired') assert.deepEqual(result.lease.bundle, { cpuUnits: 2, memoryMiB: 2048, io: 'normal', network: 'light', repositoryWrite: true, machineExclusive: false });
+  });
+});
+
 // 4 --------------------------------------------------------------------------
 test('a host at or under 12 GiB yields exactly one substantive slot', () => {
   const host = snapshot({ physicalMemoryBytes: 12 * GIB, logicalCpuCount: 8 });

@@ -29,6 +29,7 @@ const ownerEnv = await readEnvFile(path.join(localStateDir, 'secrets.env')).catc
 const currentNodeId = process.env.DEX_REACH_NODE_ID || ownerEnv.DEX_REACH_NODE_ID || os.hostname().toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
 const nodeEnv = path.join(localStateDir, 'nodes', `${currentNodeId}.env`);
 const services = [
+  { label: 'com.stinkyweasel.dex-reach.coordinator', entry: 'dist/src/coordinator/main.js', envFile: undefined },
   { label: 'com.stinkyweasel.dex-reach.gateway', entry: 'dist/src/gateway/main.js', envFile: undefined },
   { label: 'com.stinkyweasel.dex-reach.node', entry: 'dist/src/node/main.js', envFile: nodeEnv }
 ].map(service => ({ ...service, target: path.join(agentsDir, `${service.label}.plist`) }));

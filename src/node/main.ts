@@ -17,6 +17,7 @@ import {
   type GatewayResponse,
   type NodeHello,
   type NodeStatus,
+  type SchedulerSnapshot,
   type RequestActor,
   type ReachProfile
 } from '../shared/protocol.js';
@@ -34,6 +35,8 @@ import { workspaceSafeOperationRefusal, workspaceSafeToolRefusal } from '../shar
 import { AdapterRegistry, remoteAdapterToolRefusal } from '../shared/adapter-contract.js';
 import { childSpan, recordSpan, traceContextFrom, type ReachTraceContext } from '../shared/trace.js';
 import { loadTransportKeys } from './transport-keys.js';
+import { coordinatedStatus } from '../coordinator/client.js';
+import { redactWorkStatusForShare } from '../shared/work-coordinator.js';
 import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 
 loadLocalSecrets();
@@ -58,7 +61,7 @@ let activeSocket: WebSocket | null = null;
  * that has completed migration is still refused when it offers a bearer token.
  */
 let preferBearerCredential = false;
-let lastAccessJson = '';
+let lastStatusJson = '';
 
 await backend.start(config.allowedRoots);
 await sweepExpiredPlans();
@@ -319,7 +322,8 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
 
 async function publishStatus(): Promise<void> {
   const access = await currentAccess();
-  const json = JSON.stringify(access);
+  const scheduler = redactWorkStatusForShare(await coordinatedStatus()) as SchedulerSnapshot;
+  const json = JSON.stringify({ access, scheduler });
   const connected = activeSocket?.readyState === WebSocket.OPEN;
   await writeRuntimeStatus(config.nodeId, {
     pid: process.pid,
@@ -328,11 +332,11 @@ async function publishStatus(): Promise<void> {
     access,
     updatedAt: new Date().toISOString()
   });
-  if (json !== lastAccessJson && connected && activeSocket) {
-    const status: NodeStatus = { type: 'status', access };
+  if (json !== lastStatusJson && connected && activeSocket) {
+    const status: NodeStatus = { type: 'status', access, scheduler };
     activeSocket.send(JSON.stringify(status));
   }
-  lastAccessJson = json;
+  lastStatusJson = json;
 }
 
 const statusTimer = setInterval(() => void publishStatus().catch(() => undefined), 2000);
@@ -366,7 +370,7 @@ async function connect(): Promise<void> {
     reconnectMs = 1000;
     lastAliveAt = Date.now();
     activeSocket = ws;
-    lastAccessJson = '';
+    lastStatusJson = '';
     const hello: NodeHello = {
       type: 'hello',
       protocolVersion: REACH_PROTOCOL_VERSION,
@@ -376,7 +380,8 @@ async function connect(): Promise<void> {
       tools: backend.listTools(),
       allowedRoots: config.allowedRoots,
       agentVersion: DEX_REACH_VERSION,
-      access: await currentAccess()
+      access: await currentAccess(),
+      scheduler: redactWorkStatusForShare(await coordinatedStatus()) as SchedulerSnapshot
     };
     ws.send(JSON.stringify(hello));
     void publishStatus().catch(() => undefined);

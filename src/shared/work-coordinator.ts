@@ -17,6 +17,7 @@ import {
   probeHost
 } from './machine-capacity.js';
 import { recordCapacityHealth, type CapacityProfile } from './capacity-profile.js';
+import { bundleBudget, isWorkBundle, legacyWorkBundle, normalizeWorkBundle, type WorkBundle } from './work-bundle.js';
 
 export const WORK_EXECUTORS = ['claude-code', 'chatgpt', 'codex', 'grok', 'human', 'other'] as const;
 export type WorkExecutor = (typeof WORK_EXECUTORS)[number];
@@ -49,6 +50,7 @@ export type WorkLease = {
   branch?: string;
   access: AccessClass;
   workload: WorkloadClass;
+  bundle?: WorkBundle;
   phase?: string;
   createdAt: string;
   heartbeatAt: string;
@@ -62,6 +64,7 @@ export type WorkQueueTicket = {
   repositoryRoot?: string;
   access: AccessClass;
   workload: WorkloadClass;
+  bundle?: WorkBundle;
   phase?: string;
   enqueuedAt: string;
   heartbeatAt: string;
@@ -69,16 +72,17 @@ export type WorkQueueTicket = {
 
 /** Exact persisted key sets. Anything else is dropped on write and ignored on read. */
 export const LEASE_FIELDS: readonly (keyof WorkLease)[] = [
-  'id', 'pid', 'parentPid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'branch', 'access', 'workload', 'phase', 'createdAt', 'heartbeatAt'
+  'id', 'pid', 'parentPid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'branch', 'access', 'workload', 'bundle', 'phase', 'createdAt', 'heartbeatAt'
 ];
 export const TICKET_FIELDS: readonly (keyof WorkQueueTicket)[] = [
-  'id', 'pid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'access', 'workload', 'phase', 'enqueuedAt', 'heartbeatAt'
+  'id', 'pid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'access', 'workload', 'bundle', 'phase', 'enqueuedAt', 'heartbeatAt'
 ];
 
 export type WorkRequest = {
   executor: WorkExecutor;
   access: AccessClass;
   workload: WorkloadClass;
+  bundle?: WorkBundle;
   repositoryRoot?: string;
   branch?: string;
   phase?: string;
@@ -120,6 +124,15 @@ export type WorkStatus = {
 // ---------------------------------------------------------------------------
 
 export function coordinatorDir(): string { return path.join(machineStateDir(), 'coordinator'); }
+/**
+ * Local-user-only daemon transport. Unix socket names have a small platform limit, so the durable
+ * state path is represented by a stable non-secret digest beneath the system temporary directory.
+ * The daemon still verifies account ownership and applies 0600 permissions before serving it.
+ */
+export function coordinatorSocketPath(): string {
+  const identity = crypto.createHash('sha256').update(machineStateDir()).digest('hex').slice(0, 20);
+  return path.join(os.tmpdir(), `dex-reach-coord-${identity}.sock`);
+}
 export function leasesDir(): string { return path.join(coordinatorDir(), 'leases'); }
 export function queueDir(): string { return path.join(coordinatorDir(), 'queue'); }
 export function historyFile(): string { return path.join(coordinatorDir(), 'history', 'events.jsonl'); }
@@ -200,6 +213,7 @@ function validLease(raw: unknown): WorkLease | null {
   if (!WORK_EXECUTORS.includes(record.executor as WorkExecutor)) return null;
   if (!WORK_ACCESS_CLASSES.includes(record.access as AccessClass)) return null;
   if (!WORK_WORKLOAD_CLASSES.includes(record.workload as WorkloadClass)) return null;
+  if (record.bundle !== undefined && !isWorkBundle(record.bundle)) return null;
   return pick<WorkLease>(record, LEASE_FIELDS);
 }
 
@@ -212,6 +226,7 @@ function validTicket(raw: unknown): WorkQueueTicket | null {
   if (!WORK_EXECUTORS.includes(record.executor as WorkExecutor)) return null;
   if (!WORK_ACCESS_CLASSES.includes(record.access as AccessClass)) return null;
   if (!WORK_WORKLOAD_CLASSES.includes(record.workload as WorkloadClass)) return null;
+  if (record.bundle !== undefined && !isWorkBundle(record.bundle)) return null;
   return pick<WorkQueueTicket>(record, TICKET_FIELDS);
 }
 
@@ -374,7 +389,7 @@ export async function snapshotCapacity(): Promise<CapacitySnapshot> {
 export function decideAdmission(
   state: CoordinatorState,
   snapshot: CapacitySnapshot,
-  request: { access: AccessClass; workload: WorkloadClass; repositoryRoot?: string; ticketId?: string }
+  request: { access: AccessClass; workload: WorkloadClass; bundle?: WorkBundle; repositoryRoot?: string; ticketId?: string }
 ): { admit: boolean; capacity: MachineCapacity; reasons: string[] } {
   const blocking: string[] = [];
   const substantive = isSubstantive(request.workload, request.access);
@@ -409,6 +424,15 @@ export function decideAdmission(
 
   const activeSubstantive = state.leases.filter(lease => isSubstantive(lease.workload, lease.access)).length + degradedPenalty;
   const activeHeavy = state.leases.filter(lease => lease.workload === 'heavy').length + degradedPenalty;
+  const requestedBundle = normalizeWorkBundle(request.workload, request.access, request.bundle);
+  const usedBundles = state.leases.map(lease => normalizeWorkBundle(lease.workload, lease.access, lease.bundle));
+  const budget = bundleBudget(snapshot.physicalMemoryBytes, snapshot.logicalCpuCount);
+  const usedCpu = usedBundles.reduce((sum, bundle) => sum + bundle.cpuUnits, 0);
+  const usedMemory = usedBundles.reduce((sum, bundle) => sum + bundle.memoryMiB, 0);
+  if (usedCpu + requestedBundle.cpuUnits > budget.cpuUnits) blocking.push(`CPU bundle budget exhausted (${usedCpu}/${budget.cpuUnits} units active; request ${requestedBundle.cpuUnits})`);
+  if (usedMemory + requestedBundle.memoryMiB > budget.memoryMiB) blocking.push(`memory bundle budget exhausted (${usedMemory}/${budget.memoryMiB} MiB active; request ${requestedBundle.memoryMiB})`);
+  if (requestedBundle.io === 'high' && usedBundles.some(bundle => bundle.io === 'high')) blocking.push('high-I/O bundle already active');
+  if (requestedBundle.network === 'heavy' && usedBundles.some(bundle => bundle.network === 'heavy')) blocking.push('heavy-network bundle already active');
 
   const capacity = evaluateCapacity(
     {
@@ -435,6 +459,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
   const executor = assertMember(request.executor, WORK_EXECUTORS, 'executor');
   const access = assertMember(request.access, WORK_ACCESS_CLASSES, 'access');
   const workload = assertMember(request.workload, WORK_WORKLOAD_CLASSES, 'workload');
+  const bundle = normalizeWorkBundle(workload, access, request.bundle);
   const phase = sanitizeLabel(request.phase, 'phase');
   const branch = sanitizeLabel(request.branch, 'branch');
   const repositoryRoot = await canonicalRepositoryRoot(request.repositoryRoot);
@@ -450,7 +475,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
 
   return withFileLock(coordinatorLockFile(), async () => {
     const state = await pruneExpired(await readCoordinatorState());
-    const decision = decideAdmission(state, snapshot, { access, workload, repositoryRoot, ticketId: request.ticketId });
+    const decision = decideAdmission(state, snapshot, { access, workload, bundle, repositoryRoot, ticketId: request.ticketId });
     const now = new Date().toISOString();
 
     if (decision.admit) {
@@ -464,6 +489,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
         ...(branch ? { branch } : {}),
         access,
         workload,
+        bundle,
         ...(phase ? { phase } : {}),
         createdAt: now,
         heartbeatAt: now
@@ -485,6 +511,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
           ...(repositoryRoot ? { repositoryRoot } : {}),
           access,
           workload,
+          bundle,
           ...(phase ? { phase } : {}),
           enqueuedAt: now,
           heartbeatAt: now
@@ -565,6 +592,8 @@ export async function workStatus(options: { snapshot?: CapacitySnapshot } = {}):
  * and stay out of anything intended to leave the machine (DEX-INV-026).
  */
 export function redactWorkStatusForShare(status: WorkStatus): Record<string, unknown> {
+  const waits = status.tickets.map(ticket => Math.max(0, Date.now() - Date.parse(ticket.enqueuedAt))).sort((a, b) => a - b);
+  const percentile = (fraction: number) => waits.length ? waits[Math.min(waits.length - 1, Math.floor((waits.length - 1) * fraction))]! : 0;
   return {
     substantiveSlots: status.capacity.substantiveSlots,
     heavySlots: status.capacity.heavySlots,
@@ -573,6 +602,7 @@ export function redactWorkStatusForShare(status: WorkStatus): Record<string, unk
     activeLeases: status.leases.length,
     activeHeavy: status.capacity.activeHeavy,
     queueDepth: status.tickets.length,
+    queueLatencyMs: { oldest: waits[waits.length - 1] ?? 0, p50: percentile(0.5), p95: percentile(0.95) },
     observedUncoordinatedHeavy: status.observed.uncoordinatedHeavy,
     dexServices: status.observed.dexServices,
     degraded: status.degraded

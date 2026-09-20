@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Server } from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
 import { parseNodeAuthorization, type NodeAuthStore } from './node-auth.js';
-import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor } from '../shared/protocol.js';
+import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor, type SchedulerSnapshot } from '../shared/protocol.js';
 import { addRevokedNode, loadRevokedNodes } from '../shared/revoked-nodes.js';
 
 export type NodeRecord = {
@@ -12,6 +12,7 @@ export type NodeRecord = {
   lastSeenAt: number;
   /** Latest node-reported local access policy (display only; the node enforces it). */
   access: AccessSnapshot | null;
+  scheduler: SchedulerSnapshot | null;
 };
 
 type Pending = {
@@ -92,6 +93,7 @@ export class NodeRegistry {
       fingerprint: record.hello.fingerprint,
       allowedRoots: record.hello.allowedRoots,
       aiAccess: record.access ? { mode: record.access.effectiveMode, until: record.access.until, clients: record.access.clients } : 'unknown',
+      scheduler: record.scheduler,
       toolCount: record.hello.tools.length,
       agentVersion: record.hello.agentVersion,
       connectedAt: new Date(record.connectedAt).toISOString(),
@@ -163,7 +165,7 @@ export class NodeRegistry {
 
   /** Test seam: register an already-authenticated socket-like object as a node. */
   registerForTest(hello: NodeHello, socket: WebSocket): void {
-    this.nodes.set(hello.nodeId, { hello, socket, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null });
+    this.nodes.set(hello.nodeId, { hello, socket, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null });
   }
 
   /** Test seam: deliver a node response as if it arrived on the socket. */
@@ -189,14 +191,18 @@ export class NodeRegistry {
         }
         const existing = this.nodes.get(hello.nodeId);
         if (existing && existing.socket !== ws) existing.socket.close(4000, 'replaced by newer connection');
-        this.nodes.set(hello.nodeId, { hello, socket: ws, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null });
+        this.nodes.set(hello.nodeId, { hello, socket: ws, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null });
         registered = true;
         return;
       }
       const record = this.nodes.get(expectedNodeId);
       if (record) record.lastSeenAt = Date.now();
       if (typed.type === 'response') this.finishResponse(message as GatewayResponse);
-      if (typed.type === 'status' && record) record.access = (message as NodeStatus).access ?? null;
+      if (typed.type === 'status' && record) {
+        const status = message as NodeStatus;
+        record.access = status.access ?? null;
+        record.scheduler = status.scheduler ?? null;
+      }
     });
 
     ws.on('close', () => {

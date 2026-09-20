@@ -54,6 +54,17 @@ export type AccessSnapshot = {
   clients: Partial<Record<ClientKind, AccessMode>>;
 };
 
+/** Privacy-safe local scheduler data displayed to browser clients; no paths, PIDs or command text. */
+export type SchedulerSnapshot = {
+  substantiveSlots: number;
+  heavySlots: number;
+  activeLeases: number;
+  queueDepth: number;
+  queueLatencyMs: { oldest: number; p50: number; p95: number };
+  observedUncoordinatedHeavy: number;
+  degraded: boolean;
+};
+
 export type NodeHello = {
   type: 'hello';
   protocolVersion: number;
@@ -64,10 +75,11 @@ export type NodeHello = {
   allowedRoots: string[];
   agentVersion: string;
   access?: AccessSnapshot;
+  scheduler?: SchedulerSnapshot;
 };
 
 /** Pushed by a node whenever its local access policy changes. */
-export type NodeStatus = { type: 'status'; access: AccessSnapshot };
+export type NodeStatus = { type: 'status'; access: AccessSnapshot; scheduler?: SchedulerSnapshot };
 
 export type GatewayRequest = {
   type: 'request';

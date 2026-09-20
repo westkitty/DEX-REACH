@@ -46,7 +46,7 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
 
   server.registerTool('reach_list_nodes', {
     title: 'List DEX Nodes',
-    description: 'List every online DEX//REACH node (machine) with its node ID, identity fingerprint, execution profile, allowed filesystem roots, the owner-controlled aiAccess mode (off / read-only / on, plus any per-client limits), and capability counts. Call this first and pick the node_id explicitly before any other DEX//REACH action; a node whose aiAccess is off or read-only will refuse operations locally regardless of what you request.',
+    description: 'List every online DEX//REACH node (machine) with its node ID, identity fingerprint, execution profile, owner-controlled aiAccess mode, and privacy-safe scheduler state. Call this first and inspect scheduler.queueDepth and scheduler.queueLatencyMs before submitting work; a node whose aiAccess is off or read-only will refuse operations locally regardless of what you request.',
     inputSchema: {},
     annotations: READ
   }, async () => text(registry.listNodes()));
