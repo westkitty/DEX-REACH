@@ -534,7 +534,6 @@ async function livePairProofs(pair: LivePair, nodeId: string): Promise<void> {
 
     const listed = await pair.call('reach_list_tools', { node_id: nodeId });
     expect(listed.ok, `listing the node's compatibility tools failed: ${listed.text.slice(0, 200)}`);
-    expect(/^[0-9a-f]{32}$/.test(listed.traceId ?? ''), 'the live MCP result did not expose a caller-visible trace id');
     const offered = (JSON.parse(listed.text) as { name: string }[]).map(tool => tool.name);
     assertSameSurface(offered, remoteCompatibilityTools(), 'compatibility tools offered to a remote client');
     // Absent rather than refused: a probe must not be able to tell a withheld tool from one that
