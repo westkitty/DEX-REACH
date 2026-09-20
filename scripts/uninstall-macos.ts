@@ -8,6 +8,8 @@ const execFileAsync = promisify(execFile);
 const agentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
 const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
 const labels = [
+  'com.stinkyweasel.dex-reach.coordinator',
+  'com.stinkyweasel.dex-reach.worker',
   'com.stinkyweasel.dex-reach.gateway',
   'com.stinkyweasel.dex-reach.node'
 ];

@@ -98,6 +98,15 @@ if (command === 'list') {
   const removed = await store.forget(nodeId);
   await removeRevokedNode(stateDir, nodeId);
   console.log(removed ? `Forgot revoked node ${nodeId}` : `No enrolled node named ${nodeId}`);
+} else if (command === 'enroll-token') {
+  if (!nodeId) throw new Error('enroll-token requires a node id');
+  const token = await store.createEnrollmentToken(nodeId);
+  console.log(`One-use enrollment token for ${nodeId} created. Deliver it privately; it is not stored in plaintext.`);
+  console.log(token);
+} else if (command === 'complete-migration') {
+  if (!nodeId) throw new Error('complete-migration requires a node id');
+  await store.completeMigration(nodeId);
+  console.log(`${nodeId} is now asymmetric-only. Bearer tokens no longer authenticate and the node cannot silently downgrade.`);
 } else {
-  throw new Error('usage: node-credentials.ts list | migrate-local | enroll <node> | rotate <node> | revoke <node> | forget <revoked node>');
+  throw new Error('usage: node-credentials.ts list | migrate-local | enroll <node> | enroll-token <node> | complete-migration <node> | rotate <node> | revoke <node> | forget <revoked node>');
 }

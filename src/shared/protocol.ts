@@ -2,6 +2,9 @@ export const REACH_PROTOCOL_VERSION = 1;
 
 export type ReachProfile =
   | 'read-only'
+  // Typed project work without arbitrary shell: inspection, reads, typed writes, checkpoints and the
+  // declared-safe compatibility tools. It is an execution profile, not a fourth owner mode.
+  | 'workspace-safe'
   | 'development'
   | 'repository-maintenance'
   | 'android-adb'
@@ -51,6 +54,46 @@ export type AccessSnapshot = {
   clients: Partial<Record<ClientKind, AccessMode>>;
 };
 
+export type SchedulerEventSnapshot = {
+  cursor: number;
+  at: string;
+  event: string;
+  id?: string;
+  executor?: string;
+  access?: string;
+  workload?: string;
+  reason?: string;
+  forced?: boolean;
+  observedUncoordinatedHeavy?: number;
+  dexServices?: number;
+};
+
+export type SchedulerBundleTotals = {
+  cpuUnits: number;
+  memoryMiB: number;
+  highIo: number;
+  heavyNetwork: number;
+  repositoryWrites: number;
+  machineExclusive: number;
+};
+
+/** Privacy-safe local scheduler data displayed to browser clients; no paths, PIDs or command text. */
+export type SchedulerSnapshot = {
+  substantiveSlots: number;
+  heavySlots: number;
+  activeLeases: number;
+  queueDepth: number;
+  queueLatencyMs: { oldest: number; p50: number; p95: number };
+  activeBundleTotals?: SchedulerBundleTotals;
+  queuedBundleTotals?: SchedulerBundleTotals;
+  eventCursor?: number;
+  eventWindowStartCursor?: number;
+  events?: SchedulerEventSnapshot[];
+  observationCache?: { hits: number; misses: number; hitRate: number };
+  observedUncoordinatedHeavy: number;
+  degraded: boolean;
+};
+
 export type NodeHello = {
   type: 'hello';
   protocolVersion: number;
@@ -61,10 +104,11 @@ export type NodeHello = {
   allowedRoots: string[];
   agentVersion: string;
   access?: AccessSnapshot;
+  scheduler?: SchedulerSnapshot;
 };
 
 /** Pushed by a node whenever its local access policy changes. */
-export type NodeStatus = { type: 'status'; access: AccessSnapshot };
+export type NodeStatus = { type: 'status'; access: AccessSnapshot; scheduler?: SchedulerSnapshot };
 
 export type GatewayRequest = {
   type: 'request';
@@ -72,6 +116,9 @@ export type GatewayRequest = {
   operation: string;
   args: Record<string, unknown>;
   actor?: RequestActor;
+  /** W3C trace context, validated by the node. An invalid value is ignored, never repaired. */
+  traceparent?: string;
+  tracestate?: string;
 };
 
 export type GatewayResponse = {
@@ -80,6 +127,8 @@ export type GatewayResponse = {
   ok: boolean;
   result?: unknown;
   error?: string;
+  /** The trace the node recorded this exchange under, so the owner can follow it with `dex trace`. */
+  traceId?: string;
 };
 
 export type Heartbeat = { type: 'heartbeat'; at: number };

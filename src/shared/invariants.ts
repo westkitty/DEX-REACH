@@ -33,7 +33,28 @@ export const DEX_RELEASE_INVARIANTS: readonly ReleaseInvariant[] = [
   { id: 'DEX-INV-018', capability: 'ADB availability is not faked', evidenceClass: 'live-runtime' },
   { id: 'DEX-INV-019', capability: 'Simulation stays labeled simulation', evidenceClass: 'external' },
   { id: 'DEX-INV-020', capability: 'Planned mutations bind execution identity', evidenceClass: 'mixed' },
-  { id: 'DEX-INV-021', capability: 'Live trust reports remain evidence-scoped', evidenceClass: 'mixed' }
+  { id: 'DEX-INV-021', capability: 'Live trust reports remain evidence-scoped', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-022', capability: 'Machine workload admission grants no execution authority', evidenceClass: 'regression' },
+  { id: 'DEX-INV-023', capability: 'Repository mutation ownership is exclusive', evidenceClass: 'regression' },
+  { id: 'DEX-INV-024', capability: 'Exhausted machine capacity queues rather than oversubscribes', evidenceClass: 'regression' },
+  { id: 'DEX-INV-025', capability: 'Stale coordination state is reclaimed without terminating processes', evidenceClass: 'regression' },
+  { id: 'DEX-INV-026', capability: 'Coordination metadata carries no prompts, transcripts or credentials', evidenceClass: 'regression' },
+  { id: 'DEX-INV-027', capability: 'Causal evidence links stages without exporting content', evidenceClass: 'regression' },
+  { id: 'DEX-INV-028', capability: 'workspace-safe narrows execution and is narrowed by owner authority', evidenceClass: 'regression' },
+  { id: 'DEX-INV-029', capability: 'Rolling execution budgets only narrow authority', evidenceClass: 'regression' },
+  { id: 'DEX-INV-030', capability: 'Capability requests never grant authority', evidenceClass: 'regression' },
+  { id: 'DEX-INV-031', capability: 'Policy assertions and append-only policy history', evidenceClass: 'regression' },
+  { id: 'DEX-INV-032', capability: 'Node transport authentication is a separate cryptographic domain from receipt signing', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-033', capability: 'A node transport proof cannot be replayed within its validity window', evidenceClass: 'regression' },
+  { id: 'DEX-INV-034', capability: 'A capability adapter declares; DEX decides', evidenceClass: 'regression' },
+  { id: 'DEX-INV-035', capability: 'Node-local secret values never leave the node (EXPERIMENTAL)', evidenceClass: 'regression' },
+  { id: 'DEX-INV-036', capability: 'Evidence bundles are portable, content-free, and never claim more than they prove', evidenceClass: 'regression' },
+  { id: 'DEX-INV-037', capability: 'A release is a function of tracked source at one commit, and says what it does not prove', evidenceClass: 'regression' },
+  { id: 'DEX-INV-038', capability: 'A proof run records only what it observed, and absent hardware is never a pass', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-039', capability: 'The gateway never advertises an authorization behaviour it does not perform', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-040', capability: 'Owner-visible activity identifies DEX-owned processes without persisting command content', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-041', capability: 'Machine coordination and activity have one namespace per OS account', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-042', capability: 'Coordinator daemon transport is owner-private and fail-closed', evidenceClass: 'mixed' }
 ] as const;
 
 export function invariantManifest() {

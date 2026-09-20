@@ -94,6 +94,7 @@ while true; do
   echo '7  Recent audit (20)'
   echo '8  Signed receipts (20)'
   echo '9  Capability grants'
+  echo 'A  Live DEX activity'
   echo 'D  DEX command prompt'
   echo '0  Close this window'
   echo
@@ -118,6 +119,7 @@ while true; do
     7) run_dex audit --limit 20; pause ;;
     8) run_dex receipts --limit 20; pause ;;
     9) run_dex grants; pause ;;
+    a|A) run_dex activity; pause ;;
     d|D)
       echo
       echo 'Enter arguments after "dex" (examples: status, audit --limit 50, explain chatgpt dex.file.write --path /tmp/x).'

@@ -1,9 +1,11 @@
 import * as z from 'zod/v4';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '@modelcontextprotocol/server';
 import type { NodeRegistry } from './registry.js';
 import type { AuditLog } from '../shared/audit.js';
 import type { RequestActor } from '../shared/protocol.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
+import { PLAN_TARGET_OPERATIONS } from '../shared/operations.js';
+import { childSpan, recordSpan, traceContextFrom } from '../shared/trace.js';
 
 const NODE_ID_HINT = 'Target node ID exactly as returned by reach_list_nodes (for example "macbook-air.local"). Never guess; each node is a different machine.';
 const EXECUTION_IDENTITY_EXPECTATION = z.object({
@@ -23,8 +25,16 @@ const EXECUTION_IDENTITY_EXPECTATION = z.object({
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 const MUTATE = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } as const;
 
-function text(value: unknown) {
-  return { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
+function text(value: unknown, traceId?: string) {
+  const result = { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
+  if (!traceId) return result;
+  // The trace id goes in `_meta` and nowhere else. `structuredContent` is the tool's machine-readable
+  // result, so setting it to `{ dex_trace_id }` declares that the trace id IS the result: a client
+  // that reads structured output then shows the caller an identifier and never the payload. That is
+  // not theoretical — a real Claude Code call against the installed 951818c reached all six trace
+  // stages and returned the trace metadata without the fingerprint. `_meta` is out-of-band metadata
+  // and does not displace the result, which is why the caller-visible id belongs there.
+  return { ...result, _meta: { 'dex-reach/trace-id': traceId } };
 }
 
 export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, clientId = 'unknown', actor?: RequestActor): McpServer {
@@ -32,10 +42,33 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
 
   const routed = async (nodeId: string, operation: string, args: Record<string, unknown>) => {
     const started = Date.now();
+    const trace = traceContextFrom();
+    await recordSpan({
+      traceId: trace.traceId,
+      spanId: trace.spanId,
+      parentSpanId: trace.parentSpanId,
+      stage: 'mcp',
+      at: new Date().toISOString(),
+      operation,
+      nodeId,
+      actorKind: actor?.kind
+    });
+    const gatewayTrace = childSpan(trace);
+    await recordSpan({
+      traceId: gatewayTrace.traceId,
+      spanId: gatewayTrace.spanId,
+      parentSpanId: gatewayTrace.parentSpanId,
+      stage: 'gateway',
+      at: new Date().toISOString(),
+      operation,
+      nodeId,
+      actorKind: actor?.kind
+    });
     try {
-      const result = await registry.request(nodeId, operation, args, actor);
+      const response = await registry.requestWithTrace(nodeId, operation, args, actor, gatewayTrace);
+      if (response.traceId && response.traceId !== trace.traceId) throw new Error('node returned a trace id that does not match the gateway trace');
       await audit.append({ at: new Date().toISOString(), source: 'gateway', nodeId, client: clientId, actor, operation, ok: true, durationMs: Date.now() - started, args });
-      return text(result);
+      return text(response.result, trace.traceId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await audit.append({ at: new Date().toISOString(), source: 'gateway', nodeId, client: clientId, actor, operation, ok: false, durationMs: Date.now() - started, args, error: message });
@@ -45,7 +78,7 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
 
   server.registerTool('reach_list_nodes', {
     title: 'List DEX Nodes',
-    description: 'List every online DEX//REACH node (machine) with its node ID, identity fingerprint, execution profile, allowed filesystem roots, the owner-controlled aiAccess mode (off / read-only / on, plus any per-client limits), and capability counts. Call this first and pick the node_id explicitly before any other DEX//REACH action; a node whose aiAccess is off or read-only will refuse operations locally regardless of what you request.',
+    description: 'List every online DEX//REACH node (machine) with its node ID, identity fingerprint, execution profile, owner-controlled aiAccess mode, and privacy-safe scheduler state. Call this first and inspect scheduler.queueDepth and scheduler.queueLatencyMs before submitting work; a node whose aiAccess is off or read-only will refuse operations locally regardless of what you request.',
     inputSchema: {},
     annotations: READ
   }, async () => text(registry.listNodes()));
@@ -143,7 +176,7 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
     description: 'Create a short-lived, one-use execution plan for an exact operation and arguments on one node. The node re-authorizes the target operation locally, records the current policy hash, and attempts a Git checkpoint when relevant. Planning does not execute the target operation.',
     inputSchema: {
       node_id: z.string().min(1).describe(NODE_ID_HINT),
-      operation: z.enum(['dex.file.write', 'dex.process.run', 'dex.checkpoint', 'dc.call']).describe('Exact supported mutating target operation.'),
+      operation: z.enum(PLAN_TARGET_OPERATIONS).describe('Exact supported mutating target operation.'),
       arguments: z.record(z.string(), z.unknown()).default({}).describe('Exact target arguments that must match the later commit.'),
       expected_identity: EXECUTION_IDENTITY_EXPECTATION.optional().describe('Optional expected execution identity. If supplied, planning fails before mutation when any supplied field differs. Every successful plan also locks the fresh fingerprint and rechecks it at commit time.')
     },

@@ -17,8 +17,80 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Node 22 bundles npm 10, whose `npm audit` falls back to the registry's retired quick-audit
+      # endpoint. That endpoint reports every failure as `400 Invalid package tree, run npm install
+      # to rebuild your package-lock.json`, which is misleading: it says nothing about the lockfile,
+      # which is valid, and it hides what actually went wrong. npm 11 uses the supported bulk
+      # advisory endpoint and reports the real status. Pinned exactly rather than tracking latest so
+      # the toolchain stays reproducible; raise it deliberately.
+      - run: npm install -g npm@11.19.1
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run invariants -- --check
       - run: npm test
       - run: npm run build
-      - run: npm audit --omit=dev --audit-level=high
+      - name: Production dependency audit
+        # The gate is unchanged: `npm audit --omit=dev --audit-level=high`, failing the job on any
+        # high or critical advisory in the production tree. The loop retries only to ride out a
+        # registry transport failure; a real advisory is deterministic, so it fails every attempt and
+        # the unguarded final run below carries its output and its exit status.
+        run: |
+          for attempt in 1 2 3; do
+            if npm audit --omit=dev --audit-level=high; then exit 0; fi
+            echo "npm audit attempt ${attempt} failed; retrying in $((attempt * 20))s"
+            sleep $((attempt * 20))
+          done
+          npm audit --omit=dev --audit-level=high
+
+  # A build that succeeds proves nothing about whether it can be rebuilt by anyone else. This job
+  # exports the commit with `git archive`, installs from the lockfile alone and builds in a
+  # different directory, then compares every artifact by hash against a build of the checkout. It
+  # catches an untracked build input, a stale artifact, a globally installed dependency the workflow
+  # never installs, and an absolute path baked into the output. It is a separate job so a failure
+  # here is attributable and does not read as a test or audit failure.
+  reproducible-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # git archive needs the commit's full tree, and a shallow clone with no history is fine,
+          # but the checkout must be of the commit itself rather than a synthetic merge, or the
+          # rebuild would compare against something that exists nowhere in the repository.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run verify:clean-build
+
+  # The source tests construct every module's inputs directly, so they cannot see an integration
+  # that is wrong at the seams. This job starts a real gateway and a real node agent as separate
+  # processes on a loopback port and drives them with a real MCP client through the full OAuth
+  # flow. It is what caught an authorization response that contradicted the gateway's own discovery
+  # document, and a re-enrolled node that retried a refused credential forever.
+  #
+  # Items whose environment this runner does not have -- a macOS host, an Android device, a second
+  # physical machine -- are recorded as UNVERIFIED and do not fail the job. Only a proof that ran
+  # and did not hold does.
+  runtime-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        # --require-live: this runner can start a gateway and a node, so a pair that fails to come
+        # up is a regression, not a missing environment. Without it the six live-pair proofs would
+        # quietly drop to UNVERIFIED and the job would still pass.
+      - run: npm run proof -- --require-live
+      - name: Upload the proof run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-run
+          path: release/proof-run.json
+          if-no-files-found: warn

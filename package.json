@@ -4,9 +4,12 @@
   "description": "Secure AI-native remote computing control plane and MCP gateway",
   "scripts": {
     "test": "node --test --import tsx tests/*.test.ts",
+    "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "gateway": "tsx src/gateway/main.ts",
+    "coordinator": "tsx src/coordinator/main.ts",
+    "worker": "tsx src/worker/main.ts",
     "node": "tsx src/node/main.ts",
     "probe:backend": "tsx scripts/probe-backend.ts",
     "bootstrap": "tsx scripts/bootstrap.ts",
@@ -16,6 +19,9 @@
     "nodes": "tsx scripts/node-credentials.ts",
     "dex": "tsx scripts/dex-reach.ts",
     "invariants": "tsx scripts/invariants.ts",
+    "verify:clean-build": "tsx scripts/verify-clean-build.ts",
+    "release:provenance": "tsx scripts/release-provenance.ts",
+    "proof": "tsx scripts/proof-run.ts",
     "install:node": "npm run build && tsx scripts/install-node.ts",
     "install:dock": "zsh scripts/install-dock-launcher.sh",
     "verify": "npm run typecheck && npm run invariants -- --check && npm test && npm run build && npm audit --omit=dev --audit-level=high && npm run probe:backend",
@@ -27,11 +33,16 @@
   "type": "module",
   "private": true,
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/express": "^2.0.0",
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/server-legacy": "^2.0.0",
     "@wonderwhy-er/desktop-commander": "^0.2.50",
     "express": "^5.1.0",
+    "hono": "^4.13.8",
     "ws": "^8.18.3",
-    "zod": "^3.25.76"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
