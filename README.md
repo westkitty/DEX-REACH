@@ -60,7 +60,8 @@ A node can be locally set to `off`, `read-only`, or `on`; access can be temporar
 | Linux systemd path | **Implemented, not yet tested on a real Linux host** |
 | Windows process execution | **Not supported yet** |
 | Android ADB discovery | **Verified** — deployed node sees the ADB binary; no Android hardware is currently attached, so device-control proof remains pending |
-| Owner activity ledger | **Implemented on expansion branch** — source CLI distinguishes DEX-owned processes, coordination claims, DEX services, queued work, and anonymous heavy blockers; not installed on primary runtime yet |
+| Owner activity ledger | **Verified installed** — persistent runtime exposes owner-safe `activity` plus daemon-backed scheduler/queue state; share mode omits local paths/PIDs |
+| Local coordinator daemon | **Verified installed** — `com.stinkyweasel.dex-reach.coordinator` runs persistently and serves queue/capacity state for native and compatibility execution paths |
 
 For the detailed evidence, current limitations, and exact verification matrix, read [`OPERATIONAL_STATE.md`](OPERATIONAL_STATE.md).
 
