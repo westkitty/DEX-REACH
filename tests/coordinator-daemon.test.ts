@@ -63,3 +63,27 @@ test('coordinator daemon owns an account-private socket and rejects malformed fr
     await fs.rm(state, { recursive: true, force: true });
   }
 });
+
+test('a coordinator socket owned by another account is refused rather than trusted or bypassed', async () => {
+  const state = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-coordinator-foreign-'));
+  const previous = process.env.DEX_REACH_STATE_DIR;
+  process.env.DEX_REACH_STATE_DIR = state;
+  const socketPath = coordinatorSocketPath();
+  // A real socket this account owns, standing in for one a hostile local account created first at
+  // the same deterministic path. The uid is what distinguishes them, so the check is exercised by
+  // reporting a different uid rather than by trying to create a file as another user.
+  const server = net.createServer(socket => socket.end('{"ok":true,"value":{"leases":[],"tickets":[]}}\n'));
+  const realGetuid = process.getuid;
+  try {
+    await new Promise<void>((resolve, reject) => server.once('error', reject).listen({ path: socketPath }, resolve));
+    (process as { getuid?: () => number }).getuid = () => (realGetuid ? realGetuid() + 1 : 12345);
+    // Not a silent fall back to direct mode: a foreign socket means another scheduler may be running,
+    // and coordinating beside one we cannot see is what oversubscribes the machine.
+    await assert.rejects(coordinatedStatus(), /owned by another account/);
+  } finally {
+    (process as { getuid?: () => number }).getuid = realGetuid;
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previous;
+    await fs.rm(state, { recursive: true, force: true });
+  }
+});

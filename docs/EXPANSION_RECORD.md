@@ -2,7 +2,7 @@
 
 As of 2026-09-19.
 
-Fourteen of the fifteen phases in the expansion brief are implemented, swept twice for defects, and proved against a real gateway and node agent running as separate processes. Phase 3 is deliberately absent and this branch must not be installed on the primary Mac yet. Every claim below is checkable against commit `dc7b341` on branch `claude/work-coordinator-cpcug3`, draft pull request #2.
+Fourteen of the fifteen phases in the expansion brief are implemented, swept twice for defects, and proved against a real gateway and node agent running as separate processes. Phase 3 is deliberately absent and this branch must not be installed on the primary Mac yet. Every claim below is checkable against the code at commit `7a0e9c1` on branch `claude/work-coordinator-cpcug3`, draft pull request #2, plus the review commit that follows it. Documentation commits sit on top of the code they describe, so check out the branch tip rather than a fixed hash if you want the current text with the current code.
 
 ## How to check this record yourself
 
@@ -10,7 +10,7 @@ Everything here is a claim about one commit, and each claim has a command that e
 
 | Step | Command |
 | --- | --- |
-| Get the exact code | `git fetch origin claude/work-coordinator-cpcug3 && git checkout dc7b341` |
+| Get the exact code | `git fetch origin claude/work-coordinator-cpcug3 && git checkout claude/work-coordinator-cpcug3` |
 | Install from the lockfile alone | `npm ci` |
 | Types | `npm run typecheck` |
 | Invariant manifest matches the code | `npm run invariants -- --check` |
@@ -22,11 +22,11 @@ Everything here is a claim about one commit, and each claim has a command that e
 
 The last one is the important one. It starts a real gateway and a real node agent as separate operating-system processes on a loopback port in a throwaway state directory, enrolls the node through the owner CLI, and drives the pair with a real MCP client through a full OAuth flow. It writes `release/proof-run.json`, which records every proof item, the one environment that can establish it, and what a pass still does not prove.
 
-GitHub Actions runs three separate jobs on every push so a failure is attributable rather than a single red mark: `validate`, `reproducible-build` and `runtime-proof`. All three are green on `dc7b341`.
+GitHub Actions runs three separate jobs on every push so a failure is attributable rather than a single red mark: `validate`, `reproducible-build` and `runtime-proof`. All three were green on `dc7b341`, and the runs on the current branch tip are the ones to check for anything newer.
 
 ## The commit ledger
 
-Twenty-six commits sit between `main` at `80fcbe1` and the branch head at `dc7b341`: 81 files changed, 14,994 insertions, 322 deletions. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
+Twenty-eight commits sit between `main` at `80fcbe1` and `7a0e9c1`, the last code commit at the time of writing: 91 files changed, 15,658 insertions, 335 deletions. The review commit that follows adds to that. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
 
 | Commit | What it did |
 | --- | --- |
@@ -56,6 +56,9 @@ Twenty-six commits sit between `main` at `80fcbe1` and the branch head at `dc7b3
 | `e43da6d` | Reconcile this record with that fix. Documentation only |
 | `3fb0eaf` | Owner's own work: coordinator reliability hardening. Lifecycle-managed work-run leases, a sustained interactive capacity profile, one workload tree counted as one capacity consumer, an owner-visible activity ledger, and one coordination namespace per OS account. Adds DEX-INV-040 and 041 |
 | `dc7b341` | Merge of that work with this branch |
+| `df08077` | Verify that work and reconcile this record. Documentation only |
+| `7a0e9c1` | Owner's own work: a local coordinator daemon over an account-private Unix socket, work-bundle CPU/memory/IO/network budgets, and a privacy-safe scheduler snapshot on `reach_list_nodes` |
+| _next_ | Review of that daemon: refuse a coordinator socket owned by another account, and bind it under a restrictive umask |
 
 ## Phase by phase
 
@@ -278,13 +281,13 @@ The cross-process proofs hold every contender until all of them have reported, r
 
 ## Where it stands, and what only the owner can do
 
-### Validation at `dc7b341`
+### Validation at `7a0e9c1` plus the review commit
 
 | Check | Result |
 | --- | --- |
 | `npm run typecheck` | Pass |
 | `npm run invariants -- --check` | Pass, 41 release-blocking invariants |
-| `npm test` | 245 tests; 244 pass in the container, 245 pass on CI |
+| `npm test` | 248 tests; 247 pass in the container, 248 pass on CI |
 | `npm run build` | Pass |
 | `npm audit --omit=dev --audit-level=high` | 0 vulnerabilities |
 | `npm run probe:backend` | 26 compatibility tools |

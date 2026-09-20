@@ -122,7 +122,19 @@ async function main(): Promise<void> {
       })();
     });
   });
-  await new Promise<void>((resolve, reject) => server.once('error', reject).listen({ path: coordinatorSocketPath(), readableAll: false, writableAll: false }, resolve));
+  // The socket lives beneath os.tmpdir() because a Unix socket path has a ~104-character platform
+  // limit that the durable state path can exceed. `readableAll`/`writableAll` govern Windows named
+  // pipes and do nothing for a Unix socket, so `listen` would otherwise create it with the process
+  // umask -- world-connectable on a host whose temporary directory is shared between accounts, which
+  // Linux's /tmp is and macOS's per-user /var/folders is not. That left a window between bind and the
+  // chmod below in which another local account could connect. Binding under a 0177 umask closes it;
+  // the chmod stays as the assertion that the final mode is what we intend.
+  const umask = process.umask(0o177);
+  try {
+    await new Promise<void>((resolve, reject) => server.once('error', reject).listen({ path: coordinatorSocketPath(), readableAll: false, writableAll: false }, resolve));
+  } finally {
+    process.umask(umask);
+  }
   await fs.chmod(coordinatorSocketPath(), 0o600);
   console.log(`DEX//REACH coordinator daemon listening for ${os.userInfo().username}`);
   const stop = () => server.close(() => void fs.rm(coordinatorSocketPath(), { force: true }).finally(() => process.exit(0)));

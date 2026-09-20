@@ -28,6 +28,15 @@ async function socketPresent(): Promise<boolean> {
   try {
     const stat = await fs.lstat(coordinatorSocketPath());
     if (!stat.isSocket()) throw new CoordinatorUnavailableError('coordinator socket path is not a socket; refusing direct coordination fallback');
+    // The daemon refuses to take over a socket another account owns; a client has to make the same
+    // check before trusting one. The path is a digest of a non-secret state directory, so where the
+    // temporary directory is shared between accounts another local user can create it first. A
+    // forged answer cannot widen what any request may do -- admission grants no execution authority
+    // (DEX-INV-022) -- but it could make DEX oversubscribe the machine or refuse all work, so this
+    // refuses rather than falling back silently: a foreign socket means coordination is ambiguous,
+    // and direct mode would then run beside a scheduler we cannot see.
+    const uid = process.getuid?.();
+    if (uid !== undefined && stat.uid !== uid) throw new CoordinatorUnavailableError('coordinator socket is owned by another account; refusing to coordinate through it');
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
