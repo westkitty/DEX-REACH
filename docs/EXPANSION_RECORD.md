@@ -2,7 +2,7 @@
 
 As of 2026-09-19.
 
-Fourteen of the fifteen phases in the expansion brief are implemented, swept twice for defects, and proved against a real gateway and node agent running as separate processes. Phase 3 is deliberately absent and this branch must not be installed on the primary Mac yet. Every claim below is checkable against commit `71079b3` on branch `claude/work-coordinator-cpcug3`, draft pull request #2.
+Fourteen of the fifteen phases in the expansion brief are implemented, swept twice for defects, and proved against a real gateway and node agent running as separate processes. Phase 3 is deliberately absent and this branch must not be installed on the primary Mac yet. Every claim below is checkable against commit `7f617ab` on branch `claude/work-coordinator-cpcug3`, draft pull request #2.
 
 ## How to check this record yourself
 
@@ -10,7 +10,7 @@ Everything here is a claim about one commit, and each claim has a command that e
 
 | Step | Command |
 | --- | --- |
-| Get the exact code | `git fetch origin claude/work-coordinator-cpcug3 && git checkout 71079b3` |
+| Get the exact code | `git fetch origin claude/work-coordinator-cpcug3 && git checkout 7f617ab` |
 | Install from the lockfile alone | `npm ci` |
 | Types | `npm run typecheck` |
 | Invariant manifest matches the code | `npm run invariants -- --check` |
@@ -22,11 +22,11 @@ Everything here is a claim about one commit, and each claim has a command that e
 
 The last one is the important one. It starts a real gateway and a real node agent as separate operating-system processes on a loopback port in a throwaway state directory, enrolls the node through the owner CLI, and drives the pair with a real MCP client through a full OAuth flow. It writes `release/proof-run.json`, which records every proof item, the one environment that can establish it, and what a pass still does not prove.
 
-GitHub Actions runs three separate jobs on every push so a failure is attributable rather than a single red mark: `validate`, `reproducible-build` and `runtime-proof`. All three are green on `71079b3`.
+GitHub Actions runs three separate jobs on every push so a failure is attributable rather than a single red mark: `validate`, `reproducible-build` and `runtime-proof`. All three are green on `7f617ab`.
 
 ## The commit ledger
 
-Twenty-one commits sit between `main` at `80fcbe1` and the branch head at `71079b3`: 71 files changed, 13,580 insertions, 307 deletions. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
+Twenty-three commits sit between `main` at `80fcbe1` and the branch head at `7f617ab`: 72 files changed, 13,913 insertions, 307 deletions. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
 
 | Commit | What it did |
 | --- | --- |
@@ -51,6 +51,8 @@ Twenty-one commits sit between `main` at `80fcbe1` and the branch head at `71079
 | `ca1332b` | Make a failed provenance check say what actually failed |
 | `393352c` | Physical and runtime proof, and the fix for the two defects that proof exposed |
 | `71079b3` | Prove the served MCP contract against a running gateway, and record what that still does not close |
+| `d8cdc5f` | This record: one owner-facing document covering the whole expansion. Documentation only |
+| `7f617ab` | Owner's own fix: Electron and Chromium helper processes no longer consume an anonymous coding-work slot in machine admission |
 
 ## Phase by phase
 
@@ -59,6 +61,8 @@ Every phase either adds a narrowing or adds evidence. None of them widens what a
 ### Phase 0A and 0B: shared-machine coordination
 
 Several AI sessions can use one machine at once, so machine capacity and repository ownership became authority boundaries of their own. This added leases, a FIFO queue nobody can jump, live capacity probes, and seven `work-*` CLI commands. Two rules matter most. Holding a lease grants nothing: owner mode, client ceilings, grants, roots, profile and plan rules decide a request exactly as they would with no lease. And a stale lease is reclaimed only when its heartbeat is well past due and its process is actually gone, never by signalling or killing another agent's process. Coordination files carry only the declared lease fields, never prompt text, transcripts, command output or credentials.
+
+One later fix, `7f617ab`, made by the owner rather than in this program: Electron and Chromium helper processes no longer consume an anonymous coding-work slot. Such helpers inherit their host application's command line, so a desktop application's renderer read as an independent coding session and took a slot from real work. The exclusion is constrained to the documented helper types (`renderer`, `gpu-process`, `utility`, `zygote`), and CPU load, memory pressure and thermal state are still evaluated independently of the slot count, so genuine contention from such a process still queues work.
 
 ### Phase 1: one operation catalog
 
@@ -267,13 +271,13 @@ The cross-process proofs hold every contender until all of them have reported, r
 
 ## Where it stands, and what only the owner can do
 
-### Validation at `71079b3`
+### Validation at `7f617ab`
 
 | Check | Result |
 | --- | --- |
 | `npm run typecheck` | Pass |
 | `npm run invariants -- --check` | Pass, 39 release-blocking invariants |
-| `npm test` | 232 tests; 231 pass in the container, 232 pass on CI |
+| `npm test` | 233 tests; 232 pass in the container, 233 pass on CI |
 | `npm run build` | Pass |
 | `npm audit --omit=dev --audit-level=high` | 0 vulnerabilities |
 | `npm run probe:backend` | 26 compatibility tools |
