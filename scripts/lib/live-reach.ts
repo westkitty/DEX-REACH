@@ -322,9 +322,9 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
       // The trace id is read from the one place the gateway writes it. Accepting it from several
       // shapes would make this assertion unfalsifiable across exactly the shapes it exists to tell
       // apart: a gateway that regressed to emitting the id as an extra content block would still
-      // pass, which is the failure this proof item was added to catch. The gateway also mirrors the
-      // id into `structuredContent`, and `tests/mcp-contract.test.ts` pins the two to be equal, so
-      // reading `_meta` alone is strict without being brittle.
+      // pass, which is the failure this proof item was added to catch. `_meta` is deliberately the
+      // only trace carrier: a trace-only `structuredContent` would replace the useful payload for
+      // clients that prefer structured output, as the contract test pins.
       const candidate = result._meta?.['dex-reach/trace-id'];
       const traceId = typeof candidate === 'string' && /^[0-9a-f]{32}$/.test(candidate) ? candidate : undefined;
       // Every text block is payload. Keeping only the first would silently truncate a multi-block
