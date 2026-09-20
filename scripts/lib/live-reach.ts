@@ -311,7 +311,11 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
     await connect();
 
     async function call(tool: string, args: Record<string, unknown>): Promise<LiveCallResult> {
-      const result = await client.callTool({ name: tool, arguments: args }) as { isError?: boolean; content?: unknown; _meta?: Record<string, unknown> };
+      const result = await client.callTool({ name: tool, arguments: args }) as {
+        isError?: boolean;
+        content?: unknown;
+        _meta?: Record<string, unknown>;
+      };
       const content = Array.isArray(result.content) ? result.content : [];
       const texts = content
         .filter((item): item is { type: 'text'; text: string } => Boolean(item) && (item as { type?: string }).type === 'text' && typeof (item as { text?: unknown }).text === 'string')
@@ -319,9 +323,9 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
       // The gateway carries the trace id in the result's `_meta`, which is where it belongs: a second
       // text block would be joined into the payload by any client that concatenates content, which is
       // what this harness itself used to do. Every text block is payload again, and the trace id is
-      // read from the single place the server writes it.
-      const meta = result._meta?.['com.stinkyweasel.dexreach/trace-id'];
-      const traceId = typeof meta === 'string' ? meta : undefined;
+      // read from the single place the server writes it, shape-checked at the boundary.
+      const candidate = result._meta?.['com.stinkyweasel.dexreach/trace-id'];
+      const traceId = typeof candidate === 'string' && /^[0-9a-f]{32}$/.test(candidate) ? candidate : undefined;
       return { ok: !result.isError, text: texts.join('\n'), ...(traceId ? { traceId } : {}) };
     }
 
