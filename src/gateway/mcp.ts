@@ -28,11 +28,13 @@ const MUTATE = { readOnlyHint: false, destructiveHint: true, idempotentHint: fal
 function text(value: unknown, traceId?: string) {
   const result = { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
   if (!traceId) return result;
-  return {
-    ...result,
-    structuredContent: { dex_trace_id: traceId },
-    _meta: { 'dex-reach/trace-id': traceId }
-  };
+  // The trace id goes in `_meta` and nowhere else. `structuredContent` is the tool's machine-readable
+  // result, so setting it to `{ dex_trace_id }` declares that the trace id IS the result: a client
+  // that reads structured output then shows the caller an identifier and never the payload. That is
+  // not theoretical — a real Claude Code call against the installed 951818c reached all six trace
+  // stages and returned the trace metadata without the fingerprint. `_meta` is out-of-band metadata
+  // and does not displace the result, which is why the caller-visible id belongs there.
+  return { ...result, _meta: { 'dex-reach/trace-id': traceId } };
 }
 
 export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, clientId = 'unknown', actor?: RequestActor): McpServer {

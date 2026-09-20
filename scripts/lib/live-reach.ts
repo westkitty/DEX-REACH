@@ -32,7 +32,7 @@ export type LiveNode = {
   logFile: string;
 };
 
-export type LiveCallResult = { ok: boolean; text: string; traceId?: string };
+export type LiveCallResult = { ok: boolean; text: string; traceId?: string; structuredOutput?: unknown };
 
 export type LivePairOptions = {
   repoRoot: string;
@@ -329,7 +329,11 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
       const traceId = typeof candidate === 'string' && /^[0-9a-f]{32}$/.test(candidate) ? candidate : undefined;
       // Every text block is payload. Keeping only the first would silently truncate a multi-block
       // result, and the trace id is deliberately not carried in one.
-      return { ok: !result.isError, text: texts.join('\n'), ...(traceId ? { traceId } : {}) };
+      // Reported so a proof item can assert on it. This harness reads `content`; a client that reads
+      // structured output reads something else, and the gap between the two is how a routed call
+      // came back to a real client carrying its trace id and none of its payload.
+      const structuredOutput = result.structuredContent;
+      return { ok: !result.isError, text: texts.join('\n'), structuredOutput, ...(traceId ? { traceId } : {}) };
     }
 
     async function migrateNodeToAsymmetric(nodeId: string): Promise<{ authMode: string; privateKeyRefused: boolean }> {

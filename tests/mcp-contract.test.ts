@@ -131,9 +131,11 @@ test('node-routed MCP calls preserve the original payload and expose a caller-vi
     const content = result.content as Array<{ type: string; text?: string }>;
     assert.equal(content.length, 1, 'trace metadata must not alter the original text payload shape');
     assert.equal(content[0]?.text, JSON.stringify({ ok: true }, null, 2));
-    const structured = result.structuredContent as { dex_trace_id?: string } | undefined;
-    assert.match(structured?.dex_trace_id || '', /^[0-9a-f]{32}$/);
-    assert.equal((result._meta as Record<string, unknown> | undefined)?.['dex-reach/trace-id'], structured?.dex_trace_id);
+    assert.match(String((result._meta as Record<string, unknown> | undefined)?.['dex-reach/trace-id'] ?? ''), /^[0-9a-f]{32}$/);
+    // A tool that reports structured output is saying that output is its result. Carrying the trace
+    // id there hides the payload from every client that reads structured output in preference to
+    // text, which is what a real client showed against the installed build.
+    assert.equal(result.structuredContent, undefined, 'the trace id must not stand in for the tool result');
   } finally {
     await close();
     if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previous;

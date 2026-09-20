@@ -551,6 +551,12 @@ async function livePairProofs(pair: LivePair, nodeId: string): Promise<void> {
     const trust = await pair.call('reach_trust_report', { node_id: nodeId });
     expect(trust.ok, `the trust report failed: ${trust.text.slice(0, 200)}`);
     expect(/^[0-9a-f]{32}$/.test(trust.traceId ?? ''), 'the routed MCP result did not expose a caller-visible trace id');
+    // The trace id must travel as metadata, never as the tool's structured result. A result whose
+    // structured output is the trace id hands a structured-output client an identifier in place of
+    // the payload, which no assertion over `content` can see: this harness reads `content`, and a
+    // real Claude Code call against the installed build read structured output and got the id alone.
+    expect(trust.structuredOutput === undefined, 'the routed MCP result reported structured output, which stands in for the payload for any client that reads it');
+    expect(trust.text.trim().length > 0, 'the routed MCP result carried no payload alongside its trace id');
     const report = JSON.parse(trust.text) as {
       verdict: string; certificateHash?: string; evidenceScope?: string;
       invariants?: { count?: number; ids?: string[]; liveEvaluatedIds?: string[] };
