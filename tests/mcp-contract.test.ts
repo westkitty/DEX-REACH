@@ -37,6 +37,19 @@ const EXPECTED_TOOLS = [
   'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'
 ];
 
+function clientPreferredOutput(result: { content?: unknown; structuredContent?: unknown }): unknown {
+  // Model-facing clients may prefer structured output when it exists. This is deliberately the
+  // selection rule that exposed the installed-client failure, rather than another assertion that
+  // merely parses content and misses a conflicting structured result.
+  if (result.structuredContent !== undefined) return result.structuredContent;
+  const content = result.content;
+  assert.ok(Array.isArray(content) && content.length === 1, 'a result without structured output must carry one text payload');
+  const text = content[0] as { type?: unknown; text?: unknown };
+  assert.equal(text.type, 'text');
+  if (typeof text.text !== 'string') throw new TypeError('a text result must carry string text');
+  return JSON.parse(text.text);
+}
+
 test('the served MCP surface is exactly the 16 expected actions, in a deterministic order', async () => {
   const { client, close } = await connectedClient();
   try {
@@ -136,6 +149,15 @@ test('node-routed MCP calls preserve the original payload and expose a caller-vi
     // id there hides the payload from every client that reads structured output in preference to
     // text, which is what a real client showed against the installed build.
     assert.equal(result.structuredContent, undefined, 'the trace id must not stand in for the tool result');
+    assert.deepEqual(clientPreferredOutput(result), { ok: true }, 'a client that prefers structured output still receives the useful payload');
+
+    // Counterfactual for the installed failure: a trace-only structured result wins this same
+    // selection rule and therefore displaces the fingerprint, even though the text remains valid.
+    assert.notDeepEqual(
+      clientPreferredOutput({ content, structuredContent: { dex_trace_id: '0123456789abcdef0123456789abcdef' } }),
+      { ok: true },
+      'the prior trace-only structured result must be distinguishable from a useful result'
+    );
   } finally {
     await close();
     if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previous;
