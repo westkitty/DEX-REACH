@@ -121,7 +121,7 @@ test('node-targeted actions require an explicit node_id and reach_plan keeps its
   }
 });
 
-test('node-routed MCP calls preserve the original payload and expose a caller-visible trace id', async () => {
+test('node-routed MCP calls preserve the original payload and expose a caller-visible trace id as result metadata', async () => {
   const previous = process.env.DEX_REACH_STATE_DIR;
   const temp = await import('node:fs/promises').then(fs => fs.mkdtemp('/tmp/dex-mcp-trace-'));
   process.env.DEX_REACH_STATE_DIR = temp;
@@ -129,9 +129,10 @@ test('node-routed MCP calls preserve the original payload and expose a caller-vi
   try {
     const result = await client.callTool({ name: 'reach_fingerprint', arguments: { node_id: 'test-node' } });
     const content = result.content as Array<{ type: string; text?: string }>;
+    assert.equal(content.length, 1, 'trace metadata must not become a second content block');
     assert.equal(content[0]?.text, JSON.stringify({ ok: true }, null, 2));
-    const meta = JSON.parse(content[1]?.text || '{}') as { dex_trace_id?: string };
-    assert.match(meta.dex_trace_id || '', /^[0-9a-f]{32}$/);
+    const meta = result._meta as Record<string, unknown> | undefined;
+    assert.match(String(meta?.['com.stinkyweasel.dexreach/trace-id'] || ''), /^[0-9a-f]{32}$/);
   } finally {
     await close();
     if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previous;
