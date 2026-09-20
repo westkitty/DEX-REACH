@@ -175,6 +175,26 @@ test('process observation separates DEX services from anonymous heavy jobs', () 
   assert.equal(isDexServiceCommand('node /Users/owner/DEX-REACH/dist/scripts/dex-reach.js work-status'), false);
 });
 
+test('desktop application helper processes do not consume an anonymous coding-work slot', () => {
+  const rows = parseProcessTable(`  PID  PPID %CPU %MEM     ELAPSED COMMAND
+  601     1 185.2  5.5    00:08:00 /Applications/ChatGPT.app/Contents/Frameworks/Codex\ (Renderer).app/Contents/MacOS/Codex\ (Renderer) --type=renderer --standard-schemes=app,codex-sandbox --user-data-dir=/private/var/folders/dex
+  602     1  22.0  2.1    00:02:00 /opt/homebrew/bin/claude --print "inspect repository"
+`);
+
+  const observed = classifyObservedWorkloads(rows, { selfPid: 999 });
+  // Electron/Chromium renderer helpers inherit application names such as "Codex", but are not
+  // independent coding sessions. A real CLI session remains a competing workload.
+  assert.equal(observed.uncoordinatedHeavy, 1);
+  assert.equal(
+    evaluateCapacity(
+      { physicalMemoryBytes: 8 * GIB, logicalCpuCount: 8, loadAverage1m: 0.5, ...healthy },
+      { activeSubstantive: 0, activeHeavy: 0, observedUncoordinatedHeavy: observed.uncoordinatedHeavy },
+      { workload: 'medium', access: 'mutate' }
+    ).canAdmit,
+    false
+  );
+});
+
 test('processes belonging to a known lease are not double-counted as anonymous', () => {
   const rows = parseProcessTable(PS_FIXTURE);
   // Leasing pid 104 also covers its npm child at 105.

@@ -363,12 +363,21 @@ const DEX_SERVICE_PATTERNS: readonly RegExp[] = [
   /src\/gateway\/main\.(ts|js)/, /src\/node\/main\.(ts|js)/
 ];
 
+/**
+ * Electron/Chromium helpers inherit their host application's command line, including strings such
+ * as `codex-sandbox`. They are part of a desktop application's UI process tree, not independent
+ * coding sessions. Keep this constrained to documented helper process types so a CLI command with
+ * an unrelated `--type` flag remains eligible for ordinary workload classification.
+ */
+const DESKTOP_HELPER_TYPE_PATTERN = /(?:^|\s)--type=(?:renderer|gpu-process|utility|zygote)(?:\s|$)/;
+
 export function isDexServiceCommand(command: string): boolean {
   return DEX_SERVICE_PATTERNS.some(pattern => pattern.test(command));
 }
 
 export function looksHeavy(row: ProcessRow): boolean {
   if (isDexServiceCommand(row.command)) return false;
+  if (DESKTOP_HELPER_TYPE_PATTERN.test(row.command)) return false;
   if (!HEAVY_COMMAND_PATTERNS.some(pattern => pattern.test(row.command))) return false;
   // A named build tool that is consuming neither CPU nor memory is idle, not a competing job.
   return row.cpu >= 10 || row.mem >= 2;
