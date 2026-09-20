@@ -2,7 +2,7 @@
 
 As of 2026-09-19.
 
-Fourteen of the fifteen phases in the expansion brief are implemented, swept twice for defects, and proved against a real gateway and node agent running as separate processes. Phase 3 is deliberately absent and this branch must not be installed on the primary Mac yet. Every claim below is checkable against commit `7f617ab` on branch `claude/work-coordinator-cpcug3`, draft pull request #2.
+Fourteen of the fifteen phases in the expansion brief are implemented, swept twice for defects, and proved against a real gateway and node agent running as separate processes. Phase 3 is deliberately absent and this branch must not be installed on the primary Mac yet. Every claim below is checkable against commit `dc7b341` on branch `claude/work-coordinator-cpcug3`, draft pull request #2.
 
 ## How to check this record yourself
 
@@ -10,7 +10,7 @@ Everything here is a claim about one commit, and each claim has a command that e
 
 | Step | Command |
 | --- | --- |
-| Get the exact code | `git fetch origin claude/work-coordinator-cpcug3 && git checkout 7f617ab` |
+| Get the exact code | `git fetch origin claude/work-coordinator-cpcug3 && git checkout dc7b341` |
 | Install from the lockfile alone | `npm ci` |
 | Types | `npm run typecheck` |
 | Invariant manifest matches the code | `npm run invariants -- --check` |
@@ -22,11 +22,11 @@ Everything here is a claim about one commit, and each claim has a command that e
 
 The last one is the important one. It starts a real gateway and a real node agent as separate operating-system processes on a loopback port in a throwaway state directory, enrolls the node through the owner CLI, and drives the pair with a real MCP client through a full OAuth flow. It writes `release/proof-run.json`, which records every proof item, the one environment that can establish it, and what a pass still does not prove.
 
-GitHub Actions runs three separate jobs on every push so a failure is attributable rather than a single red mark: `validate`, `reproducible-build` and `runtime-proof`. All three are green on `7f617ab`.
+GitHub Actions runs three separate jobs on every push so a failure is attributable rather than a single red mark: `validate`, `reproducible-build` and `runtime-proof`. All three are green on `dc7b341`.
 
 ## The commit ledger
 
-Twenty-three commits sit between `main` at `80fcbe1` and the branch head at `7f617ab`: 72 files changed, 13,913 insertions, 307 deletions. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
+Twenty-six commits sit between `main` at `80fcbe1` and the branch head at `dc7b341`: 81 files changed, 14,994 insertions, 322 deletions. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
 
 | Commit | What it did |
 | --- | --- |
@@ -53,6 +53,9 @@ Twenty-three commits sit between `main` at `80fcbe1` and the branch head at `7f6
 | `71079b3` | Prove the served MCP contract against a running gateway, and record what that still does not close |
 | `d8cdc5f` | This record: one owner-facing document covering the whole expansion. Documentation only |
 | `7f617ab` | Owner's own fix: Electron and Chromium helper processes no longer consume an anonymous coding-work slot in machine admission |
+| `e43da6d` | Reconcile this record with that fix. Documentation only |
+| `3fb0eaf` | Owner's own work: coordinator reliability hardening. Lifecycle-managed work-run leases, a sustained interactive capacity profile, one workload tree counted as one capacity consumer, an owner-visible activity ledger, and one coordination namespace per OS account. Adds DEX-INV-040 and 041 |
+| `dc7b341` | Merge of that work with this branch |
 
 ## Phase by phase
 
@@ -63,6 +66,8 @@ Every phase either adds a narrowing or adds evidence. None of them widens what a
 Several AI sessions can use one machine at once, so machine capacity and repository ownership became authority boundaries of their own. This added leases, a FIFO queue nobody can jump, live capacity probes, and seven `work-*` CLI commands. Two rules matter most. Holding a lease grants nothing: owner mode, client ceilings, grants, roots, profile and plan rules decide a request exactly as they would with no lease. And a stale lease is reclaimed only when its heartbeat is well past due and its process is actually gone, never by signalling or killing another agent's process. Coordination files carry only the declared lease fields, never prompt text, transcripts, command output or credentials.
 
 One later fix, `7f617ab`, made by the owner rather than in this program: Electron and Chromium helper processes no longer consume an anonymous coding-work slot. Such helpers inherit their host application's command line, so a desktop application's renderer read as an independent coding session and took a slot from real work. The exclusion is constrained to the documented helper types (`renderer`, `gpu-process`, `utility`, `zygote`), and CPU load, memory pressure and thermal state are still evaluated independently of the slot count, so genuine contention from such a process still queues work.
+
+A second body of owner work, `3fb0eaf`, hardened the coordinator further: work-run leases now have a managed lifecycle, a sustained interactive capacity profile was added, one workload process tree counts as one capacity consumer rather than several, and `dex activity` gives the owner a local view of which processes DEX actually owns. Two rules were added with it. The activity ledger keeps only a sanitised process label, never a raw command line, so no argument or credential can reach it, and a corrupt ledger fails visibly instead of emptying itself. And machine coordination and activity anchor to the OS account home rather than to a virtualised `HOME`, so a compatibility adapter that replaces `HOME` cannot split one physical machine into two schedulers. Those are `DEX-INV-040` and `DEX-INV-041`.
 
 ### Phase 1: one operation catalog
 
@@ -163,9 +168,9 @@ Neither of these could have been caught by any test in this repository, because 
 
 `fee7892` made a capability request that cannot be risk-classified refuse rather than quietly default to the lowest risk class. `ca1332b` made a failed provenance check say what actually failed instead of reporting a generic drift.
 
-## The 39 release-blocking invariants
+## The 41 release-blocking invariants
 
-The expansion took the count from 21 to 39: everything from `DEX-INV-022` onward is new here. They live in `docs/INVARIANTS.md` with their full preconditions and acceptable proof, and in `src/shared/invariants.ts` as a machine-readable index; a regression test fails if those two ever disagree.
+The expansion took the count from 21 to 41: everything from `DEX-INV-022` onward is new here. They live in `docs/INVARIANTS.md` with their full preconditions and acceptable proof, and in `src/shared/invariants.ts` as a machine-readable index; a regression test fails if those two ever disagree.
 
 "Regression only" means a test proves the contract and no deployed system has exercised it. "Proof stale" means it was verified on the deployed 0.3.2 worker and has not been re-verified since the MCP SDK v2 migration.
 
@@ -210,6 +215,8 @@ The expansion took the count from 21 to 39: everything from `DEX-INV-022` onward
 | 037 | A release is a function of tracked source at one commit | Regression plus one executed clean-build comparison |
 | 038 | A proof run records only what it observed, and absent hardware is never a pass | Regression plus executed proof runs |
 | 039 | The gateway never advertises an authorization behaviour it does not perform | Regression plus one live MCP client completing OAuth |
+| 040 | Owner-visible activity identifies DEX-owned processes without persisting command content | Regression plus the source CLI on the primary Mac |
+| 041 | Machine coordination and activity have one namespace per OS account | Regression plus a live cross-path smoke on the primary Mac |
 
 ## What the proof run establishes, and where
 
@@ -271,13 +278,13 @@ The cross-process proofs hold every contender until all of them have reported, r
 
 ## Where it stands, and what only the owner can do
 
-### Validation at `7f617ab`
+### Validation at `dc7b341`
 
 | Check | Result |
 | --- | --- |
 | `npm run typecheck` | Pass |
-| `npm run invariants -- --check` | Pass, 39 release-blocking invariants |
-| `npm test` | 233 tests; 232 pass in the container, 233 pass on CI |
+| `npm run invariants -- --check` | Pass, 41 release-blocking invariants |
+| `npm test` | 245 tests; 244 pass in the container, 245 pass on CI |
 | `npm run build` | Pass |
 | `npm audit --omit=dev --audit-level=high` | 0 vulnerabilities |
 | `npm run probe:backend` | 26 compatibility tools |
