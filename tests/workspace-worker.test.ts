@@ -102,6 +102,7 @@ test('workspace worker serves only bounded read operations, falls back on root m
     assert.equal(fingerprint.cwd, await fs.realpath(work));
 
     assert.equal(await workspaceWorkerExecute('worker-test-node', 'dex.file.read', { path: file }, '0'.repeat(64)), null);
+    assert.equal(await workspaceWorkerExecute('different-node', 'dex.file.read', { path: file }, rootsHash), null);
     assert.equal(await workspaceWorkerExecute('worker-test-node', 'dex.process.run', { command: 'pwd' }, rootsHash), null);
 
     const refused = await rawCall(workspaceWorkerSocketPath(), {

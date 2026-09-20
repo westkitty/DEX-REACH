@@ -190,6 +190,9 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
   const baseEnv: NodeJS.ProcessEnv = {
     ...process.env,
     DEX_REACH_STATE_DIR: stateDir,
+    // A proof pair must not consult an installed account worker. The isolated pair has no worker
+    // process, so eligible operations take the normal node path after finding no private socket.
+    DEX_WORKSPACE_WORKER_DIR: path.join(workspace, 'worker'),
     DEX_REACH_PUBLIC_BASE_URL: baseUrl.toString(),
     DEX_REACH_GATEWAY_HOST: '127.0.0.1',
     DEX_REACH_GATEWAY_PORT: String(port),

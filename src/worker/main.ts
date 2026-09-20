@@ -105,7 +105,11 @@ const server = net.createServer(socket => {
         const operation = request.payload.operation;
         const args = request.payload.args;
         const expectedRootsHash = request.payload.expectedRootsHash;
-        if (nodeId !== config.nodeId) throw new Error('workspace worker node identity mismatch');
+        if (nodeId !== config.nodeId) {
+          response = { ok: false, code: 'config-mismatch', error: 'workspace worker node identity no longer matches the node; use normal node execution' };
+          socket.end(JSON.stringify(response) + '\n');
+          return;
+        }
         if (expectedRootsHash !== config.rootsHash) {
           response = { ok: false, code: 'config-mismatch', error: 'workspace worker roots no longer match the node; use normal node execution' };
           socket.end(JSON.stringify(response) + '\n');
