@@ -59,7 +59,7 @@ A node can be locally set to `off`, `read-only`, or `on`; access can be temporar
 | Primary macOS service install/reload | **Verified in 0.3.1** — self-hosted install returns before a one-shot launchd reloader replaces gateway/node; node-only fresh-Mac proof remains pending |
 | Linux systemd path | **Implemented, not yet tested on a real Linux host** |
 | Windows process execution | **Not supported yet** |
-| Android ADB discovery | **Verified** — deployed node sees the ADB binary; no Android hardware is currently attached, so device-control proof remains pending |
+| Android ADB hardware | **Verified on primary Mac** — wireless ADB connected a Samsung SM-X910; raw ADB state was `device`, DEX `reach_adb_devices` saw the same transport, and harmless identity reads through DEX returned samsung / SM-X910 / Android 16 / SDK 36 |
 | Owner activity ledger | **Verified installed** — persistent runtime exposes owner-safe `activity` plus daemon-backed scheduler/queue state; share mode omits local paths/PIDs |
 | Local coordinator daemon | **Verified installed** — `com.stinkyweasel.dex-reach.coordinator` runs persistently and serves queue/capacity state for native and compatibility execution paths |
 
@@ -696,7 +696,7 @@ The README explains the system. `OPERATIONAL_STATE.md` controls what is actually
 - No second physical machine has been enrolled yet; second-node behavior is verified through a real isolated node process and real AI clients, not separate hardware.
 - Linux service installation is implemented but has not been run on a real Linux host.
 - Windows process execution and service installation are not implemented.
-- ADB discovery works through DEX//REACH, but real Android hardware control is not yet verified.
+- Real Android hardware has been verified through DEX//REACH on a Samsung SM-X910 using harmless wireless-ADB discovery and identity reads; destructive/device-mutating ADB behavior was not exercised.
 - Some local capabilities still come from the pinned Desktop Commander npm package through the compatibility adapter. The package has 26 raw internal tools; DEX currently exposes 22 remotely after withholding node-owned/vendor/history surfaces. The external Desktop Commander relay/app is not required by DEX//REACH.
 
 ---
