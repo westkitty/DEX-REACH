@@ -10,7 +10,8 @@ import {
   type AdmissionResult,
   type ReleaseResult,
   type WorkRequest,
-  type WorkStatus
+  type WorkStatus,
+  type WorkEventWindow
 } from '../shared/work-coordinator.js';
 
 const PROTOCOL_VERSION = 1;
@@ -98,4 +99,13 @@ export async function coordinatedCancel(id: string): Promise<boolean> {
 export async function coordinatedStatus(): Promise<WorkStatus> {
   const value = await callDaemon('status');
   return value === null ? workStatus() : object<WorkStatus>(value);
+}
+
+export async function coordinatedEvents(cursor = 0, limit = 100): Promise<WorkEventWindow> {
+  const value = await callDaemon('events', { cursor, limit });
+  if (value === null) {
+    const { readWorkEvents } = await import('../shared/work-coordinator.js');
+    return readWorkEvents(cursor, limit);
+  }
+  return object<WorkEventWindow>(value);
 }

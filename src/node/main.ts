@@ -38,6 +38,7 @@ import { loadTransportKeys } from './transport-keys.js';
 import { coordinatedStatus } from '../coordinator/client.js';
 import { redactWorkStatusForShare } from '../shared/work-coordinator.js';
 import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
+import { workspaceWorkerEligible, workspaceWorkerExecute, workspaceWorkerRootsHash } from '../shared/workspace-worker.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -127,6 +128,10 @@ async function executeOperation(operation: string, args: Record<string, unknown>
       justification: String(args.justification || ''),
       operation: typeof args.operation === 'string' ? args.operation : undefined
     });
+  }
+  if (workspaceWorkerEligible(operation, args)) {
+    const delegated = await workspaceWorkerExecute(config.nodeId, operation, args, workspaceWorkerRootsHash(config.allowedRoots));
+    if (delegated !== null) return delegated;
   }
   return nativeCall(config.nodeId, operation, args, config.allowedRoots, profile);
 }

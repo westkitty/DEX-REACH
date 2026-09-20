@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { machineStateDir } from './local-env.js';
 import { atomicWriteFile, withFileLock } from './state-io.js';
-import { collectExcludedPids, isDexServiceCommand, looksHeavy, parseProcessTable, type ProcessRow } from './machine-capacity.js';
+import { collectExcludedPids, dexServiceLabel, isDexServiceCommand, looksHeavy, parseProcessTable, type ProcessRow } from './machine-capacity.js';
 
 const execFileAsync = promisify(execFile);
 const MAX_ACTIVITY_RECORDS = 200;
@@ -220,7 +220,7 @@ export async function observeActivityProcesses(trackedPids: readonly number[] = 
     return {
       dexServices: rows.filter(row => isDexServiceCommand(row.command)).map(row => ({
         ...observation(row),
-        processLabel: /src\/gateway\/main\.(?:ts|js)/.test(row.command) ? 'gateway' : 'node'
+        processLabel: dexServiceLabel(row.command)
       })),
       uncoordinatedHeavy: rows.filter(row => !excluded.has(row.pid) && !isDexServiceCommand(row.command) && looksHeavy(row)).map(observation)
     };

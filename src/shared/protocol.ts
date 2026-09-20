@@ -54,6 +54,30 @@ export type AccessSnapshot = {
   clients: Partial<Record<ClientKind, AccessMode>>;
 };
 
+export type SchedulerEventSnapshot = {
+  cursor: number;
+  at: string;
+  event: string;
+  id?: string;
+  executor?: string;
+  access?: string;
+  workload?: string;
+  phase?: string | null;
+  reason?: string;
+  forced?: boolean;
+  observedUncoordinatedHeavy?: number;
+  dexServices?: number;
+};
+
+export type SchedulerBundleTotals = {
+  cpuUnits: number;
+  memoryMiB: number;
+  highIo: number;
+  heavyNetwork: number;
+  repositoryWrites: number;
+  machineExclusive: number;
+};
+
 /** Privacy-safe local scheduler data displayed to browser clients; no paths, PIDs or command text. */
 export type SchedulerSnapshot = {
   substantiveSlots: number;
@@ -61,6 +85,12 @@ export type SchedulerSnapshot = {
   activeLeases: number;
   queueDepth: number;
   queueLatencyMs: { oldest: number; p50: number; p95: number };
+  activeBundleTotals?: SchedulerBundleTotals;
+  queuedBundleTotals?: SchedulerBundleTotals;
+  eventCursor?: number;
+  eventWindowStartCursor?: number;
+  events?: SchedulerEventSnapshot[];
+  observationCache?: { hits: number; misses: number; hitRate: number };
   observedUncoordinatedHeavy: number;
   degraded: boolean;
 };

@@ -26,9 +26,12 @@ const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true,
 const MUTATE = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } as const;
 
 function text(value: unknown, traceId?: string) {
+  const result = { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
+  if (!traceId) return result;
   return {
-    content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
-    ...(traceId ? { _meta: { 'com.stinkyweasel.dexreach/trace-id': traceId } } : {})
+    ...result,
+    structuredContent: { dex_trace_id: traceId },
+    _meta: { 'dex-reach/trace-id': traceId }
   };
 }
 

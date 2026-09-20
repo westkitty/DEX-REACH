@@ -159,6 +159,8 @@ const PS_FIXTURE = `  PID  PPID %CPU %MEM     ELAPSED COMMAND
   101     1 92.4  8.1    01:20:11 node /opt/homebrew/bin/tsc -p tsconfig.json
   102     1  0.0  0.1    12:00:00 node /Users/owner/DEX-REACH/dist/src/gateway/main.js
   103     1  0.1  0.3 3-12:00:00 node /Users/owner/DEX-REACH/dist/src/node/main.js
+  108     1  0.0  0.1 3-12:00:00 node /Users/owner/DEX-REACH/dist/src/coordinator/main.js
+  109     1  0.0  0.1 3-12:00:00 node /Users/owner/DEX-REACH/dist/src/worker/main.js
   104     1 74.0 12.0    00:05:00 claude --dangerously-skip-permissions
   105   104 30.0  4.0    00:04:00 npm run verify
   106     1  0.0  0.0    00:00:02 npm ls
@@ -167,18 +169,20 @@ const PS_FIXTURE = `  PID  PPID %CPU %MEM     ELAPSED COMMAND
 
 test('process observation separates DEX services from anonymous heavy jobs', () => {
   const rows = parseProcessTable(PS_FIXTURE);
-  assert.equal(rows.length, 7);
+  assert.equal(rows.length, 9);
   assert.equal(rows[0]!.pid, 101);
   assert.equal(rows[0]!.command, 'node /opt/homebrew/bin/tsc -p tsconfig.json');
 
   const observed = classifyObservedWorkloads(rows, { selfPid: 999 });
-  // Persistent gateway/node services are services, not competing coding jobs.
-  assert.equal(observed.dexServices, 2);
+  // Persistent coordinator/worker/gateway/node services are services, not competing coding jobs.
+  assert.equal(observed.dexServices, 4);
   // tsc is one job; the Claude session and its npm child are one process tree; idle npm/Safari are not.
   assert.equal(observed.uncoordinatedHeavy, 2);
   assert.deepEqual(observed.uncoordinatedDetails?.map(item => item.pids), [[101], [104, 105]]);
 
   assert.equal(isDexServiceCommand('node /Users/owner/DEX-REACH/dist/src/node/main.js'), true);
+  assert.equal(isDexServiceCommand('node /Users/owner/DEX-REACH/dist/src/coordinator/main.js'), true);
+  assert.equal(isDexServiceCommand('node /Users/owner/DEX-REACH/dist/src/worker/main.js'), true);
   assert.equal(isDexServiceCommand('node /opt/homebrew/bin/tsc'), false);
   // The owner control CLI is a short-lived command, not a persistent service.
   assert.equal(isDexServiceCommand('node /Users/owner/DEX-REACH/dist/scripts/dex-reach.js work-status'), false);

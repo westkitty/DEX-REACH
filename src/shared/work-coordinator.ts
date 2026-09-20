@@ -32,6 +32,42 @@ export const LEASE_STALE_MS = 5 * HEARTBEAT_INTERVAL_MS;
 export const TICKET_STALE_MS = 5 * HEARTBEAT_INTERVAL_MS;
 /** Bounded history so coordination state cannot grow without limit. */
 export const HISTORY_LIMIT = 200;
+export const EVENT_PAGE_LIMIT = 100;
+
+export const WORK_EVENT_KINDS = [
+  'ticket-enqueued', 'lease-acquired', 'lease-released', 'lease-reclaimed',
+  'ticket-expired', 'ticket-cancelled', 'heartbeat', 'phase-progress',
+  'cache-hit', 'cache-miss', 'classifier-result', 'request-rejected'
+] as const;
+export type WorkEventKind = (typeof WORK_EVENT_KINDS)[number];
+
+export type WorkEvent = {
+  cursor: number;
+  at: string;
+  event: WorkEventKind;
+  id?: string;
+  executor?: WorkExecutor;
+  access?: AccessClass;
+  workload?: WorkloadClass;
+  phase?: string | null;
+  reason?: string;
+  forced?: boolean;
+  observedUncoordinatedHeavy?: number;
+  dexServices?: number;
+};
+
+export type WorkEventWindow = {
+  cursor: number;
+  startCursor: number;
+  events: WorkEvent[];
+  hasMore: boolean;
+};
+
+export type ObservationCacheMetrics = {
+  hits: number;
+  misses: number;
+  hitRate: number;
+};
 
 const MAX_LABEL_LENGTH = 64;
 
@@ -117,6 +153,8 @@ export type WorkStatus = {
   observed: ObservedWorkloads;
   degraded: boolean;
   degradedReasons: string[];
+  eventWindow: WorkEventWindow;
+  observationCache?: ObservationCacheMetrics;
 };
 
 // ---------------------------------------------------------------------------
@@ -137,6 +175,7 @@ export function leasesDir(): string { return path.join(coordinatorDir(), 'leases
 export function queueDir(): string { return path.join(coordinatorDir(), 'queue'); }
 export function historyFile(): string { return path.join(coordinatorDir(), 'history', 'events.jsonl'); }
 export function coordinatorLockFile(): string { return path.join(coordinatorDir(), 'coordinator.lock'); }
+export function historyLockFile(): string { return path.join(coordinatorDir(), 'history', 'events.lock'); }
 
 async function ensureLayout(): Promise<void> {
   for (const dir of [coordinatorDir(), leasesDir(), queueDir(), path.dirname(historyFile())]) {
@@ -299,14 +338,96 @@ function ticketIsStale(ticket: WorkQueueTicket, now = Date.now()): boolean {
   return age > TICKET_STALE_MS && !processAlive(ticket.pid);
 }
 
-async function appendHistory(event: Record<string, unknown>): Promise<void> {
-  const file = historyFile();
-  let lines: string[] = [];
+function safeEventId(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') throw new Error('work event id must be a string');
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(trimmed)) throw new Error('work event id is not a bounded identifier');
+  return trimmed;
+}
+
+function safeEventReason(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') throw new Error('work event reason must be a string');
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 96 || !/^[A-Za-z0-9._: -]+$/.test(trimmed)) throw new Error('work event reason is not a safe label');
+  return trimmed;
+}
+
+function validWorkEvent(raw: unknown): WorkEvent | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  if (!Number.isInteger(value.cursor) || Number(value.cursor) <= 0) return null;
+  if (typeof value.at !== 'string' || !Number.isFinite(Date.parse(value.at))) return null;
+  if (!(WORK_EVENT_KINDS as readonly unknown[]).includes(value.event)) return null;
   try {
-    lines = (await fs.readFile(file, 'utf8')).split('\n').filter(Boolean);
-  } catch { /* first event */ }
-  lines.push(JSON.stringify({ at: new Date().toISOString(), ...event }));
-  await atomicWriteFile(file, lines.slice(-HISTORY_LIMIT).join('\n') + '\n');
+    const event: WorkEvent = {
+      cursor: Number(value.cursor),
+      at: value.at,
+      event: value.event as WorkEventKind
+    };
+    const id = safeEventId(value.id); if (id) event.id = id;
+    if (value.executor !== undefined) {
+      if (!WORK_EXECUTORS.includes(value.executor as WorkExecutor)) return null;
+      event.executor = value.executor as WorkExecutor;
+    }
+    if (value.access !== undefined) {
+      if (!WORK_ACCESS_CLASSES.includes(value.access as AccessClass)) return null;
+      event.access = value.access as AccessClass;
+    }
+    if (value.workload !== undefined) {
+      if (!WORK_WORKLOAD_CLASSES.includes(value.workload as WorkloadClass)) return null;
+      event.workload = value.workload as WorkloadClass;
+    }
+    if (value.phase === null) event.phase = null;
+    else if (value.phase !== undefined) event.phase = sanitizeLabel(String(value.phase), 'phase') ?? null;
+    const reason = safeEventReason(value.reason); if (reason) event.reason = reason;
+    if (typeof value.forced === 'boolean') event.forced = value.forced;
+    if (Number.isInteger(value.observedUncoordinatedHeavy) && Number(value.observedUncoordinatedHeavy) >= 0) event.observedUncoordinatedHeavy = Number(value.observedUncoordinatedHeavy);
+    if (Number.isInteger(value.dexServices) && Number(value.dexServices) >= 0) event.dexServices = Number(value.dexServices);
+    return event;
+  } catch {
+    return null;
+  }
+}
+
+async function storedWorkEvents(): Promise<WorkEvent[]> {
+  try {
+    return (await fs.readFile(historyFile(), 'utf8')).split('\n').filter(Boolean)
+      .map(line => { try { return validWorkEvent(JSON.parse(line)); } catch { return null; } })
+      .filter((event): event is WorkEvent => Boolean(event))
+      .sort((a, b) => a.cursor - b.cursor);
+  } catch {
+    return [];
+  }
+}
+
+export async function recordWorkEvent(input: Omit<Partial<WorkEvent>, 'cursor' | 'at'> & { event: WorkEventKind }): Promise<WorkEvent> {
+  await ensureLayout();
+  return withFileLock(historyLockFile(), async () => {
+    const current = await storedWorkEvents();
+    const cursor = (current[current.length - 1]?.cursor ?? 0) + 1;
+    const candidate = validWorkEvent({ ...input, cursor, at: new Date().toISOString() });
+    if (!candidate) throw new Error('work event failed safe-field validation');
+    const next = [...current, candidate].slice(-HISTORY_LIMIT);
+    await atomicWriteFile(historyFile(), next.map(event => JSON.stringify(event)).join('\n') + '\n');
+    return candidate;
+  }, { timeoutMs: 5_000 });
+}
+
+export async function readWorkEvents(afterCursor = 0, limit = EVENT_PAGE_LIMIT): Promise<WorkEventWindow> {
+  const safeCursor = Number.isInteger(afterCursor) && afterCursor >= 0 ? afterCursor : 0;
+  const safeLimit = Number.isInteger(limit) ? Math.max(1, Math.min(limit, EVENT_PAGE_LIMIT)) : EVENT_PAGE_LIMIT;
+  const stored = await storedWorkEvents();
+  const latest = stored[stored.length - 1]?.cursor ?? 0;
+  const eligible = stored.filter(event => event.cursor > safeCursor);
+  const events = eligible.slice(0, safeLimit);
+  return {
+    cursor: latest,
+    startCursor: stored[0]?.cursor ?? latest,
+    events,
+    hasMore: eligible.length > events.length
+  };
 }
 
 async function writeLease(lease: WorkLease): Promise<void> {
@@ -324,7 +445,7 @@ async function pruneExpired(state: CoordinatorState, now = Date.now()): Promise<
   for (const lease of state.leases) {
     if (leaseIsReclaimable(lease, now)) {
       await removeLeaseFile(lease.id);
-      await appendHistory({ event: 'lease-reclaimed', id: lease.id, executor: lease.executor, reason: 'heartbeat expired and process absent' });
+      await recordWorkEvent({ event: 'lease-reclaimed', id: lease.id, executor: lease.executor, reason: 'heartbeat expired and process absent' });
     } else {
       leases.push(lease);
     }
@@ -333,7 +454,7 @@ async function pruneExpired(state: CoordinatorState, now = Date.now()): Promise<
   for (const ticket of state.tickets) {
     if (ticketIsStale(ticket, now)) {
       await removeTicketFile(ticket.id);
-      await appendHistory({ event: 'ticket-expired', id: ticket.id, executor: ticket.executor });
+      await recordWorkEvent({ event: 'ticket-expired', id: ticket.id, executor: ticket.executor });
     } else {
       tickets.push(ticket);
     }
@@ -496,7 +617,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
       };
       await writeLease(lease);
       if (request.ticketId) await removeTicketFile(request.ticketId);
-      await appendHistory({ event: 'lease-acquired', id: lease.id, executor, access, workload, phase: phase ?? null });
+      await recordWorkEvent({ event: 'lease-acquired', id: lease.id, executor, access, workload, phase: phase ?? null });
       return { status: 'acquired', lease, capacity: decision.capacity };
     }
 
@@ -517,7 +638,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
           heartbeatAt: now
         };
     await writeTicket(ticket);
-    if (!existing) await appendHistory({ event: 'ticket-enqueued', id: ticket.id, executor, access, workload });
+    if (!existing) await recordWorkEvent({ event: 'ticket-enqueued', id: ticket.id, executor, access, workload });
 
     const queue = existing ? state.tickets : [...state.tickets, ticket];
     const position = queue.findIndex(entry => entry.id === ticket.id) + 1;
@@ -542,7 +663,7 @@ export async function releaseWork(leaseId: string, options: { pid?: number; forc
       return { released: false, reason: `lease ${leaseId} belongs to live pid ${lease.pid}; use --force as the local owner to override` };
     }
     await removeLeaseFile(leaseId);
-    await appendHistory({ event: 'lease-released', id: leaseId, executor: lease.executor, forced: Boolean(options.force) });
+    await recordWorkEvent({ event: 'lease-released', id: leaseId, executor: lease.executor, forced: Boolean(options.force) });
     return { released: true };
   }, { timeoutMs: 15_000 });
 }
@@ -553,9 +674,31 @@ export async function heartbeat(id: string): Promise<boolean> {
     const state = await readCoordinatorState();
     const now = new Date().toISOString();
     const lease = state.leases.find(entry => entry.id === id);
-    if (lease) { await writeLease({ ...lease, heartbeatAt: now }); return true; }
+    if (lease) {
+      await writeLease({ ...lease, heartbeatAt: now });
+      await recordWorkEvent({
+        event: lease.phase ? 'phase-progress' : 'heartbeat',
+        id: lease.id,
+        executor: lease.executor,
+        access: lease.access,
+        workload: lease.workload,
+        phase: lease.phase ?? null
+      });
+      return true;
+    }
     const ticket = state.tickets.find(entry => entry.id === id);
-    if (ticket) { await writeTicket({ ...ticket, heartbeatAt: now }); return true; }
+    if (ticket) {
+      await writeTicket({ ...ticket, heartbeatAt: now });
+      await recordWorkEvent({
+        event: ticket.phase ? 'phase-progress' : 'heartbeat',
+        id: ticket.id,
+        executor: ticket.executor,
+        access: ticket.access,
+        workload: ticket.workload,
+        phase: ticket.phase ?? null
+      });
+      return true;
+    }
     return false;
   }, { timeoutMs: 15_000 });
 }
@@ -567,7 +710,7 @@ export async function cancelTicket(ticketId: string): Promise<boolean> {
     const state = await readCoordinatorState();
     if (!state.tickets.some(ticket => ticket.id === ticketId)) return false;
     await removeTicketFile(ticketId);
-    await appendHistory({ event: 'ticket-cancelled', id: ticketId });
+    await recordWorkEvent({ event: 'ticket-cancelled', id: ticketId });
     return true;
   }, { timeoutMs: 15_000 });
 }
@@ -583,7 +726,8 @@ export async function workStatus(options: { snapshot?: CapacitySnapshot } = {}):
     tickets: state.tickets,
     observed: snapshot.observed,
     degraded: state.degraded,
-    degradedReasons: state.degradedReasons
+    degradedReasons: state.degradedReasons,
+    eventWindow: await readWorkEvents(0, HISTORY_LIMIT)
   };
 }
 
@@ -591,9 +735,22 @@ export async function workStatus(options: { snapshot?: CapacitySnapshot } = {}):
  * Share-safe projection. Repository paths, branches, PIDs and host memory size are local details
  * and stay out of anything intended to leave the machine (DEX-INV-026).
  */
+function aggregateBundles(entries: Array<Pick<WorkLease, 'workload' | 'access' | 'bundle'>>): Record<string, number> {
+  const bundles = entries.map(entry => normalizeWorkBundle(entry.workload, entry.access, entry.bundle));
+  return {
+    cpuUnits: bundles.reduce((sum, bundle) => sum + bundle.cpuUnits, 0),
+    memoryMiB: bundles.reduce((sum, bundle) => sum + bundle.memoryMiB, 0),
+    highIo: bundles.filter(bundle => bundle.io === 'high').length,
+    heavyNetwork: bundles.filter(bundle => bundle.network === 'heavy').length,
+    repositoryWrites: bundles.filter(bundle => bundle.repositoryWrite).length,
+    machineExclusive: bundles.filter(bundle => bundle.machineExclusive).length
+  };
+}
+
 export function redactWorkStatusForShare(status: WorkStatus): Record<string, unknown> {
   const waits = status.tickets.map(ticket => Math.max(0, Date.now() - Date.parse(ticket.enqueuedAt))).sort((a, b) => a - b);
   const percentile = (fraction: number) => waits.length ? waits[Math.min(waits.length - 1, Math.floor((waits.length - 1) * fraction))]! : 0;
+  const recentEvents = status.eventWindow.events.slice(-32);
   return {
     substantiveSlots: status.capacity.substantiveSlots,
     heavySlots: status.capacity.heavySlots,
@@ -603,6 +760,12 @@ export function redactWorkStatusForShare(status: WorkStatus): Record<string, unk
     activeHeavy: status.capacity.activeHeavy,
     queueDepth: status.tickets.length,
     queueLatencyMs: { oldest: waits[waits.length - 1] ?? 0, p50: percentile(0.5), p95: percentile(0.95) },
+    activeBundleTotals: aggregateBundles(status.leases),
+    queuedBundleTotals: aggregateBundles(status.tickets),
+    eventCursor: status.eventWindow.cursor,
+    eventWindowStartCursor: recentEvents[0]?.cursor ?? status.eventWindow.cursor,
+    events: recentEvents,
+    ...(status.observationCache ? { observationCache: status.observationCache } : {}),
     observedUncoordinatedHeavy: status.observed.uncoordinatedHeavy,
     dexServices: status.observed.dexServices,
     degraded: status.degraded

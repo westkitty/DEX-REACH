@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { coordinatorSocketPath } from '../src/shared/work-coordinator.js';
-import { coordinatedStatus } from '../src/coordinator/client.js';
+import { coordinatedEvents, coordinatedStatus } from '../src/coordinator/client.js';
 
 async function socketCall(socketPath: string, request: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -50,6 +50,14 @@ test('coordinator daemon owns an account-private socket and rejects malformed fr
 
     const status = await coordinatedStatus();
     assert.equal(Array.isArray(status.leases), true);
+    assert.ok(status.eventWindow.cursor > 0);
+    assert.ok(status.observationCache && status.observationCache.misses >= 1);
+    const firstWindow = await coordinatedEvents(0, 100);
+    assert.ok(firstWindow.cursor >= status.eventWindow.cursor);
+    const nextStatus = await coordinatedStatus();
+    const resumed = await coordinatedEvents(firstWindow.cursor, 100);
+    assert.ok(nextStatus.eventWindow.cursor >= firstWindow.cursor);
+    assert.ok(resumed.events.every(event => event.cursor > firstWindow.cursor));
     const malformed = await socketCall(socketPath, '{not-json') as { ok: boolean; error?: string };
     assert.equal(malformed.ok, false);
     assert.match(malformed.error || '', /JSON|request/);

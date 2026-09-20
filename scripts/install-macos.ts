@@ -9,6 +9,7 @@ import { readEnvFile } from './lib/node-files.js';
 import { atomicWriteFile } from '../src/shared/state-io.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
 import { launchdOneShotPlist, launchdPlist, servicePath } from './lib/service.js';
+import { workspaceWorkerConfigFile, workspaceWorkerDir, workspaceWorkerRootsHash } from '../src/shared/workspace-worker.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -28,10 +29,25 @@ await fs.mkdir(logsDir, { recursive: true, mode: 0o700 });
 const ownerEnv = await readEnvFile(path.join(localStateDir, 'secrets.env')).catch((): Record<string, string> => ({}));
 const currentNodeId = process.env.DEX_REACH_NODE_ID || ownerEnv.DEX_REACH_NODE_ID || os.hostname().toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
 const nodeEnv = path.join(localStateDir, 'nodes', `${currentNodeId}.env`);
+const nodeSettings = await readEnvFile(nodeEnv);
+const workerNodeId = nodeSettings.DEX_REACH_NODE_ID || currentNodeId;
+const workerRoots = (nodeSettings.DEX_REACH_ALLOWED_ROOTS || os.homedir())
+  .split(path.delimiter).map(root => path.resolve(root.trim())).filter(Boolean);
+if (!workerRoots.length) throw new Error('workspace worker requires at least one configured node root');
+await fs.mkdir(workspaceWorkerDir(), { recursive: true, mode: 0o700 });
+await fs.chmod(workspaceWorkerDir(), 0o700);
+await atomicWriteFile(workspaceWorkerConfigFile(), JSON.stringify({
+  version: 1,
+  nodeId: workerNodeId,
+  allowedRoots: workerRoots,
+  rootsHash: workspaceWorkerRootsHash(workerRoots)
+}, null, 2) + '\n', 0o600);
+
 const services = [
-  { label: 'com.stinkyweasel.dex-reach.coordinator', entry: 'dist/src/coordinator/main.js', envFile: undefined },
-  { label: 'com.stinkyweasel.dex-reach.gateway', entry: 'dist/src/gateway/main.js', envFile: undefined },
-  { label: 'com.stinkyweasel.dex-reach.node', entry: 'dist/src/node/main.js', envFile: nodeEnv }
+  { label: 'com.stinkyweasel.dex-reach.coordinator', entry: 'dist/src/coordinator/main.js', envFile: undefined, stateDir: localStateDir },
+  { label: 'com.stinkyweasel.dex-reach.worker', entry: 'dist/src/worker/main.js', envFile: undefined, stateDir: undefined },
+  { label: 'com.stinkyweasel.dex-reach.gateway', entry: 'dist/src/gateway/main.js', envFile: undefined, stateDir: localStateDir },
+  { label: 'com.stinkyweasel.dex-reach.node', entry: 'dist/src/node/main.js', envFile: nodeEnv, stateDir: localStateDir }
 ].map(service => ({ ...service, target: path.join(agentsDir, `${service.label}.plist`) }));
 
 // Stage and syntax-check every LaunchAgent before replacing any live process. This matters when
@@ -42,7 +58,7 @@ for (const service of services) {
     label: service.label,
     entry: service.entry,
     envFile: service.envFile,
-    stateDir: localStateDir,
+    stateDir: service.stateDir,
     pathEnv,
     root,
     nodeBin,
@@ -94,6 +110,6 @@ await atomicWriteFile(installStatus, JSON.stringify({
 await execFileAsync('/bin/launchctl', ['bootstrap', domain, helperTarget]);
 
 console.log(`DEX//REACH ${DEX_REACH_VERSION} launchd definitions staged and validated.`);
-console.log(`Gateway/node reload delegated to one-shot helper ${helperLabel}.`);
+console.log(`DEX service reload delegated to one-shot helper ${helperLabel}.`);
 console.log(`Reload status: ${installStatus}`);
 console.log('The helper waits briefly so a DEX-hosted install can return before replacing its own transport.');

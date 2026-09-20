@@ -10,7 +10,10 @@ import {
   releaseWork,
   snapshotCapacity,
   workStatus,
+  readWorkEvents,
+  recordWorkEvent,
   type CapacitySnapshot,
+  type ObservationCacheMetrics,
   type WorkRequest
 } from '../shared/work-coordinator.js';
 import { classifyCpuPressure } from '../shared/machine-capacity.js';
@@ -22,6 +25,13 @@ type Command = 'status' | 'acquire' | 'heartbeat' | 'release' | 'cancel' | 'even
 type Request = { version: number; command: Command; payload?: Record<string, unknown> };
 type Response = { ok: true; value: unknown } | { ok: false; error: string };
 let cachedObservation: { at: number; snapshot: CapacitySnapshot } | null = null;
+let observationCacheHits = 0;
+let observationCacheMisses = 0;
+
+function observationCacheMetrics(): ObservationCacheMetrics {
+  const total = observationCacheHits + observationCacheMisses;
+  return { hits: observationCacheHits, misses: observationCacheMisses, hitRate: total ? observationCacheHits / total : 0 };
+}
 
 function safeError(error: unknown): string {
   const message = error instanceof Error ? error.message : 'coordinator request failed';
@@ -41,8 +51,19 @@ function invalidateObservation(): void { cachedObservation = null; }
 
 async function observedSnapshot(): Promise<CapacitySnapshot> {
   const cached = cachedObservation;
-  if (cached && Date.now() - cached.at < OBSERVATION_TTL_MS) return cached.snapshot;
+  if (cached && Date.now() - cached.at < OBSERVATION_TTL_MS) {
+    observationCacheHits += 1;
+    await recordWorkEvent({ event: 'cache-hit' }).catch(() => undefined);
+    return cached.snapshot;
+  }
+  observationCacheMisses += 1;
+  await recordWorkEvent({ event: 'cache-miss' }).catch(() => undefined);
   const snapshot = await snapshotCapacity();
+  await recordWorkEvent({
+    event: 'classifier-result',
+    observedUncoordinatedHeavy: snapshot.observed.uncoordinatedHeavy,
+    dexServices: snapshot.observed.dexServices
+  }).catch(() => undefined);
   // Never reuse a warning/busy sample: only an all-healthy measurement earns the short cache.
   if (snapshot.memory === 'healthy' && snapshot.thermal === 'healthy'
     && classifyCpuPressure(snapshot.loadAverage1m, snapshot.logicalCpuCount) === 'healthy'
@@ -54,8 +75,16 @@ async function observedSnapshot(): Promise<CapacitySnapshot> {
 
 async function execute(request: Request): Promise<unknown> {
   const payload = request.payload || {};
-  if (request.command === 'status') return workStatus({ snapshot: await observedSnapshot() });
-  if (request.command === 'events') return { cursor: null, events: [] };
+  if (request.command === 'status') {
+    return { ...(await workStatus({ snapshot: await observedSnapshot() })), observationCache: observationCacheMetrics() };
+  }
+  if (request.command === 'events') {
+    const cursor = payload.cursor === undefined ? 0 : Number(payload.cursor);
+    const limit = payload.limit === undefined ? 100 : Number(payload.limit);
+    if (!Number.isInteger(cursor) || cursor < 0) throw new Error('events cursor must be a non-negative integer');
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('events limit must be between 1 and 100');
+    return readWorkEvents(cursor, limit);
+  }
   if (request.command === 'acquire') {
     const raw = payload.request;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('acquire requires a request object');
@@ -117,7 +146,10 @@ async function main(): Promise<void> {
       void (async () => {
         let response: Response;
         try { response = { ok: true, value: await execute(safeRequest(JSON.parse(input.slice(0, newline)))) }; }
-        catch (error) { response = { ok: false, error: safeError(error) }; }
+        catch (error) {
+          await recordWorkEvent({ event: 'request-rejected', reason: 'invalid-request' }).catch(() => undefined);
+          response = { ok: false, error: safeError(error) };
+        }
         socket.end(JSON.stringify(response) + '\n');
       })();
     });

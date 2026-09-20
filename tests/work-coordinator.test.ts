@@ -22,6 +22,8 @@ import {
   looksLikeSecretMaterial,
   queueDir,
   readCoordinatorState,
+  readWorkEvents,
+  recordWorkEvent,
   redactWorkStatusForShare,
   releaseWork,
   sanitizeLabel,
@@ -447,6 +449,41 @@ test('share-mode status omits repository paths and other local detail', async ()
     // It still answers the operational question without exposing local detail.
     assert.match(shared, /"queueDepth":0/);
     assert.match(shared, /"activeLeases":1/);
+  });
+});
+
+test('progress history uses monotonic cursors and resumes without leaking local paths', async () => {
+  await withStateDir(async dir => {
+    const repo = path.join(dir, 'secret-repo');
+    await fs.mkdir(repo, { recursive: true });
+    const first = await recordWorkEvent({ event: 'cache-miss' });
+    const second = await recordWorkEvent({ event: 'classifier-result', observedUncoordinatedHeavy: 2, dexServices: 4 });
+    assert.equal(second.cursor, first.cursor + 1);
+
+    const page = await readWorkEvents(0, 1);
+    assert.equal(page.events.length, 1);
+    assert.equal(page.hasMore, true);
+    const resumed = await readWorkEvents(page.events[0]!.cursor, 100);
+    assert.equal(resumed.events[0]!.cursor, second.cursor);
+    assert.equal(resumed.hasMore, false);
+
+    const acquired = await acquireWork({
+      snapshot: HOST,
+      executor: 'chatgpt',
+      access: 'mutate',
+      workload: 'medium',
+      repositoryRoot: repo,
+      phase: 'event-proof'
+    });
+    assert.equal(acquired.status, 'acquired');
+    if (acquired.status === 'acquired') await heartbeat(acquired.lease.id);
+
+    const status = await workStatus({ snapshot: HOST });
+    const shared = JSON.stringify(redactWorkStatusForShare(status));
+    assert.match(shared, /\"eventCursor\":/);
+    assert.match(shared, /phase-progress/);
+    assert.doesNotMatch(shared, /secret-repo/);
+    assert.doesNotMatch(shared, new RegExp(String(process.pid)));
   });
 });
 

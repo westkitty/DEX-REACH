@@ -311,22 +311,28 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
     await connect();
 
     async function call(tool: string, args: Record<string, unknown>): Promise<LiveCallResult> {
-      const result = await client.callTool({ name: tool, arguments: args }) as {
-        isError?: boolean;
-        content?: unknown;
-        _meta?: Record<string, unknown>;
-      };
+      const result = await client.callTool({ name: tool, arguments: args }) as { isError?: boolean; content?: unknown; structuredContent?: unknown; _meta?: Record<string, unknown> };
       const content = Array.isArray(result.content) ? result.content : [];
       const texts = content
         .filter((item): item is { type: 'text'; text: string } => Boolean(item) && (item as { type?: string }).type === 'text' && typeof (item as { text?: unknown }).text === 'string')
         .map(item => item.text);
-      // The gateway carries the trace id in the result's `_meta`, which is where it belongs: a second
-      // text block would be joined into the payload by any client that concatenates content, which is
-      // what this harness itself used to do. Every text block is payload again, and the trace id is
-      // read from the single place the server writes it, shape-checked at the boundary.
-      const candidate = result._meta?.['com.stinkyweasel.dexreach/trace-id'];
-      const traceId = typeof candidate === 'string' && /^[0-9a-f]{32}$/.test(candidate) ? candidate : undefined;
-      return { ok: !result.isError, text: texts.join('\n'), ...(traceId ? { traceId } : {}) };
+      let traceId: string | undefined;
+      const structured = result.structuredContent as { dex_trace_id?: unknown } | undefined;
+      if (typeof structured?.dex_trace_id === 'string' && /^[0-9a-f]{32}$/.test(structured.dex_trace_id)) traceId = structured.dex_trace_id;
+      const metaTrace = result._meta?.['dex-reach/trace-id'];
+      if (!traceId && typeof metaTrace === 'string' && /^[0-9a-f]{32}$/.test(metaTrace)) traceId = metaTrace;
+      for (const extra of texts.slice(1)) {
+        try {
+          const parsed = JSON.parse(extra) as { dex_trace_id?: unknown };
+          if (typeof parsed.dex_trace_id === 'string' && /^[0-9a-f]{32}$/.test(parsed.dex_trace_id)) {
+            traceId = parsed.dex_trace_id;
+            break;
+          }
+        } catch {
+          // Additional text blocks may be human-readable metadata. The first text block remains payload.
+        }
+      }
+      return { ok: !result.isError, text: texts[0] ?? '', ...(traceId ? { traceId } : {}) };
     }
 
     async function migrateNodeToAsymmetric(nodeId: string): Promise<{ authMode: string; privateKeyRefused: boolean }> {

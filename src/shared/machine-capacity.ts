@@ -395,7 +395,10 @@ const HEAVY_COMMAND_PATTERNS: readonly RegExp[] = [
  * `dex-reach` control CLI is an ordinary short-lived command, not a service.
  */
 const DEX_SERVICE_PATTERNS: readonly RegExp[] = [
-  /src\/gateway\/main\.(ts|js)/, /src\/node\/main\.(ts|js)/
+  /src\/coordinator\/main\.(ts|js)/,
+  /src\/worker\/main\.(ts|js)/,
+  /src\/gateway\/main\.(ts|js)/,
+  /src\/node\/main\.(ts|js)/
 ];
 
 /**
@@ -408,6 +411,13 @@ const DESKTOP_HELPER_TYPE_PATTERN = /(?:^|\s)--type=(?:renderer|gpu-process|util
 
 export function isDexServiceCommand(command: string): boolean {
   return DEX_SERVICE_PATTERNS.some(pattern => pattern.test(command));
+}
+
+export function dexServiceLabel(command: string): 'coordinator' | 'worker' | 'gateway' | 'node' {
+  if (/src\/coordinator\/main\.(?:ts|js)/.test(command)) return 'coordinator';
+  if (/src\/worker\/main\.(?:ts|js)/.test(command)) return 'worker';
+  if (/src\/gateway\/main\.(?:ts|js)/.test(command)) return 'gateway';
+  return 'node';
 }
 
 /** Bounded executable identity for local status; never expose the raw process command or arguments. */
@@ -497,7 +507,7 @@ export function classifyObservedWorkloads(
   }).sort((a, b) => a.pid - b.pid);
   const dexServiceDetails = rows.filter(row => isDexServiceCommand(row.command)).map((row): ObservedProcess => ({
     pid: row.pid, pids: [row.pid], cpu: row.cpu, mem: row.mem,
-    processLabel: /src\/gateway\/main\.(?:ts|js)/.test(row.command) ? 'gateway' : 'node', matchedBy: row.cpu >= 10 ? 'cpu' : 'memory'
+    processLabel: dexServiceLabel(row.command), matchedBy: row.cpu >= 10 ? 'cpu' : 'memory'
   }));
   return { uncoordinatedHeavy: uncoordinatedDetails.length, dexServices: dexServiceDetails.length, uncoordinatedDetails, dexServiceDetails };
 }

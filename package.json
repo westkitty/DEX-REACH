@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "gateway": "tsx src/gateway/main.ts",
     "coordinator": "tsx src/coordinator/main.ts",
+    "worker": "tsx src/worker/main.ts",
     "node": "tsx src/node/main.ts",
     "probe:backend": "tsx scripts/probe-backend.ts",
     "bootstrap": "tsx scripts/bootstrap.ts",
