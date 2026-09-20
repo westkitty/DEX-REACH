@@ -11,6 +11,7 @@ import { workspaceSafeOperationRefusal } from '../shared/profiles.js';
 import { stateDir } from '../shared/local-env.js';
 import { NO_SECRETS, requestedSecretAliases, resolveSecrets, scrubSecretValues, secretInjectionRefusal, type ResolvedSecrets } from '../shared/secrets.js';
 import { describeOperation } from '../shared/operations.js';
+import { finishProcessActivity, startProcessActivity } from '../shared/activity.js';
 
 const execFileAsync = promisify(execFile);
 const SENSITIVE_ENV_KEY = /(^DEX_REACH_(?:NODE_TOKEN|OWNER_PASSWORD|ENV_FILE)$|TOKEN|PASSWORD|PASSWD|SECRET|AUTHORIZATION|COOKIE|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)/i;
@@ -157,20 +158,32 @@ export async function nativeProcess(
   // silently merged with, something inherited from the node process.
   const env = { ...safeChildEnvironment(), ...secrets.env };
   const scrub = (text: string) => scrubSecretValues(redactKnownEnvironmentSecrets(text), secrets.values);
-  try {
-    const { stdout, stderr } = readonly
-      ? await execFileAsync(readonly.program, readonly.args, { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env })
-      : await execFileAsync(shell!, ['-lc', command], { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env });
-    return { exitCode: 0, stdout: scrub(stdout), stderr: scrub(stderr), secretsUsed: secrets.aliases };
-  } catch (error) {
-    const value = error as Error & { code?: number; stdout?: string; stderr?: string };
-    return {
-      exitCode: typeof value.code === 'number' ? value.code : 1,
-      stdout: scrub(value.stdout || ''),
-      stderr: scrub(value.stderr || value.message),
-      secretsUsed: secrets.aliases
-    };
-  }
+  const program = readonly ? readonly.program : shell!;
+  const childArgs = readonly ? readonly.args : ['-lc', command];
+  return new Promise(resolve => {
+    const child = execFile(program, childArgs, { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env }, async (error, stdout, stderr) => {
+      const activity = await activityPromise.catch(() => null);
+      if (!error) {
+        if (activity) await finishProcessActivity(activity.id, 'completed', 0).catch(() => undefined);
+        resolve({ exitCode: 0, stdout: scrub(stdout), stderr: scrub(stderr), secretsUsed: secrets.aliases });
+        return;
+      }
+      const value = error as Error & { code?: number | string; killed?: boolean; stdout?: string; stderr?: string };
+      const exitCode = typeof value.code === 'number' ? value.code : 1;
+      if (activity) {
+        await finishProcessActivity(activity.id, value.killed ? 'timed-out' : 'failed', exitCode).catch(() => undefined);
+      }
+      resolve({
+        exitCode,
+        stdout: scrub(value.stdout || stdout || ''),
+        stderr: scrub(value.stderr || stderr || value.message),
+        secretsUsed: secrets.aliases
+      });
+    });
+    const activityPromise = child.pid
+      ? startProcessActivity({ kind: 'native-process', pid: child.pid, operation: 'dex.process.run', command, cwd })
+      : Promise.resolve(null);
+  });
 }
 
 /**

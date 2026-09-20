@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { Client, StreamableHTTPClientTransport, UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/client';
+import { Client, StreamableHTTPClientTransport, UnauthorizedError, type OAuthClientProvider, type OAuthDiscoveryState } from '@modelcontextprotocol/client';
 import type { OAuthClientInformationFull, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/server';
 import { DEX_REACH_VERSION } from '../../src/shared/version.js';
 
@@ -67,6 +67,10 @@ export type LivePair = {
   migrateNodeToAsymmetric(nodeId: string): Promise<{ authMode: string; privateKeyRefused: boolean }>;
   /** Connect a raw websocket with a bearer token, to show what the gateway now refuses. */
   bearerConnectRefused(nodeId: string): Promise<string>;
+  /** Complete the owner-approval leg for an external real client without exposing owner credentials. */
+  approveAuthorizationUrl(url: URL | string): Promise<string>;
+  /** Run the literal repository golden gate against this isolated pair without exporting owner credentials. */
+  runGoldenVerification(): Promise<string>;
   stop(): Promise<void>;
 };
 
@@ -138,6 +142,7 @@ class LiveOAuthProvider implements OAuthClientProvider {
   private info?: OAuthClientInformationFull;
   private saved?: OAuthTokens;
   private verifier?: string;
+  private discovery?: OAuthDiscoveryState;
   authorizationUrl?: URL;
   constructor(private readonly callback: string) {}
   get redirectUrl(): string { return this.callback; }
@@ -156,6 +161,8 @@ class LiveOAuthProvider implements OAuthClientProvider {
   saveTokens(value: OAuthTokens): void { this.saved = value; }
   redirectToAuthorization(url: URL): void { this.authorizationUrl = url; }
   saveCodeVerifier(value: string): void { this.verifier = value; }
+  saveDiscoveryState(value: OAuthDiscoveryState): void { this.discovery = structuredClone(value); }
+  discoveryState(): OAuthDiscoveryState | undefined { return this.discovery ? structuredClone(this.discovery) : undefined; }
   codeVerifier(): string {
     if (!this.verifier) throw new Error('missing PKCE verifier');
     return this.verifier;
@@ -265,7 +272,11 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
     }
     await waitForNodeCount((options.nodeIds ?? ['proof-node-a']).length);
 
-    async function authorize(url: URL): Promise<URLSearchParams> {
+    async function approveAuthorizationUrl(input: URL | string): Promise<string> {
+      const url = typeof input === 'string' ? new URL(input) : input;
+      if (url.origin !== baseUrl.origin || url.pathname !== '/authorize') {
+        throw new Error('external authorization URL does not target this live pair');
+      }
       const page = await fetch(url);
       const html = await page.text();
       const ticket = html.match(/name="ticket" value="([^"]+)"/)?.[1];
@@ -278,9 +289,13 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
       });
       const location = approval.headers.get('location');
       if (!location) throw new Error(`owner approval did not redirect (status ${approval.status})`);
+      return location;
+    }
+
+    async function authorize(url: URL): Promise<URLSearchParams> {
       // The whole response, so the SDK can apply RFC 9207. Handing it a bare code would silently
       // disable exactly the check that found the defect this harness exists to catch.
-      return new URL(location).searchParams;
+      return new URL(await approveAuthorizationUrl(url)).searchParams;
     }
 
     async function connect(): Promise<void> {
@@ -330,6 +345,33 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
       return { authMode: body.authMode ?? 'unknown', privateKeyRefused };
     }
 
+    async function runGoldenVerification(): Promise<string> {
+      const nodeId = (options.nodeIds ?? ['proof-node-a'])[0]!;
+      const ownerFile = path.join(stateDir, 'secrets.env');
+      const safeEnv: NodeJS.ProcessEnv = { ...baseEnv, DEX_REACH_NODE_ID: nodeId };
+      delete safeEnv.DEX_REACH_OWNER_USER;
+      delete safeEnv.DEX_REACH_OWNER_PASSWORD;
+      // Keep the proof credential outside argv/logs and out of all verify children. smoke.ts
+      // deliberately loads the owner file only when the golden command reaches its smoke stage.
+      await fs.writeFile(
+        ownerFile,
+        'DEX_REACH_OWNER_USER=' + ownerUser + '\n' +
+          'DEX_REACH_OWNER_PASSWORD=' + ownerPassword + '\n',
+        { mode: 0o600 }
+      );
+      try {
+        const result = await execFileAsync('npm', ['run', 'verify:golden'], {
+          cwd: repoRoot,
+          env: safeEnv,
+          timeout: 15 * 60 * 1000,
+          maxBuffer: 32 * 1024 * 1024
+        });
+        return [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+      } finally {
+        await fs.rm(ownerFile, { force: true }).catch(() => undefined);
+      }
+    }
+
     async function bearerConnectRefused(nodeId: string): Promise<string> {
       const values = await readEnvFile(path.join(stateDir, 'nodes', `${nodeId}.env`));
       const { default: WebSocket } = await import('ws');
@@ -349,7 +391,7 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
       call, nodeCli, dexCli,
       onlineNodeCount: async () => (await health()).onlineNodes,
       waitForNodeCount, startNode, stopNode, migrateNodeToAsymmetric, bearerConnectRefused,
-      stop
+      approveAuthorizationUrl, runGoldenVerification, stop
     };
   } catch (error) {
     await stop();

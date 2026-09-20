@@ -15,6 +15,7 @@ import {
   decodeAdapterManifest
 } from '../../shared/adapter-contract.js';
 import { DESKTOP_COMMANDER_MANIFEST_DATA } from './desktop-commander.manifest.js';
+import { finishProcessActivityByPid, startProcessActivity, touchProcessActivityByPid } from '../../shared/activity.js';
 
 /**
  * The Desktop Commander capability adapter.
@@ -32,6 +33,20 @@ function compatibilityEnvironment(home: string): Record<string, string> {
   const base = getDefaultEnvironment();
   const safe = Object.fromEntries(Object.entries(base).filter(([key]) => !SENSITIVE_ENV_KEY.test(key)));
   return { ...safe, HOME: home, USER: os.userInfo().username };
+}
+
+function activityText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(activityText).join(' ');
+  if (!value || typeof value !== 'object') return '';
+  return Object.values(value as Record<string, unknown>).map(activityText).join(' ');
+}
+
+function activityPid(value: unknown): number | null {
+  const match = /\bPID\s+(\d+)\b/i.exec(activityText(value));
+  if (!match) return null;
+  const pid = Number.parseInt(match[1]!, 10);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
 }
 
 function findConfig(value: unknown): Record<string, unknown> | null {
@@ -157,6 +172,28 @@ export class DesktopCommanderAdapter {
         ? result.content.map(item => 'text' in item ? item.text : JSON.stringify(item)).join(' ')
         : JSON.stringify(result);
       throw new Error(`compatibility backend ${name} failed: ${message}`);
+    }
+
+    // Process visibility is evidence, not authority. Activity bookkeeping is deliberately best-effort:
+    // a local activity-store problem must never change whether an already-authorized adapter call runs.
+    try {
+      if (name === 'start_process') {
+        const pid = activityPid(result);
+        if (pid) {
+          await startProcessActivity({
+            kind: 'compat-process',
+            pid,
+            operation: 'compat.start_process',
+            command: typeof args.command === 'string' ? args.command : 'process'
+          });
+        }
+      } else if ((name === 'read_process_output' || name === 'interact_with_process') && typeof args.pid === 'number') {
+        await touchProcessActivityByPid(args.pid);
+      } else if ((name === 'force_terminate' || name === 'kill_process') && typeof args.pid === 'number') {
+        await finishProcessActivityByPid(args.pid, 'terminated');
+      }
+    } catch {
+      // The operation result remains authoritative; owner-visible activity is secondary evidence.
     }
     return result;
   }

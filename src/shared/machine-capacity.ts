@@ -2,6 +2,8 @@ import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
+import path from 'node:path';
+import type { CapacityProfile } from './capacity-profile.js';
 
 const execFileAsync = promisify(execFile);
 const GIB = 1024 ** 3;
@@ -30,6 +32,18 @@ export type ObservedWorkloads = {
   uncoordinatedHeavy: number;
   /** Long-running DEX gateway/node services. They consume host resources but are not coding jobs. */
   dexServices: number;
+  /** Ephemeral, local-only explanations for the current classification; command arguments are never retained. */
+  uncoordinatedDetails?: ObservedProcess[];
+  dexServiceDetails?: ObservedProcess[];
+};
+
+export type ObservedProcess = {
+  pid: number;
+  pids: number[];
+  cpu: number;
+  mem: number;
+  processLabel: string;
+  matchedBy: 'cpu' | 'memory';
 };
 
 export type MachineCapacity = {
@@ -38,6 +52,8 @@ export type MachineCapacity = {
 
   substantiveSlots: number;
   heavySlots: number;
+  profile: CapacityProfile;
+  interactiveReady: boolean;
 
   livePressure: {
     memory: MemoryPressure;
@@ -90,6 +106,18 @@ export function substantiveSlotsFor(physicalMemoryBytes: number, logicalCpuCount
   return Math.max(1, Math.min(memorySubstantiveSlots(physicalMemoryBytes), cpuSubstantiveSlots(logicalCpuCount)));
 }
 
+/** Interactive mode expands only a one-slot host after the owner-selected sustained-health gate. */
+export function substantiveSlotsForProfile(
+  physicalMemoryBytes: number,
+  logicalCpuCount: number,
+  profile: CapacityProfile = 'conservative',
+  interactiveReady = false
+): number {
+  const base = substantiveSlotsFor(physicalMemoryBytes, logicalCpuCount);
+  if (profile === 'interactive' && interactiveReady && base === 1 && physicalMemoryBytes >= 8 * GIB && logicalCpuCount >= 4) return 2;
+  return base;
+}
+
 export function heavySlotsFor(physicalMemoryBytes: number, logicalCpuCount: number): number {
   return Math.max(1, Math.min(memoryHeavySlots(physicalMemoryBytes), substantiveSlotsFor(physicalMemoryBytes, logicalCpuCount)));
 }
@@ -114,9 +142,11 @@ export function isSubstantive(workload: WorkloadClass, access: AccessClass): boo
 export function evaluateCapacity(
   probe: Pick<HostProbe, 'physicalMemoryBytes' | 'logicalCpuCount' | 'loadAverage1m' | 'memory' | 'thermal'>,
   counts: CapacityCounts,
-  request?: { workload: WorkloadClass; access: AccessClass }
+  request?: { workload: WorkloadClass; access: AccessClass; profile?: CapacityProfile; interactiveReady?: boolean }
 ): MachineCapacity {
-  const substantiveSlots = substantiveSlotsFor(probe.physicalMemoryBytes, probe.logicalCpuCount);
+  const profile = request?.profile ?? 'conservative';
+  const interactiveReady = request?.interactiveReady ?? false;
+  const substantiveSlots = substantiveSlotsForProfile(probe.physicalMemoryBytes, probe.logicalCpuCount, profile, interactiveReady);
   const heavySlots = heavySlotsFor(probe.physicalMemoryBytes, probe.logicalCpuCount);
   const cpu = classifyCpuPressure(probe.loadAverage1m, probe.logicalCpuCount);
   const reasons: string[] = [];
@@ -133,6 +163,8 @@ export function evaluateCapacity(
       logicalCpuCount: probe.logicalCpuCount,
       substantiveSlots,
       heavySlots,
+      profile,
+      interactiveReady,
       livePressure: { memory: probe.memory, cpu, thermal: probe.thermal },
       activeCoordinated: counts.activeSubstantive,
       activeHeavy: counts.activeHeavy,
@@ -149,6 +181,7 @@ export function evaluateCapacity(
         (counts.observedUncoordinatedHeavy > 0 ? `, including ${counts.observedUncoordinatedHeavy} uncoordinated heavy workload(s)` : '') +
         ')'
     );
+    if (profile === 'interactive' && !interactiveReady) reasons.push('interactive profile is warming; sustained healthy observations are required');
   }
   if (heavy && counts.activeHeavy >= heavySlots) {
     reasons.push(`heavy slots exhausted (${counts.activeHeavy}/${heavySlots})`);
@@ -173,6 +206,8 @@ export function evaluateCapacity(
     logicalCpuCount: probe.logicalCpuCount,
     substantiveSlots,
     heavySlots,
+    profile,
+    interactiveReady,
     livePressure: { memory: probe.memory, cpu, thermal: probe.thermal },
     activeCoordinated: counts.activeSubstantive,
     activeHeavy: counts.activeHeavy,
@@ -375,6 +410,13 @@ export function isDexServiceCommand(command: string): boolean {
   return DEX_SERVICE_PATTERNS.some(pattern => pattern.test(command));
 }
 
+/** Bounded executable identity for local status; never expose the raw process command or arguments. */
+export function safeProcessLabel(command: string): string {
+  const token = command.trim().match(/^([^\s]+)/)?.[1] ?? '';
+  const base = path.basename(token);
+  return /^[A-Za-z0-9._+:-]{1,48}$/.test(base) ? base : 'process';
+}
+
 export function looksHeavy(row: ProcessRow): boolean {
   if (isDexServiceCommand(row.command)) return false;
   if (DESKTOP_HELPER_TYPE_PATTERN.test(row.command)) return false;
@@ -435,20 +477,37 @@ export function classifyObservedWorkloads(
   options: { leasedPids?: readonly number[]; selfPid?: number } = {}
 ): ObservedWorkloads {
   const excluded = collectExcludedPids(rows, options);
-  let uncoordinatedHeavy = 0;
-  let dexServices = 0;
-
-  for (const row of rows) {
-    if (isDexServiceCommand(row.command)) { dexServices += 1; continue; }
-    if (excluded.has(row.pid)) continue;
-    if (looksHeavy(row)) uncoordinatedHeavy += 1;
-  }
-  return { uncoordinatedHeavy, dexServices };
+  const byPid = new Map(rows.map(row => [row.pid, row]));
+  const heavy = rows.filter(row => !excluded.has(row.pid) && !isDexServiceCommand(row.command) && looksHeavy(row));
+  const heavyPids = new Set(heavy.map(row => row.pid));
+  const rootFor = (row: ProcessRow): number => {
+    let root = row;
+    let parent = byPid.get(root.ppid);
+    let guard = 0;
+    while (parent && heavyPids.has(parent.pid) && guard++ < 64) { root = parent; parent = byPid.get(root.ppid); }
+    return root.pid;
+  };
+  const groups = new Map<number, ProcessRow[]>();
+  for (const row of heavy) groups.set(rootFor(row), [...(groups.get(rootFor(row)) ?? []), row]);
+  const uncoordinatedDetails = [...groups.entries()].map(([pid, group]): ObservedProcess => {
+    const root = byPid.get(pid) ?? group[0]!;
+    const cpu = Math.max(...group.map(row => row.cpu));
+    const mem = Math.max(...group.map(row => row.mem));
+    return { pid, pids: group.map(row => row.pid).sort((a, b) => a - b), cpu, mem, processLabel: safeProcessLabel(root.command), matchedBy: cpu >= 10 ? 'cpu' : 'memory' };
+  }).sort((a, b) => a.pid - b.pid);
+  const dexServiceDetails = rows.filter(row => isDexServiceCommand(row.command)).map((row): ObservedProcess => ({
+    pid: row.pid, pids: [row.pid], cpu: row.cpu, mem: row.mem,
+    processLabel: /src\/gateway\/main\.(?:ts|js)/.test(row.command) ? 'gateway' : 'node', matchedBy: row.cpu >= 10 ? 'cpu' : 'memory'
+  }));
+  return { uncoordinatedHeavy: uncoordinatedDetails.length, dexServices: dexServiceDetails.length, uncoordinatedDetails, dexServiceDetails };
 }
 
-export async function observeWorkloads(options: { leasedPids?: readonly number[] } = {}): Promise<ObservedWorkloads> {
+export async function observeProcessRows(): Promise<ProcessRow[]> {
   const args = process.platform === 'darwin' ? ['-axo', 'pid,ppid,%cpu,%mem,etime,command'] : ['-eo', 'pid,ppid,%cpu,%mem,etime,args'];
   const stdout = await runProbe('ps', args);
-  if (!stdout) return { uncoordinatedHeavy: 0, dexServices: 0 };
-  return classifyObservedWorkloads(parseProcessTable(stdout), options);
+  return stdout ? parseProcessTable(stdout) : [];
+}
+
+export async function observeWorkloads(options: { leasedPids?: readonly number[]; rows?: readonly ProcessRow[] } = {}): Promise<ObservedWorkloads> {
+  return classifyObservedWorkloads(options.rows ?? await observeProcessRows(), options);
 }

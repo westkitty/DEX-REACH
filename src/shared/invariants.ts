@@ -51,7 +51,9 @@ export const DEX_RELEASE_INVARIANTS: readonly ReleaseInvariant[] = [
   { id: 'DEX-INV-036', capability: 'Evidence bundles are portable, content-free, and never claim more than they prove', evidenceClass: 'regression' },
   { id: 'DEX-INV-037', capability: 'A release is a function of tracked source at one commit, and says what it does not prove', evidenceClass: 'regression' },
   { id: 'DEX-INV-038', capability: 'A proof run records only what it observed, and absent hardware is never a pass', evidenceClass: 'mixed' },
-  { id: 'DEX-INV-039', capability: 'The gateway never advertises an authorization behaviour it does not perform', evidenceClass: 'mixed' }
+  { id: 'DEX-INV-039', capability: 'The gateway never advertises an authorization behaviour it does not perform', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-040', capability: 'Owner-visible activity identifies DEX-owned processes without persisting command content', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-041', capability: 'Machine coordination and activity have one namespace per OS account', evidenceClass: 'mixed' }
 ] as const;
 
 export function invariantManifest() {

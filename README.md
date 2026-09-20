@@ -60,6 +60,7 @@ A node can be locally set to `off`, `read-only`, or `on`; access can be temporar
 | Linux systemd path | **Implemented, not yet tested on a real Linux host** |
 | Windows process execution | **Not supported yet** |
 | Android ADB discovery | **Verified** — deployed node sees the ADB binary; no Android hardware is currently attached, so device-control proof remains pending |
+| Owner activity ledger | **Implemented on expansion branch** — source CLI distinguishes DEX-owned processes, coordination claims, DEX services, queued work, and anonymous heavy blockers; not installed on primary runtime yet |
 
 For the detailed evidence, current limitations, and exact verification matrix, read [`OPERATIONAL_STATE.md`](OPERATIONAL_STATE.md).
 
@@ -161,6 +162,9 @@ npm run dex -- policy-check
 npm run dex -- doctor
 npm run dex -- doctor --json --deep
 npm run dex -- doctor --share
+npm run dex -- activity
+npm run dex -- activity --watch
+npm run dex -- activity --history
 npm run dex -- assertions
 npm run dex -- assertion add chatgpt --forbid process.shell --note "ChatGPT must never have shell"
 npm run dex -- policy-history
@@ -233,6 +237,8 @@ Jobs that carry no lease are still counted. Another agent's build or test run is
 
 **What a lease is not.** A lease answers *can this run now?* It never answers *is this allowed?* Holding one grants no filesystem, process, or network authority and does not bypass OFF, READ-ONLY, client ceilings, grants, roots, budgets, or plan rules. A job can be authorized and still queued, and it can have machine capacity and still be refused. Both checks must pass. A lease record contains only coordination metadata — no prompts, no conversation content, no command output, no credentials — and lives under `~/.dex-reach/coordinator/`, outside Git.
 
+**One machine, one coordination namespace.** Compatibility adapters intentionally run with an isolated `HOME` so their own configuration cannot pollute or mutate owner state. Coordinator and activity evidence do **not** follow that virtual HOME: unless `DEX_REACH_STATE_DIR` explicitly selects an isolated test/proof root, they resolve from the real OS account home. That keeps every execution path on one physical account in the same capacity/activity view while leaving authority-bearing policy, credentials, and secrets on their existing isolated state semantics.
+
 **Staleness.** A lease heartbeats about every 30 seconds and becomes reclaimable only after several missed heartbeats *and* the recorded process being gone. Reclaiming means the coordination claim expired; it never terminates another process. A live process is never evicted for being slow. If your workflow has no long-lived process to name with `--pid`, heartbeat the lease or it expires after about two and a half minutes.
 
 If coordinator state is unreadable or corrupt, admission falls back to a single substantive job rather than unlimited concurrency, and `work-status` reports the problem so the owner can repair it.
@@ -240,6 +246,27 @@ If coordinator state is unreadable or corrupt, admission falls back to a single 
 Waiting in the queue is a normal outcome, not a failure.
 
 ---
+
+### Owner-visible activity
+
+The coordinator answers whether work may run; the activity ledger answers what DEX is actually doing.
+
+```bash
+npm run dex -- activity
+npm run dex -- activity --watch
+npm run dex -- activity --history
+npm run dex -- activity --json
+npm run dex -- activity --share
+```
+
+The live view keeps four categories separate:
+
+- **DEX-owned processes** — native process execution uses the actual spawned child PID; compatibility `start_process` uses the PID returned by the adapter.
+- **Coordinated work** — leases and queue tickets show which agent/project/phase owns capacity. A lease acquired without an explicit `--pid` is labelled **workload PID unbound** instead of pretending the short-lived acquisition CLI is the workload.
+- **DEX services** — the persistent gateway and node processes are shown separately.
+- **Heavy processes not owned by DEX** — process-table observations that consume capacity but are not attributable to a DEX activity remain explicitly anonymous/unowned.
+
+Persistent activity evidence stores bounded process identity and lifecycle metadata only. Raw commands, command arguments, prompts, transcripts, stdout/stderr and credentials are not stored. `--share` removes local PIDs and paths. Activity is evidence only: it does not grant authority or bypass owner policy.
 
 ## Execution Profiles
 

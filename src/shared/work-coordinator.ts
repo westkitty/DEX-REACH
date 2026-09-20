@@ -2,18 +2,21 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { stateDir } from './local-env.js';
+import { machineStateDir } from './local-env.js';
 import { atomicWriteFile, withFileLock } from './state-io.js';
 import {
   type AccessClass,
   type MachineCapacity,
   type ObservedWorkloads,
   type WorkloadClass,
+  classifyCpuPressure,
+  classifyObservedWorkloads,
   evaluateCapacity,
   isSubstantive,
-  observeWorkloads,
+  observeProcessRows,
   probeHost
 } from './machine-capacity.js';
+import { recordCapacityHealth, type CapacityProfile } from './capacity-profile.js';
 
 export const WORK_EXECUTORS = ['claude-code', 'chatgpt', 'codex', 'grok', 'human', 'other'] as const;
 export type WorkExecutor = (typeof WORK_EXECUTORS)[number];
@@ -40,6 +43,7 @@ export type WorkLease = {
   id: string;
   pid: number;
   parentPid?: number;
+  pidIsWorkload?: boolean;
   executor: WorkExecutor;
   repositoryRoot?: string;
   branch?: string;
@@ -53,6 +57,7 @@ export type WorkLease = {
 export type WorkQueueTicket = {
   id: string;
   pid: number;
+  pidIsWorkload?: boolean;
   executor: WorkExecutor;
   repositoryRoot?: string;
   access: AccessClass;
@@ -64,10 +69,10 @@ export type WorkQueueTicket = {
 
 /** Exact persisted key sets. Anything else is dropped on write and ignored on read. */
 export const LEASE_FIELDS: readonly (keyof WorkLease)[] = [
-  'id', 'pid', 'parentPid', 'executor', 'repositoryRoot', 'branch', 'access', 'workload', 'phase', 'createdAt', 'heartbeatAt'
+  'id', 'pid', 'parentPid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'branch', 'access', 'workload', 'phase', 'createdAt', 'heartbeatAt'
 ];
 export const TICKET_FIELDS: readonly (keyof WorkQueueTicket)[] = [
-  'id', 'pid', 'executor', 'repositoryRoot', 'access', 'workload', 'phase', 'enqueuedAt', 'heartbeatAt'
+  'id', 'pid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'access', 'workload', 'phase', 'enqueuedAt', 'heartbeatAt'
 ];
 
 export type WorkRequest = {
@@ -114,7 +119,7 @@ export type WorkStatus = {
 // Paths
 // ---------------------------------------------------------------------------
 
-export function coordinatorDir(): string { return path.join(stateDir(), 'coordinator'); }
+export function coordinatorDir(): string { return path.join(machineStateDir(), 'coordinator'); }
 export function leasesDir(): string { return path.join(coordinatorDir(), 'leases'); }
 export function queueDir(): string { return path.join(coordinatorDir(), 'queue'); }
 export function historyFile(): string { return path.join(coordinatorDir(), 'history', 'events.jsonl'); }
@@ -332,6 +337,9 @@ export type CapacitySnapshot = {
   memory: MachineCapacity['livePressure']['memory'];
   thermal: MachineCapacity['livePressure']['thermal'];
   observed: ObservedWorkloads;
+  profile?: CapacityProfile;
+  interactiveReady?: boolean;
+  healthyForMs?: number;
 };
 
 /**
@@ -340,15 +348,22 @@ export type CapacitySnapshot = {
  */
 export async function snapshotCapacity(): Promise<CapacitySnapshot> {
   const state = await readCoordinatorState().catch(() => ({ leases: [] as WorkLease[] }));
-  const probe = await probeHost();
-  const observed = await observeWorkloads({ leasedPids: state.leases.map(lease => lease.pid) });
+  const [probe, rows] = await Promise.all([probeHost(), observeProcessRows()]);
+  const observed = classifyObservedWorkloads(rows, { leasedPids: state.leases.map(lease => lease.pid) });
+  const health = await recordCapacityHealth({
+    memory: probe.memory,
+    cpu: classifyCpuPressure(probe.loadAverage1m, probe.logicalCpuCount),
+    thermal: probe.thermal,
+    observedUncoordinatedHeavy: observed.uncoordinatedHeavy
+  });
   return {
     physicalMemoryBytes: probe.physicalMemoryBytes,
     logicalCpuCount: probe.logicalCpuCount,
     loadAverage1m: probe.loadAverage1m,
     memory: probe.memory,
     thermal: probe.thermal,
-    observed
+    observed,
+    ...health
   };
 }
 
@@ -404,7 +419,7 @@ export function decideAdmission(
       thermal: snapshot.thermal
     },
     { activeSubstantive, activeHeavy, observedUncoordinatedHeavy: snapshot.observed.uncoordinatedHeavy },
-    { workload: request.workload, access: request.access }
+    { workload: request.workload, access: request.access, profile: snapshot.profile, interactiveReady: snapshot.interactiveReady }
   );
 
   if (!capacity.canAdmit) blocking.push(...capacity.reasons);
@@ -443,6 +458,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
         id: `lease-${crypto.randomUUID()}`,
         pid,
         ...(Number.isInteger(parentPid) && parentPid > 0 ? { parentPid } : {}),
+        pidIsWorkload: request.pid !== undefined,
         executor,
         ...(repositoryRoot ? { repositoryRoot } : {}),
         ...(branch ? { branch } : {}),
@@ -464,6 +480,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
       : {
           id: `ticket-${crypto.randomUUID()}`,
           pid,
+          pidIsWorkload: request.pid !== undefined,
           executor,
           ...(repositoryRoot ? { repositoryRoot } : {}),
           access,
@@ -566,10 +583,12 @@ export function redactWorkStatusForShare(status: WorkStatus): Record<string, unk
 export function describeWorkStatus(status: WorkStatus): string[] {
   const held = status.leases.map(lease => {
     const where = lease.repositoryRoot ? path.basename(lease.repositoryRoot) : 'machine';
-    return `  ${lease.id.slice(0, 14)}… ${lease.executor.padEnd(11)} ${where} / ${lease.workload} / ${lease.access}${lease.phase ? ` / ${lease.phase}` : ''}`;
+    const process = lease.pidIsWorkload ? ` / pid ${lease.pid}` : '';
+    return `  ${lease.id.slice(0, 14)}… ${lease.executor.padEnd(11)} ${where} / ${lease.workload} / ${lease.access}${lease.phase ? ` / ${lease.phase}` : ''}${process}`;
   });
   return [
     `Machine capacity: ${status.capacity.substantiveSlots} substantive slot${status.capacity.substantiveSlots === 1 ? '' : 's'}, ${status.capacity.heavySlots} heavy`,
+    `Capacity profile: ${status.capacity.profile}${status.capacity.profile === 'interactive' ? status.capacity.interactiveReady ? ' (ready)' : ' (warming)' : ''}`,
     `Host:             ${(status.capacity.physicalMemoryBytes / 1024 ** 3).toFixed(1)} GiB RAM, ${status.capacity.logicalCpuCount} logical CPUs (${os.hostname()})`,
     `Memory pressure:  ${status.capacity.livePressure.memory}`,
     `CPU pressure:     ${status.capacity.livePressure.cpu}`,
@@ -578,6 +597,7 @@ export function describeWorkStatus(status: WorkStatus): string[] {
     ...(held.length ? held : ['  (none)']),
     `Queue depth:      ${status.tickets.length}`,
     `Uncoordinated heavy jobs: ${status.observed.uncoordinatedHeavy}`,
+    ...(status.observed.uncoordinatedDetails?.map(item => `  pid ${item.pid} ${item.processLabel} (${item.pids.length} process(es), ${item.matchedBy} threshold)`) ?? []),
     `DEX services observed:    ${status.observed.dexServices}`,
     ...(status.degraded ? ['Coordinator:      DEGRADED — conservative single-substantive-job mode', ...status.degradedReasons.map(reason => `  ${reason}`)] : [])
   ];

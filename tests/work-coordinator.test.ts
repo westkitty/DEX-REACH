@@ -59,6 +59,21 @@ function snapshot(overrides: Partial<CapacitySnapshot> = {}): CapacitySnapshot {
 /** A roomy, quiet host. Filesystem tests prove coordination rules, not the runner's own load. */
 const HOST = snapshot();
 
+test('coordinator state stays machine-wide when HOME is virtualized', () => {
+  const previousHome = process.env.HOME;
+  const previousState = process.env.DEX_REACH_STATE_DIR;
+  const virtualHome = path.join(os.tmpdir(), 'dex-virtual-home');
+  try {
+    process.env.HOME = virtualHome;
+    delete process.env.DEX_REACH_STATE_DIR;
+    assert.equal(coordinatorDir(), path.join(os.userInfo().homedir, '.dex-reach', 'coordinator'));
+    assert.notEqual(coordinatorDir(), path.join(virtualHome, '.dex-reach', 'coordinator'));
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+    if (previousState === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previousState;
+  }
+});
+
 function emptyState(overrides: Partial<CoordinatorState> = {}): CoordinatorState {
   return { leases: [], tickets: [], degraded: false, degradedReasons: [], ...overrides };
 }
@@ -483,5 +498,24 @@ test('a lease is released only by its holder unless the local owner forces it', 
     assert.equal(forced.released, true);
     assert.equal((await readCoordinatorState()).leases.length, 0);
     assert.equal((await releaseWork(id)).released, false);
+  });
+});
+
+test('coordinator distinguishes an explicit workload pid from the short-lived acquirer pid', async () => {
+  await withStateDir(async dir => {
+    const repoA = path.join(dir, 'repo-bound');
+    const repoB = path.join(dir, 'repo-unbound');
+    await fs.mkdir(repoA, { recursive: true });
+    await fs.mkdir(repoB, { recursive: true });
+
+    const bound = await acquireWork({ snapshot: HOST, executor: 'chatgpt', access: 'mutate', workload: 'medium', repositoryRoot: repoA, pid: process.pid });
+    assert.equal(bound.status, 'acquired');
+    if (bound.status === 'acquired') assert.equal(bound.lease.pidIsWorkload, true);
+
+    if (bound.status === 'acquired') await releaseWork(bound.lease.id, { force: true });
+
+    const unbound = await acquireWork({ snapshot: HOST, executor: 'chatgpt', access: 'mutate', workload: 'medium', repositoryRoot: repoB });
+    assert.equal(unbound.status, 'acquired');
+    if (unbound.status === 'acquired') assert.equal(unbound.lease.pidIsWorkload, false);
   });
 });

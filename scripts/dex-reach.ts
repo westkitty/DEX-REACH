@@ -21,6 +21,8 @@ import { arg, flag, localNodeIds, nodeEnvFile, readEnvFile } from './lib/node-fi
 import { WORK_ACCESS_CLASSES, WORK_EXECUTORS, WORK_WORKLOAD_CLASSES, acquireWork, cancelTicket, describeWorkStatus, heartbeat, redactWorkStatusForShare, releaseWork, workStatus } from '../src/shared/work-coordinator.js';
 import type { AccessClass, WorkloadClass } from '../src/shared/machine-capacity.js';
 import type { WorkExecutor } from '../src/shared/work-coordinator.js';
+import { CAPACITY_PROFILES, loadCapacityProfile, setCapacityProfile, type CapacityProfile } from '../src/shared/capacity-profile.js';
+import { runWithWorkLease } from '../src/shared/work-run.js';
 import { describeTrace, isValidTraceId, listTraces, otelExportEnabled, readTrace } from '../src/shared/trace.js';
 import {
   BUDGET_SCOPES,
@@ -42,6 +44,7 @@ import {
 } from '../src/shared/capability-requests.js';
 import { addPolicyAssertion, clearPolicyAssertion, listPolicyHistory, loadPolicyAssertions } from '../src/shared/policy-assertions.js';
 import { collectDoctorReport, formatDoctorReport } from '../src/shared/doctor.js';
+import { listProcessActivities, shareSafeActivity, type ProcessActivity } from '../src/shared/activity.js';
 
 const execFileAsync = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -86,6 +89,7 @@ function usage(): never {
   policy-history [--limit 20] [--json]
   policy-restore <revision>       restore an old policy as a NEW revision
   doctor [--json] [--deep] [--share]  read-only diagnostics; --share redacts local paths
+  activity [--watch] [--history] [--json] [--share]  what DEX is running, coordinating, or waiting on
   uninstall [--purge-state --yes-delete-state]
 
 Shared-machine work coordination (resource admission only; grants no execution authority):
@@ -100,6 +104,9 @@ Shared-machine work coordination (resource admission only; grants no execution a
   work-wait <ticket-id> [--timeout 30m]   bounded polling until the ticket is admitted
   work-cancel <ticket-id>
   work-heartbeat <lease-or-ticket-id>
+  work-run --repo PATH --access read|mutate|exclusive --workload light|medium|heavy -- <command> [args...]
+                acquire, heartbeat, and release one lease around a local command
+  work-profile [conservative|interactive]  show or set the owner-selected capacity profile
 
 Causal tracing (evidence only; never arguments, file contents or process output):
   trace <trace-id> [--json]       reconstruct one causal chain across MCP, node, plan, commit,
@@ -340,6 +347,103 @@ function workOption<T extends string>(name: string, allowed: readonly T[], fallb
   return value as T;
 }
 
+function activityAge(iso: string): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h${minutes % 60}m`;
+}
+
+function activityLine(record: ProcessActivity): string {
+  const where = record.cwd ? path.basename(record.cwd) || record.cwd : '-';
+  return `  ${record.id.slice(0, 14)}… ${record.kind.padEnd(14)} pid ${String(record.pid).padEnd(6)} ${record.processLabel.padEnd(16)} ${record.state.padEnd(10)} ${where}  ${activityAge(record.startedAt)}`;
+}
+
+async function activitySnapshot(includeFinished: boolean): Promise<{
+  activities: ProcessActivity[];
+  status: Awaited<ReturnType<typeof workStatus>>;
+}> {
+  const activities = await listProcessActivities({ includeFinished, limit: includeFinished ? 100 : 50 });
+  const status = await workStatus();
+  return { activities, status };
+}
+
+async function printActivityOnce(): Promise<void> {
+  const includeFinished = flag('--history', argv) || flag('--all', argv);
+  const snapshot = await activitySnapshot(includeFinished);
+  const requestedId = argv[1] && !argv[1]!.startsWith('--') ? argv[1] : undefined;
+  if (requestedId) {
+    const all = includeFinished ? snapshot.activities : await listProcessActivities({ includeFinished: true, limit: 200 });
+    const found = all.find(item => item.id === requestedId || item.id.startsWith(requestedId));
+    if (!found) throw new Error(`no activity matching ${requestedId}`);
+    console.log(JSON.stringify(flag('--share', argv) ? shareSafeActivity([found])[0] : found, null, 2));
+    return;
+  }
+  if (flag('--share', argv)) {
+    console.log(JSON.stringify({
+      activities: shareSafeActivity(snapshot.activities),
+      coordinator: redactWorkStatusForShare(snapshot.status),
+      dexServices: snapshot.status.observed.dexServices,
+      uncoordinatedHeavy: snapshot.status.observed.uncoordinatedHeavy
+    }, null, 2));
+    return;
+  }
+  if (flag('--json', argv)) {
+    console.log(JSON.stringify(snapshot, null, 2));
+    return;
+  }
+
+  const running = snapshot.activities.filter(item => item.state === 'running');
+  const history = snapshot.activities.filter(item => item.state !== 'running');
+  console.log('DEX//REACH Activity');
+  console.log('===================');
+  console.log('\nDEX-owned processes');
+  if (!running.length) console.log('  (none)');
+  else running.forEach(item => console.log(activityLine(item)));
+
+  console.log('\nCoordinated work');
+  if (!snapshot.status.leases.length) console.log('  (none)');
+  else snapshot.status.leases.forEach(lease => {
+    const where = lease.repositoryRoot ? path.basename(lease.repositoryRoot) : 'machine';
+    const process = lease.pidIsWorkload ? ` pid ${lease.pid}` : ' workload-pid unbound';
+    console.log(`  ${lease.id.slice(0, 14)}… ${lease.executor.padEnd(11)} ${where} / ${lease.workload} / ${lease.access}${lease.phase ? ` / ${lease.phase}` : ''} /${process}`);
+  });
+
+  console.log('\nQueued');
+  if (!snapshot.status.tickets.length) console.log('  (none)');
+  else snapshot.status.tickets.forEach((ticket, index) => {
+    const where = ticket.repositoryRoot ? path.basename(ticket.repositoryRoot) : 'machine';
+    console.log(`  ${index + 1}. ${ticket.executor} ${where} / ${ticket.workload} / ${ticket.access}${ticket.phase ? ` / ${ticket.phase}` : ''}`);
+  });
+
+  console.log('\nDEX services');
+  if (!snapshot.status.observed.dexServiceDetails?.length) console.log(`  ${snapshot.status.observed.dexServices} observed (details unavailable)`);
+  else snapshot.status.observed.dexServiceDetails.forEach(item => console.log(`  pid ${item.pid}  ${item.processLabel}`));
+
+  console.log('\nHeavy processes not owned by DEX');
+  if (!snapshot.status.observed.uncoordinatedDetails?.length) console.log('  (none)');
+  else snapshot.status.observed.uncoordinatedDetails.forEach(item => console.log(`  pid ${item.pid}  ${item.processLabel}  ${item.pids.length} process(es)  cpu ${item.cpu.toFixed(1)}% mem ${item.mem.toFixed(1)}% via ${item.matchedBy}`));
+
+  console.log(`\nPressure: memory ${snapshot.status.capacity.livePressure.memory}, cpu ${snapshot.status.capacity.livePressure.cpu}, thermal ${snapshot.status.capacity.livePressure.thermal}`);
+  if (includeFinished) {
+    console.log('\nRecent finished activity');
+    if (!history.length) console.log('  (none)');
+    else history.slice(0, 20).forEach(item => console.log(activityLine(item)));
+  }
+}
+
+async function activityCommand(): Promise<void> {
+  const watch = flag('--watch', argv);
+  do {
+    if (watch) process.stdout.write('\u001b[2J\u001b[H');
+    await printActivityOnce();
+    if (!watch) return;
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  } while (true);
+}
+
 async function workStatusCommand(): Promise<void> {
   const status = await workStatus();
   if (flag('--share', argv)) { console.log(JSON.stringify(redactWorkStatusForShare(status), null, 2)); return; }
@@ -384,7 +488,9 @@ async function workAcquireCommand(): Promise<void> {
   if (result.status === 'acquired') {
     console.log(`ADMITTED  lease ${result.lease.id}`);
     console.log(`  ${result.lease.workload} / ${result.lease.access}${result.lease.repositoryRoot ? ` on ${result.lease.repositoryRoot}` : ''}`);
-    console.log(`  Owning process: ${result.lease.pid}`);
+    console.log(result.lease.pidIsWorkload
+      ? `  Workload PID: ${result.lease.pid}`
+      : `  Lease acquirer PID: ${result.lease.pid} (no workload PID bound; heartbeat required)`);
     console.log(`  Heartbeat with: npm run dex -- work-heartbeat ${result.lease.id}  (every ~30s, or the lease expires after 2.5 minutes without one)`);
     console.log(`  Release with:   npm run dex -- work-release ${result.lease.id}`);
     console.log('  This lease reserves machine capacity only; it grants no execution authority.');
@@ -394,6 +500,59 @@ async function workAcquireCommand(): Promise<void> {
   for (const reason of result.reasons) console.log(`  ${reason}`);
   console.log(`  Wait with: npm run dex -- work-wait ${result.ticket.id}`);
   process.exitCode = 3;
+}
+
+function workRunTokens(): string[] {
+  const separator = argv.indexOf('--');
+  if (separator < 0 || separator === argv.length - 1) throw new Error('usage: work-run [coordination options] -- <command> [args...]');
+  return argv.slice(separator + 1);
+}
+
+function workRunOption<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
+  const separator = argv.indexOf('--');
+  const tokens = argv.slice(0, separator < 0 ? argv.length : separator);
+  const index = tokens.indexOf(name);
+  if (index < 0) return fallback;
+  const value = tokens[index + 1];
+  if (!value || !(allowed as readonly string[]).includes(value)) throw new Error(`${name} must be one of: ${allowed.join(', ')}`);
+  return value as T;
+}
+
+function workRunArg(name: string): string | undefined {
+  const separator = argv.indexOf('--');
+  const tokens = argv.slice(0, separator < 0 ? argv.length : separator);
+  const index = tokens.indexOf(name);
+  return index < 0 ? undefined : tokens[index + 1];
+}
+
+async function workRunCommand(): Promise<void> {
+  const child = workRunTokens();
+  const result = await runWithWorkLease({
+    executor: workRunOption<WorkExecutor>('--executor', WORK_EXECUTORS, 'other'),
+    access: workRunOption<AccessClass>('--access', WORK_ACCESS_CLASSES, 'read'),
+    workload: workRunOption<WorkloadClass>('--workload', WORK_WORKLOAD_CLASSES, 'light'),
+    repositoryRoot: workRunArg('--repo'),
+    branch: workRunArg('--branch'),
+    phase: workRunArg('--phase')
+  }, child[0]!, child.slice(1));
+  if (result.status === 'queued') {
+    console.log(`QUEUED    ticket ${result.ticket.id} (position ${result.position})`);
+    for (const reason of result.reasons) console.log(`  ${reason}`);
+    process.exitCode = 3;
+    return;
+  }
+  console.log(`COMPLETE  lease ${result.leaseId} released`);
+  process.exitCode = result.exitCode ?? 1;
+}
+
+async function workProfileCommand(): Promise<void> {
+  const selected = argv[1];
+  if (selected === undefined) { console.log(await loadCapacityProfile()); return; }
+  if (!(CAPACITY_PROFILES as readonly string[]).includes(selected)) throw new Error(`work-profile must be one of: ${CAPACITY_PROFILES.join(', ')}`);
+  await setCapacityProfile(selected as CapacityProfile);
+  console.log(selected === 'interactive'
+    ? 'Capacity profile set to interactive. A fresh 60-second healthy observation window is required.'
+    : 'Capacity profile set to conservative. The one-slot default applies immediately.');
 }
 
 async function workReleaseCommand(): Promise<void> {
@@ -725,6 +884,7 @@ async function workWaitCommand(): Promise<void> {
       workload: ticket.workload,
       repositoryRoot: ticket.repositoryRoot,
       phase: ticket.phase,
+      ...(ticket.pidIsWorkload ? { pid: ticket.pid } : {}),
       ticketId
     });
     if (result.status === 'acquired') {
@@ -893,9 +1053,12 @@ try {
     case 'policy-restore': await policyRestoreCommand(); break;
     case 'doctor': await doctorCommand(); break;
     case 'uninstall': await uninstall(); break;
+    case 'activity': await activityCommand(); break;
     case 'work-status': await workStatusCommand(); break;
     case 'work-queue': await workQueueCommand(); break;
     case 'work-acquire': await workAcquireCommand(); break;
+    case 'work-run': await workRunCommand(); break;
+    case 'work-profile': await workProfileCommand(); break;
     case 'work-release': await workReleaseCommand(); break;
     case 'work-cancel': await workCancelCommand(); break;
     case 'work-heartbeat': await workHeartbeatCommand(); break;

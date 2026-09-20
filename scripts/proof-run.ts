@@ -42,7 +42,6 @@ process.env.DEX_REACH_STATE_DIR = stateDir;
 
 const { loadAccessState, authorizeOperation, saveAccessState, defaultAccessState, createGrant, reserveOperation, classifyClient } = await import('../src/shared/access.js');
 const { executionFingerprint } = await import('../src/shared/fingerprint.js');
-const { workspaceSafeOperationRefusal, workspaceSafeToolRefusal } = await import('../src/shared/profiles.js');
 const { nativeCall } = await import('../src/node/native.js');
 const { upsertBudgetRule, makeBudgetRule } = await import('../src/shared/budget-policy.js');
 const { appendReceipt, listReceipts, verifyReceipt, verifyReceiptChain } = await import('../src/shared/receipts.js');
@@ -164,16 +163,6 @@ async function inProcessProofs(): Promise<void> {
     const read = authorizeOperation(state, ACTOR, 'dex.file.read', 'development');
     expect(read.allowed, 'READ-ONLY refused a file read');
     return [`dex.fingerprint admitted with effective profile ${inspect.allowed ? inspect.effectiveProfile : ''}`, 'dex.file.read admitted'];
-  });
-
-  await prove('workspace-safe-profile', async () => {
-    const shell = workspaceSafeOperationRefusal('workspace-safe', 'dex.process.run');
-    expect(shell, 'workspace-safe admitted dex.process.run');
-    const write = workspaceSafeOperationRefusal('workspace-safe', 'dex.file.write');
-    expect(!write, 'workspace-safe refused a typed file write, which is inside its grammar');
-    const tool = workspaceSafeToolRefusal('workspace-safe', 'start_process');
-    expect(tool, 'workspace-safe admitted a compatibility tool that would widen it');
-    return [shell!.slice(0, 160), `dex.file.write admitted`, tool!.slice(0, 160)];
   });
 
   await prove('typed-mutation', async () => {
@@ -482,6 +471,61 @@ async function livePairProofs(pair: LivePair, nodeId: string): Promise<void> {
     ];
   });
 
+  await prove('workspace-safe-profile', async () => {
+    // This proof is intentionally end to end. The node process itself is configured workspace-safe;
+    // no helper-level admission result may satisfy a claim about a running node.
+    await execFileAsync('git', ['init', '-q'], { cwd: pair.roots });
+    await fs.writeFile(path.join(pair.roots, 'base.txt'), 'base\n');
+    await execFileAsync('git', ['add', 'base.txt'], { cwd: pair.roots });
+    await execFileAsync('git', ['-c', 'user.name=DEX Proof', '-c', 'user.email=proof@example.invalid', 'commit', '-qm', 'base'], { cwd: pair.roots });
+
+    await pair.dexCli(['enable', '--node', nodeId]);
+
+    const target = path.join(pair.roots, 'workspace-safe-write.txt');
+    const write = await pair.call('reach_file_write', { node_id: nodeId, path: target, text: 'workspace-safe live write\n', mode: 'rewrite' });
+    expect(write.ok, `workspace-safe refused a typed write through MCP: ${write.text.slice(0, 200)}`);
+    expect((await fs.readFile(target, 'utf8')) === 'workspace-safe live write\n', 'the workspace-safe typed write did not land');
+
+    const checkpoint = await pair.call('reach_checkpoint', { node_id: nodeId, cwd: pair.roots });
+    expect(checkpoint.ok, `workspace-safe refused a checkpoint through MCP: ${checkpoint.text.slice(0, 200)}`);
+
+    const shell = await pair.call('reach_process_run', { node_id: nodeId, command: 'pwd', cwd: pair.roots, timeout_ms: 5000 });
+    expect(!shell.ok, 'workspace-safe admitted reach_process_run');
+
+    const compatProcess = await pair.call('reach_call', { node_id: nodeId, tool: 'start_process', arguments: { command: 'pwd', timeout_ms: 1000 } });
+    expect(!compatProcess.ok, 'workspace-safe admitted compatibility start_process');
+
+    const compatSessions = await pair.call('reach_call', { node_id: nodeId, tool: 'list_sessions', arguments: {} });
+    expect(!compatSessions.ok, 'workspace-safe admitted compatibility list_sessions');
+
+    await pair.dexCli(['read-only', '--node', nodeId]);
+    const inspect = await pair.call('reach_fingerprint', { node_id: nodeId });
+    expect(inspect.ok, 'READ-ONLY on a workspace-safe node refused inspection');
+
+    const readOnlyWrite = await pair.call('reach_file_write', { node_id: nodeId, path: target, text: 'must not land\n', mode: 'rewrite' });
+    expect(!readOnlyWrite.ok, 'READ-ONLY widened workspace-safe by admitting a typed write');
+
+    const readOnlyCheckpoint = await pair.call('reach_checkpoint', { node_id: nodeId, cwd: pair.roots });
+    expect(!readOnlyCheckpoint.ok, 'READ-ONLY widened workspace-safe by admitting a checkpoint');
+
+    const readOnlyShell = await pair.call('reach_process_run', { node_id: nodeId, command: 'pwd', cwd: pair.roots, timeout_ms: 5000 });
+    expect(!readOnlyShell.ok, 'READ-ONLY on workspace-safe admitted shell');
+
+    const readOnlyCompat = await pair.call('reach_call', { node_id: nodeId, tool: 'list_processes', arguments: {} });
+    expect(!readOnlyCompat.ok, 'READ-ONLY on workspace-safe admitted a process/session compatibility tool');
+
+    expect((await fs.readFile(target, 'utf8')) === 'workspace-safe live write\n', 'a refused READ-ONLY write changed the file');
+
+    await pair.dexCli(['enable', '--node', nodeId]);
+
+    return [
+      'real workspace-safe node admitted reach_file_write and reach_checkpoint through OAuth/MCP',
+      `shell refused: ${shell.text.slice(0, 120).replace(/\s+/g, ' ')}`,
+      `compatibility process surface refused: ${compatProcess.text.slice(0, 120).replace(/\s+/g, ' ')}`,
+      'READ-ONLY kept fingerprint inspection but removed typed writes/checkpoints without re-admitting shell or process/session tools'
+    ];
+  });
+
   await prove('live-mcp-surface', async () => {
     const { tools } = await pair.client.listTools();
     const names = tools.map(tool => tool.name);
@@ -657,7 +701,7 @@ async function main(): Promise<void> {
 
   if (!skipLive) {
     try {
-      livePair = await startLivePair({ repoRoot, workspace: path.join(workspace, 'live'), nodeIds: ['proof-node-a'] });
+      livePair = await startLivePair({ repoRoot, workspace: path.join(workspace, 'live'), nodeIds: ['proof-node-a'], profile: 'workspace-safe' });
       liveEnvironment = { available: true, reason: `a gateway and a node agent are running as separate processes on ${livePair.baseUrl.origin}` };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

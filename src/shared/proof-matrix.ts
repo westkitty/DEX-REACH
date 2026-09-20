@@ -125,9 +125,9 @@ export const PROOF_ITEMS: readonly ProofItem[] = [
   {
     id: 'workspace-safe-profile',
     title: 'The workspace-safe profile refuses what it is supposed to refuse',
-    proves: 'A node running workspace-safe admits the typed operations in its grammar and refuses everything outside it, including the compatibility tools that would widen it.',
-    environment: 'this-process',
-    limitation: 'Covers the operation and tool catalog as it stands; a newly added operation is not covered until it is classified.'
+    proves: 'A real node process running workspace-safe admits typed writes and checkpoints through OAuth/MCP, refuses shell and process/session compatibility surfaces, and remains narrowed rather than widened when the owner switches to READ-ONLY.',
+    environment: 'local-pair',
+    limitation: 'Covers the operation and tool catalog as it stands on one host over loopback; it does not prove a deployed node or a newly added operation until that operation is classified and exercised.'
   },
   {
     id: 'typed-mutation',

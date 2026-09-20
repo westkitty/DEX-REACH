@@ -17,7 +17,8 @@ import {
   collectExcludedPids,
   parseProcessTable,
   probeHost,
-  substantiveSlotsFor
+  substantiveSlotsFor,
+  substantiveSlotsForProfile
 } from '../src/shared/machine-capacity.js';
 
 const GIB = 1024 ** 3;
@@ -51,6 +52,13 @@ test('the CPU-derived ceiling wins when it is smaller than the memory-derived on
   // 64 GiB would allow 4 substantive jobs, but 4 logical CPUs allow only 1.
   assert.equal(substantiveSlotsFor(64 * GIB, 4), 1);
   assert.equal(heavySlotsFor(64 * GIB, 4), 1);
+});
+
+test('interactive capacity expands only after its sustained-health gate is ready', () => {
+  assert.equal(substantiveSlotsForProfile(8 * GIB, 8, 'interactive', false), 1);
+  assert.equal(substantiveSlotsForProfile(8 * GIB, 8, 'interactive', true), 2);
+  assert.equal(substantiveSlotsForProfile(8 * GIB, 2, 'interactive', true), 1);
+  assert.equal(substantiveSlotsForProfile(8 * GIB, 8, 'conservative', true), 1);
 });
 
 test('CPU pressure thresholds follow load average against logical CPUs', () => {
@@ -166,8 +174,9 @@ test('process observation separates DEX services from anonymous heavy jobs', () 
   const observed = classifyObservedWorkloads(rows, { selfPid: 999 });
   // Persistent gateway/node services are services, not competing coding jobs.
   assert.equal(observed.dexServices, 2);
-  // tsc, the claude session and its npm verify child are heavy; idle `npm ls` and Safari are not.
-  assert.equal(observed.uncoordinatedHeavy, 3);
+  // tsc is one job; the Claude session and its npm child are one process tree; idle npm/Safari are not.
+  assert.equal(observed.uncoordinatedHeavy, 2);
+  assert.deepEqual(observed.uncoordinatedDetails?.map(item => item.pids), [[101], [104, 105]]);
 
   assert.equal(isDexServiceCommand('node /Users/owner/DEX-REACH/dist/src/node/main.js'), true);
   assert.equal(isDexServiceCommand('node /opt/homebrew/bin/tsc'), false);
@@ -218,7 +227,7 @@ test('the calling process tree is not counted as a competing workload', () => {
   assert.deepEqual([...excluded].sort((a, b) => a - b), [200, 201, 202, 203]);
 
   const observed = classifyObservedWorkloads(rows, { selfPid: 202 });
-  assert.equal(observed.uncoordinatedHeavy, 2);
+  assert.equal(observed.uncoordinatedHeavy, 1);
 
   // A coordinated lease on the other agent's root covers its children too.
   assert.equal(classifyObservedWorkloads(rows, { selfPid: 202, leasedPids: [300] }).uncoordinatedHeavy, 0);
