@@ -2,7 +2,7 @@
 
 As of 2026-09-20.
 
-Fourteen of the fifteen phases in the expansion brief are implemented, swept twice for defects, and proved against a real gateway and node agent running as separate processes. Phase 3 is deliberately absent. **The branch has been installed on the primary Mac since revision r47** and the coordinator, gateway and node run there as persistent launchd services. **One release blocker remains**: the Mac is running a `6e01e6c`-era build, so the CI-green candidate carrying the repaired trace response has not been installed or exercised there, and the owner's own record says not to merge pull request #2 before that acceptance. Everything below is checkable against the branch `claude/work-coordinator-cpcug3` in `westkitty/DEX-REACH`, draft pull request #2. Check out the branch tip rather than a fixed hash: documentation commits sit on top of the code they describe.
+Fourteen of the fifteen phases in the expansion brief are implemented, swept twice for defects, and proved against a real gateway and node agent running as separate processes. Phase 3 is deliberately absent. **The branch has been installed on the primary Mac since revision r47**, most recently at candidate `951818c`, and the coordinator, worker, gateway and node run there as persistent launchd services. **One release blocker remains.** A real Claude Code call against that installed candidate reached all six trace stages but returned the trace metadata without the fingerprint payload. The cause was found and repaired here — the gateway was reporting the trace id as the tool's structured result, so every client that reads structured output saw an identifier instead of the answer — but the repair has not been installed or exercised on the Mac, and the owner's own record says not to merge pull request #2 before that re-acceptance. Everything below is checkable against the branch `claude/work-coordinator-cpcug3` in `westkitty/DEX-REACH`, draft pull request #2. Check out the branch tip rather than a fixed hash: documentation commits sit on top of the code they describe.
 
 ## How to check this record yourself
 
@@ -26,7 +26,7 @@ GitHub Actions runs three separate jobs on every push so a failure is attributab
 
 ## The commit ledger
 
-Thirty-two commits sat between `main` at `80fcbe1` and `5b08354`: 92 files changed, 15,879 insertions, 347 deletions. The count is given against `5b08354` rather than against the branch tip because the tip moves every time this record is corrected, and a record cannot honestly quote a hash it is itself about to change. The commits after it are the trace-metadata round and documentation; the table below lists them. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
+Forty-nine commits sit between `main` at `80fcbe1` and `6f3bd4e`: 95 files changed, 16,703 insertions, 359 deletions. The count is given against `6f3bd4e`, the last commit to change code, rather than against the branch tip, because the tip moves every time this record is corrected and a record cannot honestly quote a hash it is itself about to change. The commits after it are the trace-metadata round and documentation; the table below lists them. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
 
 | Commit | What it did |
 | --- | --- |
@@ -66,6 +66,12 @@ Thirty-two commits sat between `main` at `80fcbe1` and `5b08354`: 92 files chang
 | `096a248` | Owner's own work: move the trace id off a second content block and onto the result's `_meta`, so it stops polluting the payload |
 | `7d606ea` | Follow the trace id to `_meta` in the proof client, which had been left parsing content blocks |
 | `27e7023` | Owner's own work: record a real Samsung SM-X910 answering identity reads through DEX, and a real Claude client call against the installed runtime |
+| `517f721` | Reconcile this record, the shared document and the pull request with the owner's new evidence. Documentation only |
+| `959a799` | Owner's own work: a credential-free workspace worker on a private 0600 socket, and a coordinator progress stream with monotonic cursors |
+| `951818c` | Owner's own follow-up: isolate the proof pair from an installed account worker |
+| `c272921` | Review of that work. Keep the operator `phase` label out of the share projection (DEX-INV-026), restore the proof harness to a single trace-id source, and match the installer's root parsing to the node's |
+| `7c9dadb` | Owner's own note: `951818c` installed on the Mac, and a real client call returned trace metadata without its payload |
+| `6f3bd4e` | Repair that result contract: the trace id stops being the tool's structured result, so the payload reaches clients that read structured output |
 
 ## Phase by phase
 
@@ -273,7 +279,7 @@ The cross-process proofs hold every contender until all of them have reported, r
 
 ## What was deliberately not done
 
-**Phase 3, dual-era MCP, is absent.** The brief's own rollback rule says to keep legacy serving until modern serving is proven on the owner's machine. Installing the runtime does not by itself unlock it, and neither does a green CI run: the gate is the installed machine serving a real client through the repaired response contract, which is what `PND-010` still tracks. The code Phase 3 needs is already written and shipped unused.
+**Phase 3, dual-era MCP, is absent.** The brief's own rollback rule says to keep legacy serving until modern serving is proven on the owner's machine. Installing the runtime does not by itself unlock it, and neither does a green CI run: the gate is the installed machine serving a real client through a response contract that actually returns the answer, which is what `PND-010` still tracks and what the `951818c` call showed was not yet true. The code Phase 3 needs is already written and shipped unused.
 
 **The project license is unchanged at `UNLICENSED`.** Choosing a license is an owner decision and nothing in the brief authorized one.
 
@@ -287,15 +293,25 @@ The cross-process proofs hold every contender until all of them have reported, r
 
 **The branch is installed on the primary Mac as of r47, and pull request #2 remains a draft pending final trace/CI closure.** It was installed before a full `npm run verify:golden` completed: the reconciled head passed 42 focused coordinator, capacity, work-run and MCP-contract tests on the Mac along with typecheck, the invariant manifest, build, audit and the backend probe, and the full-suite run was queued under machine pressure rather than finished. That is the owner's call on the owner's machine, and it is recorded here so nobody later reads the install as evidence the whole gate passed. The build installed there is now several commits behind the branch, which is the subject of the release blocker in the lead.
 
+### After Phase 15: the workspace worker, and what reviewing it found
+
+The owner added a credential-free workspace worker and a coordinator progress stream. The worker is a separate long-lived process on a private 0600 Unix socket that runs three read-only operations — fingerprint, repository info and file read — with a scrubbed environment holding no provider, DEX, SSH-agent or secret variables. The node delegates to it only after authorization has already happened, at the end of the same function that applies the profile and secret refusals, and it falls back to ordinary node execution whenever the worker's node identity or allowed roots no longer match. The progress stream gives coordination events monotonic cursors a client can resume from.
+
+Reviewing it found one defect that matters. The stream put its recent events into the share-safe projection, which feeds both the browser-visible scheduler snapshot and `dex doctor --share`. An event carries `phase`, an operator-supplied label whose charset admits `/`, so `dex work run --phase feature/private-name` put a branch name into output whose whole purpose is to leave the machine — against `DEX-INV-026`, whose evidence clause says in terms that share output omits repository paths, branches and PIDs. The existing invariant test passes a branch and checks for it, and would have caught the branch field; the new progress test used a label-shaped phase, so nothing exercised a path-shaped one. It was proved by counterexample before being fixed: a lease acquired with `phase: 'feature/private-name'` produced a share payload carrying that string twice. The projection now drops the label, and the label is gone from the wire type so it cannot return by accident. The local status still carries it.
+
+Two smaller things were repaired in the same pass. The live proof harness had been loosened to accept the trace id from three places at once, which makes an assertion unfalsifiable across exactly the shapes it exists to distinguish, and it kept only the first text block, which would silently truncate a multi-block payload. And the macOS installer resolved the node's allowed roots before filtering empty ones, so a trailing separator in the environment wrote the installer's working directory into the worker's configuration and left the worker permanently unusable.
+
+One thing was recorded rather than changed, because it is latent rather than live: the worker executes with a fixed `workspace-safe` profile rather than the effective profile authorization produced. That is equivalent today only because all three delegated operations are permitted under a read-only profile too. Adding one that is not would let the worker execute, under owner READ-ONLY, something the node itself refuses. A test now pins the allowlist against the operation catalog so that stays true rather than being noticed later.
+
 ## Where it stands, and what only the owner can do
 
-### Validation at `6e01e6c`, the last commit that changes code
+### Validation at `6f3bd4e`, the last commit that changes code
 
 | Check | Result |
 | --- | --- |
 | `npm run typecheck` | Pass |
 | `npm run invariants -- --check` | Pass, 42 release-blocking invariants |
-| `npm test` | 249 tests; 248 pass in the container, 249 pass on CI |
+| `npm test` | 254 tests; 253 pass in the container, 254 pass on CI |
 | `npm run build` | Pass |
 | `npm audit --omit=dev --audit-level=high` | 0 vulnerabilities |
 | `npm run probe:backend` | 26 compatibility tools |
@@ -312,11 +328,15 @@ Everything I verified was verified in a Linux cloud container. That container es
 
 The Mac is a separate source of evidence, and it should be read as separate. Everything below that happened on the Mac is the owner's own observation, recorded here as that and not re-verified from this container: the install and the services coming back, a real Claude Code client completing a `reach_fingerprint` call against the installed runtime with only that one tool pre-authorized, and a Samsung SM-X910 answering harmless identity reads through DEX over wireless ADB.
 
-The gap that remains is narrower than it was and easy to misread. The Mac is running a build from the `6e01e6c` era. The CI-green candidate with the repaired trace response is not installed there. So the six-stage `mcp → gateway → node → authorize → execute → receipt` chain and the caller-visible trace id are proven over a loopback pair and in CI, and the last real-client trace taken on the Mac resolved with only `node → authorize → execute`, because that is what the older installed build produces. `CI-green` and `proven on the installed machine` are still different states, and the four proof-stale marks on `DEX-INV-005`, `009`, `017` and `021` still stand, unchanged at four.
+The gap that remains is narrower than it was and easy to misread, and the most recent attempt to close it is the best illustration in this whole record of why the distinction matters. The owner installed candidate `951818c` on the Mac and made a real Claude Code `reach_fingerprint` call against it. The call reached all six stages of `mcp → gateway → node → authorize → execute → receipt`. It also came back without the fingerprint. The gateway had been reporting the caller-visible trace id as the tool's structured result, and structured output is what a client reads in preference to text, so the client was handed an identifier where the answer should have been. The payload was on the wire the entire time.
+
+Nothing in this repository could see it. The source contract test asserted the text payload and then read the trace id *through* the same structured field that was displacing it, so it confirmed the defect rather than catching it. The live proof parses the text content, so it read past the problem too. Both now assert that a routed result reports no structured output at all and that its payload is non-empty, and the proof harness reports the result's structured output so an assertion can be made about the difference between what the harness reads and what a real client reads. That gap between the two is now the second defect on this branch that only a real client could find, and the second time the harness and a real client were reading different fields.
+
+The repair is on the branch and is not installed. So `CI-green`, `installed`, and `proven against a real client on the installed machine` are three different states, and this branch has now demonstrated the distance between the second and the third. The four proof-stale marks on `DEX-INV-005`, `009`, `017` and `021` still stand, unchanged at four.
 
 ### What only the owner can do
 
-1. **Install the CI-green candidate on the primary Mac, then make one real routed call.** This is the release blocker and everything else waits behind it. The Mac is still running a `6e01e6c`-era build, so the repaired trace response has never been exercised there. The acceptance is three things at once: the useful payload still comes back, the caller-visible trace id is present in the MCP result metadata, and `npm run dex -- trace <id>` resolves the complete six-stage chain. This is `PND-010`, and the owner records that both authorized mutation channels for the reinstall were unavailable during the last attempt.
+1. **Install the repaired candidate on the primary Mac, then make one real routed call.** This is the release blocker and everything else waits behind it. The Mac is running `951818c`, which is the build whose real-client call returned no payload. The acceptance is three things at once: the useful payload comes back, the caller-visible trace id is present in the MCP result metadata, and `npm run dex -- trace <id>` resolves the complete six-stage chain. The first of those is what failed last time and is the reason this is still open. This is `PND-010`.
 2. **Finish the gate that the earlier install ran ahead of.** `npm run verify:golden` has not completed at an installed head. The Mac passed a focused 42-test gate plus typecheck, invariants, build, audit and probe, and the full-suite run queued under machine pressure rather than finishing.
 3. **Refresh the ChatGPT connector's action list.** That client still exposes 12 of the 16 DEX actions, so plan, commit, receipts and the trust report are not reachable from its user interface. The server contract is not the problem. This is `PND-001`.
 4. **Authorize the install proof** by running the proof harness on a macOS host with `DEX_REACH_PROOF_ALLOW_INSTALL=1`. This is a separate thing from having installed the branch by hand: `fresh-node-install` only moves off unverified when the harness itself is allowed to perform an install.
@@ -327,4 +347,4 @@ The gap that remains is narrower than it was and easy to misread. The Mac is run
 
 Four pending items remain open in `OPERATIONAL_STATE.md`: `PND-001`, `005`, `009` and `010`. `PND-005` is the one not listed above, and it is not owner-gated: it is a deliberate hold on replacing more compatibility primitives, so that widening the frozen 16-action contract does not get mixed into the migration proof.
 
-The rest closed, and it is worth being precise about how, because several closed on the owner's own hardware rather than on anything provable from here. `PND-002` closed on a real Samsung SM-X910 answering identity reads through DEX. `PND-008` closed when a real Claude Code client completed a `reach_fingerprint` call against the installed runtime. `PND-016` closed when `DEX-INV-042` was minted for the coordinator daemon transport boundary. `PND-003`, `PND-004` and `PND-007` were not proven; they were reclassified out of pending work and remain recorded as unverified in the `UNV-` entries, which is where a reader should look for the second-machine and Linux gaps. `PND-006`, `011`, `012`, `013` and `015` closed earlier in the expansion.
+The rest closed, and it is worth being precise about how, because several closed on the owner's own hardware rather than on anything provable from here. `PND-002` closed on a real Samsung SM-X910 answering identity reads through DEX. `PND-008` was closed when a real Claude Code client completed a `reach_fingerprint` call against the installed runtime, and that closure should be read narrowly: the call completed and the trace resolved, but the later call against `951818c` showed that completing is not the same as answering, because the payload was missing. The client-reachability question `PND-008` asked is closed; the result-contract question it did not ask is what `PND-010` now carries. `PND-016` closed when `DEX-INV-042` was minted for the coordinator daemon transport boundary. `PND-003`, `PND-004` and `PND-007` were not proven; they were reclassified out of pending work and remain recorded as unverified in the `UNV-` entries, which is where a reader should look for the second-machine and Linux gaps. `PND-006`, `011`, `012`, `013` and `015` closed earlier in the expansion.
