@@ -62,7 +62,6 @@ export type SchedulerEventSnapshot = {
   executor?: string;
   access?: string;
   workload?: string;
-  phase?: string | null;
   reason?: string;
   forced?: boolean;
   observedUncoordinatedHeavy?: number;

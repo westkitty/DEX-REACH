@@ -750,7 +750,12 @@ function aggregateBundles(entries: Array<Pick<WorkLease, 'workload' | 'access' |
 export function redactWorkStatusForShare(status: WorkStatus): Record<string, unknown> {
   const waits = status.tickets.map(ticket => Math.max(0, Date.now() - Date.parse(ticket.enqueuedAt))).sort((a, b) => a - b);
   const percentile = (fraction: number) => waits.length ? waits[Math.min(waits.length - 1, Math.floor((waits.length - 1) * fraction))]! : 0;
-  const recentEvents = status.eventWindow.events.slice(-32);
+  // A progress event carries `phase`, which is an operator-supplied label the charset lets look like
+  // a branch or a path (`feature/private-name`, `src/billing/rates`). DEX-INV-026 keeps repository
+  // paths and branches out of anything that leaves the machine, and this projection feeds both the
+  // browser-visible scheduler snapshot and `dex doctor --share`. The event's kind, ordering, executor
+  // and workload class answer the progress question; the label is local detail and is dropped here.
+  const recentEvents = status.eventWindow.events.slice(-32).map(({ phase: _phase, ...event }) => event);
   return {
     substantiveSlots: status.capacity.substantiveSlots,
     heavySlots: status.capacity.heavySlots,

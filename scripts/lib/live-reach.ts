@@ -319,23 +319,17 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
       const texts = content
         .filter((item): item is { type: 'text'; text: string } => Boolean(item) && (item as { type?: string }).type === 'text' && typeof (item as { text?: unknown }).text === 'string')
         .map(item => item.text);
-      let traceId: string | undefined;
-      const structured = result.structuredContent as { dex_trace_id?: unknown } | undefined;
-      if (typeof structured?.dex_trace_id === 'string' && /^[0-9a-f]{32}$/.test(structured.dex_trace_id)) traceId = structured.dex_trace_id;
-      const metaTrace = result._meta?.['dex-reach/trace-id'];
-      if (!traceId && typeof metaTrace === 'string' && /^[0-9a-f]{32}$/.test(metaTrace)) traceId = metaTrace;
-      for (const extra of texts.slice(1)) {
-        try {
-          const parsed = JSON.parse(extra) as { dex_trace_id?: unknown };
-          if (typeof parsed.dex_trace_id === 'string' && /^[0-9a-f]{32}$/.test(parsed.dex_trace_id)) {
-            traceId = parsed.dex_trace_id;
-            break;
-          }
-        } catch {
-          // Additional text blocks may be human-readable metadata. The first text block remains payload.
-        }
-      }
-      return { ok: !result.isError, text: texts[0] ?? '', ...(traceId ? { traceId } : {}) };
+      // The trace id is read from the one place the gateway writes it. Accepting it from several
+      // shapes would make this assertion unfalsifiable across exactly the shapes it exists to tell
+      // apart: a gateway that regressed to emitting the id as an extra content block would still
+      // pass, which is the failure this proof item was added to catch. The gateway also mirrors the
+      // id into `structuredContent`, and `tests/mcp-contract.test.ts` pins the two to be equal, so
+      // reading `_meta` alone is strict without being brittle.
+      const candidate = result._meta?.['dex-reach/trace-id'];
+      const traceId = typeof candidate === 'string' && /^[0-9a-f]{32}$/.test(candidate) ? candidate : undefined;
+      // Every text block is payload. Keeping only the first would silently truncate a multi-block
+      // result, and the trace id is deliberately not carried in one.
+      return { ok: !result.isError, text: texts.join('\n'), ...(traceId ? { traceId } : {}) };
     }
 
     async function migrateNodeToAsymmetric(nodeId: string): Promise<{ authMode: string; privateKeyRefused: boolean }> {

@@ -31,8 +31,12 @@ const currentNodeId = process.env.DEX_REACH_NODE_ID || ownerEnv.DEX_REACH_NODE_I
 const nodeEnv = path.join(localStateDir, 'nodes', `${currentNodeId}.env`);
 const nodeSettings = await readEnvFile(nodeEnv);
 const workerNodeId = nodeSettings.DEX_REACH_NODE_ID || currentNodeId;
+// Parsed exactly as `loadNodeConfig` parses it, including the order: empty segments are dropped
+// before resolution, because `path.resolve('')` is the installer's working directory. Resolving
+// first would write that directory into the worker's allowed roots and put the roots hash out of
+// step with the node's, leaving the worker permanently unusable for a trailing `:` in the env.
 const workerRoots = (nodeSettings.DEX_REACH_ALLOWED_ROOTS || os.homedir())
-  .split(path.delimiter).map(root => path.resolve(root.trim())).filter(Boolean);
+  .split(path.delimiter).map(root => root.trim()).filter(Boolean).map(root => path.resolve(root));
 if (!workerRoots.length) throw new Error('workspace worker requires at least one configured node root');
 await fs.mkdir(workspaceWorkerDir(), { recursive: true, mode: 0o700 });
 await fs.chmod(workspaceWorkerDir(), 0o700);

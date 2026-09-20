@@ -487,6 +487,33 @@ test('progress history uses monotonic cursors and resumes without leaking local 
   });
 });
 
+test('a branch-shaped phase label never reaches the share projection', async () => {
+  await withStateDir(async dir => {
+    const repo = path.join(dir, 'secret-project-name');
+    await fs.mkdir(repo, { recursive: true });
+    // The label charset admits `/`, so a phase is free to look exactly like a branch or a path. The
+    // share projection feeds the browser-visible scheduler snapshot and `dex doctor --share`, and
+    // DEX-INV-026 keeps branches and repository paths out of both. The local status still has it.
+    const acquired = await acquireWork({
+      snapshot: HOST, executor: 'claude-code', access: 'mutate', workload: 'medium',
+      repositoryRoot: repo, branch: 'feature/private-name', phase: 'feature/private-name'
+    });
+    assert.equal(acquired.status, 'acquired');
+    if (acquired.status === 'acquired') await heartbeat(acquired.lease.id);
+
+    const status = await workStatus({ snapshot: HOST });
+    assert.equal(status.leases[0]!.phase, 'feature/private-name');
+    assert.ok(status.eventWindow.events.some(event => event.phase === 'feature/private-name'));
+
+    const shared = JSON.stringify(redactWorkStatusForShare(status));
+    assert.doesNotMatch(shared, /private-name/);
+    assert.doesNotMatch(shared, /secret-project-name/);
+    // The progress stream still answers the operational question without the label.
+    assert.match(shared, /phase-progress/);
+    assert.match(shared, /\"eventCursor\":/);
+  });
+});
+
 // Machine exclusivity and lifecycle ------------------------------------------
 test('exclusive machine work requires an otherwise idle machine', async () => {
   await withStateDir(async dir => {

@@ -6,12 +6,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import {
+  WORKSPACE_WORKER_OPERATIONS,
   scrubWorkspaceWorkerEnvironment,
   workspaceWorkerConfigFile,
   workspaceWorkerExecute,
   workspaceWorkerRootsHash,
   workspaceWorkerSocketPath
 } from '../src/shared/workspace-worker.js';
+import { requireOperation } from '../src/shared/operations.js';
 
 async function waitForSocket(socketPath: string, stderr: () => string): Promise<void> {
   for (let attempt = 0; attempt < 120; attempt += 1) {
@@ -143,5 +145,20 @@ test('workspace worker serves only bounded read operations, falls back on root m
     if (previous === undefined) delete process.env.DEX_WORKSPACE_WORKER_DIR;
     else process.env.DEX_WORKSPACE_WORKER_DIR = previous;
     await fs.rm(temp, { recursive: true, force: true });
+  }
+});
+
+
+test('every delegated operation is admitted under the narrowest profile the node can hold', () => {
+  // The worker executes with a fixed `workspace-safe` profile rather than the effective profile the
+  // node's authorization produced, so delegation may only ever carry operations that both profiles
+  // admit. Today all three do. Adding one that `read-only` refuses would let the worker run, under
+  // owner READ-ONLY, something the node itself would refuse: a narrowing must never widen, so the
+  // allowlist is pinned here rather than left to be noticed later.
+  for (const operation of WORKSPACE_WORKER_OPERATIONS) {
+    const descriptor = requireOperation(operation);
+    assert.equal(descriptor.readOnlyAllowed, true, `${operation} is delegated but refused under read-only`);
+    assert.equal(descriptor.workspaceSafeAllowed, true, `${operation} is delegated but refused under workspace-safe`);
+    assert.equal(descriptor.mutation, false, `${operation} is delegated but mutates`);
   }
 });
