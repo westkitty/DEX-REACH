@@ -2,7 +2,7 @@
 
 As of 2026-09-20.
 
-Fourteen of the fifteen phases in the expansion brief are implemented, swept twice for defects, and proved against a real gateway and node agent running as separate processes. Phase 3 is deliberately absent. **As of revision r47 this branch is installed and running on the primary Mac**: the coordinator, gateway and node are persistent launchd services, `/healthz` is healthy with one online node, and the owner's profile, roots, ceilings and grants are unchanged by the install. Everything below is checkable against the branch `claude/work-coordinator-cpcug3` in `westkitty/DEX-REACH`, draft pull request #2. Check out the branch tip rather than a fixed hash: documentation commits sit on top of the code they describe.
+Fourteen of the fifteen phases in the expansion brief are implemented, swept twice for defects, and proved against a real gateway and node agent running as separate processes. Phase 3 is deliberately absent. **The branch has been installed on the primary Mac since revision r47** and the coordinator, gateway and node run there as persistent launchd services. **One release blocker remains**: the Mac is running a `6e01e6c`-era build, so the CI-green candidate carrying the repaired trace response has not been installed or exercised there, and the owner's own record says not to merge pull request #2 before that acceptance. Everything below is checkable against the branch `claude/work-coordinator-cpcug3` in `westkitty/DEX-REACH`, draft pull request #2. Check out the branch tip rather than a fixed hash: documentation commits sit on top of the code they describe.
 
 ## How to check this record yourself
 
@@ -26,7 +26,7 @@ GitHub Actions runs three separate jobs on every push so a failure is attributab
 
 ## The commit ledger
 
-Thirty-two commits sit between `main` at `80fcbe1` and `5b08354`: 92 files changed, 15,879 insertions, 347 deletions. The count is given against `5b08354` rather than against the branch tip because the tip moves every time this record is corrected, and a record cannot honestly quote a hash it is itself about to change. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
+Thirty-two commits sat between `main` at `80fcbe1` and `5b08354`: 92 files changed, 15,879 insertions, 347 deletions. The count is given against `5b08354` rather than against the branch tip because the tip moves every time this record is corrected, and a record cannot honestly quote a hash it is itself about to change. The commits after it are the trace-metadata round and documentation; the table below lists them. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
 
 | Commit | What it did |
 | --- | --- |
@@ -62,7 +62,10 @@ Thirty-two commits sit between `main` at `80fcbe1` and `5b08354`: 92 files chang
 | `1d82c74` | Owner's own reconciliation: rebase the Mac's local work onto `6e01e6c`, install the result, and record the installed runtime state |
 | `6dc6ed8` | Correct this record for the installed runtime: the branch was already running on the Mac while the record still said not to install it |
 | `5b08354` | Owner's own work: a caller-visible trace id on routed MCP results, a real Android device proof item, and `DEX-INV-042` for the coordinator daemon transport boundary |
-| _this commit_ | Repair the `live-mcp-surface` proof, which asserted a routed-call property on an action the gateway answers itself |
+| `0131deb` | Repair the `live-mcp-surface` proof, which asserted a routed-call property on an action the gateway answers itself |
+| `096a248` | Owner's own work: move the trace id off a second content block and onto the result's `_meta`, so it stops polluting the payload |
+| `7d606ea` | Follow the trace id to `_meta` in the proof client, which had been left parsing content blocks |
+| `27e7023` | Owner's own work: record a real Samsung SM-X910 answering identity reads through DEX, and a real Claude client call against the installed runtime |
 
 ## Phase by phase
 
@@ -270,7 +273,7 @@ The cross-process proofs hold every contender until all of them have reported, r
 
 ## What was deliberately not done
 
-**Phase 3, dual-era MCP, is absent.** The brief's own rollback rule says to keep legacy serving until modern serving is proven on the owner's machine. Installing the runtime does not by itself unlock it: the gate is a real client completing a session against the deployed gateway, which is what PND-008 still tracks. The code Phase 3 needs is already written and shipped unused.
+**Phase 3, dual-era MCP, is absent.** The brief's own rollback rule says to keep legacy serving until modern serving is proven on the owner's machine. Installing the runtime does not by itself unlock it, and neither does a green CI run: the gate is the installed machine serving a real client through the repaired response contract, which is what `PND-010` still tracks. The code Phase 3 needs is already written and shipped unused.
 
 **The project license is unchanged at `UNLICENSED`.** Choosing a license is an owner decision and nothing in the brief authorized one.
 
@@ -282,7 +285,7 @@ The cross-process proofs hold every contender until all of them have reported, r
 
 **No unrelated refactoring.** Every change belongs to a phase.
 
-**The branch is installed on the primary Mac as of r47, and pull request #2 remains a draft pending final trace/CI closure.** It was installed before a full `npm run verify:golden` completed: the reconciled head passed 42 focused coordinator, capacity, work-run and MCP-contract tests on the Mac along with typecheck, the invariant manifest, build, audit and the backend probe, and the full-suite run was queued under machine pressure rather than finished. That is the owner's call on the owner's machine, and it is recorded here so nobody later reads the install as evidence the whole gate passed.
+**The branch is installed on the primary Mac as of r47, and pull request #2 remains a draft pending final trace/CI closure.** It was installed before a full `npm run verify:golden` completed: the reconciled head passed 42 focused coordinator, capacity, work-run and MCP-contract tests on the Mac along with typecheck, the invariant manifest, build, audit and the backend probe, and the full-suite run was queued under machine pressure rather than finished. That is the owner's call on the owner's machine, and it is recorded here so nobody later reads the install as evidence the whole gate passed. The build installed there is now several commits behind the branch, which is the subject of the release blocker in the lead.
 
 ## Where it stands, and what only the owner can do
 
@@ -307,21 +310,21 @@ That table is what this container ran. The owner ran a second, independent gate 
 
 Everything I verified was verified in a Linux cloud container. That container establishes nothing about the primary Mac's resource state, macOS pressure, launchd runtime behaviour, Keychain, live installed DEX behaviour or live asymmetric Mac-node authentication. A loopback pair on Linux proves the software path. It does not prove the installation.
 
-The Mac is a separate source of evidence, and it should be read as separate. The owner installed the branch and observed the services come back, which is real installed-runtime evidence for the service lifecycle, the coordinator daemon path and the activity ledger. It is not evidence for the four proof-stale invariants, because no browser-side client session has been run against the installed runtime yet. Do not let the install collapse those two things into one claim: `installed and running` and `proven against a real client` are different states, and the branch is currently in the first one only.
+The Mac is a separate source of evidence, and it should be read as separate. Everything below that happened on the Mac is the owner's own observation, recorded here as that and not re-verified from this container: the install and the services coming back, a real Claude Code client completing a `reach_fingerprint` call against the installed runtime with only that one tool pre-authorized, and a Samsung SM-X910 answering harmless identity reads through DEX over wireless ADB.
+
+The gap that remains is narrower than it was and easy to misread. The Mac is running a build from the `6e01e6c` era. The CI-green candidate with the repaired trace response is not installed there. So the six-stage `mcp → gateway → node → authorize → execute → receipt` chain and the caller-visible trace id are proven over a loopback pair and in CI, and the last real-client trace taken on the Mac resolved with only `node → authorize → execute`, because that is what the older installed build produces. `CI-green` and `proven on the installed machine` are still different states, and the four proof-stale marks on `DEX-INV-005`, `009`, `017` and `021` still stand, unchanged at four.
 
 ### What only the owner can do
 
-1. **Run a real browser-side client session against the installed runtime.** This is the one item that has moved and the one that now gates everything else. The branch is installed, but no connector refresh or relink and no fresh OAuth and tool session has been observed against it. This is `PND-008`, and it is what clears the proof-stale marks on `DEX-INV-005`, `009`, `017` and `021`, and what unlocks Phase 3. The install did not clear it, and nothing in this container can.
-2. **Finish the gate that the install ran ahead of.** `npm run verify:golden` has not completed at the installed head. The Mac passed a focused 42-test gate plus typecheck, invariants, build, audit and probe, and the full-suite run queued under machine pressure rather than finishing. Running it now closes that gap after the fact.
-3. **Refresh the ChatGPT connector's action list.** As of r42 that client still exposes 12 of the 16 DEX actions, so plan, commit, receipts and the trust report are not reachable from its user interface. The server contract is not the problem. This is `PND-001`.
-4. **Authorize the install proof** by running the proof harness on a macOS host with `DEX_REACH_PROOF_ALLOW_INSTALL=1`. This is a separate thing from having installed the branch: `npm run install:macos` installed the runtime, while `fresh-node-install` is a proof item that only moves off unverified when the harness itself is allowed to perform an install.
-5. **Attach an Android device** and perform one harmless hardware identity operation through DEX. This is `PND-002`.
-6. **Enroll a real second machine** and repeat explicit-node routing plus the OFF, READ-ONLY and ON checks. This is `PND-003`.
-7. **Run the Linux systemd path on a real Linux host** before anyone claims Linux runtime verification. This is `PND-004`.
-8. **Produce one real end-to-end trace from a real client** and confirm the returned trace id resolves through `npm run dex -- trace <id>` as the full six-stage chain. The installed runtime currently produces a resolvable trace containing only `node → authorize → execute`, which is not the same claim. This is `PND-010`.
-9. **Run a real two-agent lease contention** on the Mac, which is what would take `DEX-INV-022` through `026` past regression and installed smoke.
-10. **Configure a real rolling budget** on the installed node and confirm a live request is refused when exhausted without changing the owner policy hash. The installed node still has no budget configured.
-11. **Decide the one remaining owner-only question:** the project license. Two of the three that used to sit here are already decided and recorded: the gateway moves to a dedicated authorization server after `PND-008`, and `dex.capability.request` does not become a public MCP action in this release, so the 16-action contract stays frozen.
-12. **Decide what happens to pull request #2,** which is still a draft.
+1. **Install the CI-green candidate on the primary Mac, then make one real routed call.** This is the release blocker and everything else waits behind it. The Mac is still running a `6e01e6c`-era build, so the repaired trace response has never been exercised there. The acceptance is three things at once: the useful payload still comes back, the caller-visible trace id is present in the MCP result metadata, and `npm run dex -- trace <id>` resolves the complete six-stage chain. This is `PND-010`, and the owner records that both authorized mutation channels for the reinstall were unavailable during the last attempt.
+2. **Finish the gate that the earlier install ran ahead of.** `npm run verify:golden` has not completed at an installed head. The Mac passed a focused 42-test gate plus typecheck, invariants, build, audit and probe, and the full-suite run queued under machine pressure rather than finishing.
+3. **Refresh the ChatGPT connector's action list.** That client still exposes 12 of the 16 DEX actions, so plan, commit, receipts and the trust report are not reachable from its user interface. The server contract is not the problem. This is `PND-001`.
+4. **Authorize the install proof** by running the proof harness on a macOS host with `DEX_REACH_PROOF_ALLOW_INSTALL=1`. This is a separate thing from having installed the branch by hand: `fresh-node-install` only moves off unverified when the harness itself is allowed to perform an install.
+5. **Run a real two-agent lease contention** on the Mac, which is what would take `DEX-INV-022` through `026` past regression and installed smoke.
+6. **Configure a real rolling budget** on the installed node and confirm a live request is refused when exhausted without changing the owner policy hash. The installed node still has no budget configured.
+7. **Decide the one remaining owner-only question:** the project license. The other two are already decided and recorded: the gateway moves to a dedicated authorization server, which is `PND-009`, and `dex.capability.request` does not become a public MCP action in this release, so the 16-action contract stays frozen.
+8. **Decide what happens to pull request #2,** which is still a draft and which the owner's own record says should not be merged before the acceptance in item 1.
 
-Nine pending items remain open in `OPERATIONAL_STATE.md`: `PND-001`, `002`, `003`, `004`, `005`, `007`, `008`, `009` and `010`. The two not listed above are not owner-gated. `PND-005` is a deliberate hold on replacing more compatibility primitives, so that widening the frozen 16-action contract does not get mixed into the migration proof, and `PND-007` is a working practice: take a coordinator lease before each phase of work and release it afterwards. `PND-006`, `011`, `012`, `013`, `015` and `016` are closed; `PND-016` closed when `5b08354` minted `DEX-INV-042` for the coordinator daemon transport boundary.
+Four pending items remain open in `OPERATIONAL_STATE.md`: `PND-001`, `005`, `009` and `010`. `PND-005` is the one not listed above, and it is not owner-gated: it is a deliberate hold on replacing more compatibility primitives, so that widening the frozen 16-action contract does not get mixed into the migration proof.
+
+The rest closed, and it is worth being precise about how, because several closed on the owner's own hardware rather than on anything provable from here. `PND-002` closed on a real Samsung SM-X910 answering identity reads through DEX. `PND-008` closed when a real Claude Code client completed a `reach_fingerprint` call against the installed runtime. `PND-016` closed when `DEX-INV-042` was minted for the coordinator daemon transport boundary. `PND-003`, `PND-004` and `PND-007` were not proven; they were reclassified out of pending work and remain recorded as unverified in the `UNV-` entries, which is where a reader should look for the second-machine and Linux gaps. `PND-006`, `011`, `012`, `013` and `015` closed earlier in the expansion.
