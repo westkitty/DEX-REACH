@@ -26,7 +26,7 @@ GitHub Actions runs three separate jobs on every push so a failure is attributab
 
 ## The commit ledger
 
-Twenty-nine commits sit between `main` at `80fcbe1` and `6e01e6c`, the last commit to change runtime code: 91 files changed, 15,711 insertions, 335 deletions. The commits that follow `6e01e6c` are documentation only, including the one that carries this sentence, which is why the count is given against `6e01e6c` rather than against a tip that moves every time the record is corrected. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
+Thirty-two commits sit between `main` at `80fcbe1` and `5b08354`: 92 files changed, 15,879 insertions, 347 deletions. The count is given against `5b08354` rather than against the branch tip because the tip moves every time this record is corrected, and a record cannot honestly quote a hash it is itself about to change. They are listed in the order they were made. Every commit message carries its own before-and-after and its own sweep findings, so `git show <commit>` is the primary record and this table is the index to it.
 
 | Commit | What it did |
 | --- | --- |
@@ -60,6 +60,9 @@ Twenty-nine commits sit between `main` at `80fcbe1` and `6e01e6c`, the last comm
 | `7a0e9c1` | Owner's own work: a local coordinator daemon over an account-private Unix socket, work-bundle CPU/memory/IO/network budgets, and a privacy-safe scheduler snapshot on `reach_list_nodes` |
 | `6e01e6c` | Review of that daemon: refuse a coordinator socket owned by another account, and bind it under a restrictive umask |
 | `1d82c74` | Owner's own reconciliation: rebase the Mac's local work onto `6e01e6c`, install the result, and record the installed runtime state |
+| `6dc6ed8` | Correct this record for the installed runtime: the branch was already running on the Mac while the record still said not to install it |
+| `5b08354` | Owner's own work: a caller-visible trace id on routed MCP results, a real Android device proof item, and `DEX-INV-042` for the coordinator daemon transport boundary |
+| _this commit_ | Repair the `live-mcp-surface` proof, which asserted a routed-call property on an action the gateway answers itself |
 
 ## Phase by phase
 
@@ -288,8 +291,8 @@ The cross-process proofs hold every contender until all of them have reported, r
 | Check | Result |
 | --- | --- |
 | `npm run typecheck` | Pass |
-| `npm run invariants -- --check` | Pass, 41 release-blocking invariants |
-| `npm test` | 248 tests; 247 pass in the container, 248 pass on CI |
+| `npm run invariants -- --check` | Pass, 42 release-blocking invariants |
+| `npm test` | 249 tests; 248 pass in the container, 249 pass on CI |
 | `npm run build` | Pass |
 | `npm audit --omit=dev --audit-level=high` | 0 vulnerabilities |
 | `npm run probe:backend` | 26 compatibility tools |
@@ -298,7 +301,7 @@ The cross-process proofs hold every contender until all of them have reported, r
 
 The single in-container test failure is a pre-existing and unrelated case in `tests/native.test.ts`. That container's shell profile prints `nvm` on startup, which contaminates the standard output that `dex.process.run` captures. It fails identically at the base commit `80fcbe1` and passes on CI, where the full suite is green. It was not weakened to make it pass.
 
-That table is what this container ran. The owner ran a second, independent gate on the primary Mac before installing, recorded as r47 in `OPERATIONAL_STATE.md`: 42 of 42 focused coordinator, machine-capacity, work-run and MCP-contract tests, including the foreign-socket ownership regression added in `6e01e6c`, plus typecheck, the 41-invariant manifest, a production build, a production dependency audit with 0 vulnerabilities, the 26-tool backend probe and `git diff --check`. That is a focused gate, not the full suite, and it is not `npm run verify:golden`. GitHub's DEX validation workflow and CodeQL are green on `6e01e6c`.
+That table is what this container ran. The owner ran a second, independent gate on the primary Mac before installing, recorded as r47 in `OPERATIONAL_STATE.md`: 42 of 42 focused coordinator, machine-capacity, work-run and MCP-contract tests, including the foreign-socket ownership regression added in `6e01e6c`, plus typecheck, the 41-invariant manifest as it stood before `DEX-INV-042` was added, a production build, a production dependency audit with 0 vulnerabilities, the 26-tool backend probe and `git diff --check`. That is a focused gate, not the full suite, and it is not `npm run verify:golden`. GitHub's DEX validation workflow and CodeQL are green on `6e01e6c`.
 
 ### The honest limits of everything above
 
@@ -318,8 +321,7 @@ The Mac is a separate source of evidence, and it should be read as separate. The
 8. **Produce one real end-to-end trace from a real client** and confirm the returned trace id resolves through `npm run dex -- trace <id>` as the full six-stage chain. The installed runtime currently produces a resolvable trace containing only `node → authorize → execute`, which is not the same claim. This is `PND-010`.
 9. **Run a real two-agent lease contention** on the Mac, which is what would take `DEX-INV-022` through `026` past regression and installed smoke.
 10. **Configure a real rolling budget** on the installed node and confirm a live request is refused when exhausted without changing the owner policy hash. The installed node still has no budget configured.
-11. **Give the coordinator daemon transport boundary its own invariant ID.** The behaviour and its regression test exist at `6e01e6c`; the release-blocking invariant does not. This is `PND-016`, and it is the one piece of work this record flagged and deliberately did not do itself, because minting an invariant inside someone else's subsystem is the owner's call.
-12. **Decide the one remaining owner-only question:** the project license. Two of the three that used to sit here are already decided and recorded: the gateway moves to a dedicated authorization server after `PND-008`, and `dex.capability.request` does not become a public MCP action in this release, so the 16-action contract stays frozen.
-13. **Decide what happens to pull request #2,** which is still a draft.
+11. **Decide the one remaining owner-only question:** the project license. Two of the three that used to sit here are already decided and recorded: the gateway moves to a dedicated authorization server after `PND-008`, and `dex.capability.request` does not become a public MCP action in this release, so the 16-action contract stays frozen.
+12. **Decide what happens to pull request #2,** which is still a draft.
 
-Ten pending items remain open in `OPERATIONAL_STATE.md`: `PND-001`, `002`, `003`, `004`, `005`, `007`, `008`, `009`, `010` and `016`. The two not listed above are not owner-gated. `PND-005` is a deliberate hold on replacing more compatibility primitives, so that widening the frozen 16-action contract does not get mixed into the migration proof, and `PND-007` is a working practice: take a coordinator lease before each phase of work and release it afterwards. `PND-006`, `011`, `012`, `013` and `015` are closed.
+Nine pending items remain open in `OPERATIONAL_STATE.md`: `PND-001`, `002`, `003`, `004`, `005`, `007`, `008`, `009` and `010`. The two not listed above are not owner-gated. `PND-005` is a deliberate hold on replacing more compatibility primitives, so that widening the frozen 16-action contract does not get mixed into the migration proof, and `PND-007` is a working practice: take a coordinator lease before each phase of work and release it afterwards. `PND-006`, `011`, `012`, `013`, `015` and `016` are closed; `PND-016` closed when `5b08354` minted `DEX-INV-042` for the coordinator daemon transport boundary.

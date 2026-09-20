@@ -534,7 +534,12 @@ async function livePairProofs(pair: LivePair, nodeId: string): Promise<void> {
 
     const listed = await pair.call('reach_list_tools', { node_id: nodeId });
     expect(listed.ok, `listing the node's compatibility tools failed: ${listed.text.slice(0, 200)}`);
-    expect(/^[0-9a-f]{32}$/.test(listed.traceId ?? ''), 'the live MCP result did not expose a caller-visible trace id');
+    // The gateway answers this one from the tool list the node advertised at registration, so the
+    // request never reaches the node and there are no authorize/execute/receipt stages to record.
+    // It must therefore carry no trace id: handing the caller one would give them an identifier
+    // that resolves to nothing the node ever did, which is exactly the kind of evidence this
+    // project refuses to manufacture. The trace-id assertion belongs on a routed call, below.
+    expect(listed.traceId === undefined, 'a gateway-local action exposed a trace id for work the node never performed');
     const offered = (JSON.parse(listed.text) as { name: string }[]).map(tool => tool.name);
     assertSameSurface(offered, remoteCompatibilityTools(), 'compatibility tools offered to a remote client');
     // Absent rather than refused: a probe must not be able to tell a withheld tool from one that
@@ -545,7 +550,7 @@ async function livePairProofs(pair: LivePair, nodeId: string): Promise<void> {
 
     const trust = await pair.call('reach_trust_report', { node_id: nodeId });
     expect(trust.ok, `the trust report failed: ${trust.text.slice(0, 200)}`);
-    expect(/^[0-9a-f]{32}$/.test(trust.traceId ?? ''), 'the trust report did not expose a caller-visible trace id');
+    expect(/^[0-9a-f]{32}$/.test(trust.traceId ?? ''), 'the routed MCP result did not expose a caller-visible trace id');
     const report = JSON.parse(trust.text) as {
       verdict: string; certificateHash?: string; evidenceScope?: string;
       invariants?: { count?: number; ids?: string[]; liveEvaluatedIds?: string[] };
@@ -559,9 +564,9 @@ async function livePairProofs(pair: LivePair, nodeId: string): Promise<void> {
     expect(live.length > 0 && live.length < DEX_RELEASE_INVARIANTS.length, `the report claims to have live-evaluated ${live.length} of ${DEX_RELEASE_INVARIANTS.length} invariants`);
 
     return [
-      `a real OAuth/PKCE MCP SDK client listed exactly ${names.length} first-class actions and received trace metadata`,
+      `a real OAuth/PKCE MCP SDK client listed exactly ${names.length} first-class actions`,
       `the node offered exactly ${offered.length} compatibility tools; the ${remoteBlockedCompatibilityTools().length} withheld ones were absent, not refused`,
-      `reach_trust_report returned ${report.verdict} scoped to ${live.length} live-evaluated invariant(s) of ${DEX_RELEASE_INVARIANTS.length}, with a certificate hash`
+      `reach_trust_report returned ${report.verdict} scoped to ${live.length} live-evaluated invariant(s) of ${DEX_RELEASE_INVARIANTS.length}, with a certificate hash and a caller-visible trace id`
     ];
   });
 
