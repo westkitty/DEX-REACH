@@ -276,7 +276,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     }
     const result = results.bound(value);
     const durationMs = Date.now() - started;
-    const executeSpan = childSpan(trace);
+    const executeSpan = childSpan(authorizeSpan);
     await recordSpan({
       traceId: executeSpan.traceId, spanId: executeSpan.spanId, parentSpanId: executeSpan.parentSpanId,
       stage: request.operation === 'dex.plan' ? 'plan' : request.operation === 'dex.commitPlan' ? 'commit' : 'execute',
@@ -289,9 +289,15 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor,
       operation: request.operation, ok: true, durationMs, args: request.args
     });
-    await appendReceipt({
+    const receipt = await appendReceipt({
       nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: true,
       result: value, durationMs, policy, checkpointId: receiptCheckpoint
+    });
+    const receiptSpan = childSpan(executeSpan);
+    await recordSpan({
+      traceId: receiptSpan.traceId, spanId: receiptSpan.spanId, parentSpanId: receiptSpan.parentSpanId,
+      stage: 'receipt', at: new Date().toISOString(), operation: request.operation,
+      nodeId: config.nodeId, actorKind: actor?.kind, ok: true, receiptId: receipt.receiptId
     });
     return { type: 'response', id: request.id, ok: true, result, traceId: trace.traceId };
   } catch (error) {
@@ -310,10 +316,18 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor,
       operation: request.operation, ok: false, durationMs, args: request.args, error: message
     });
-    await appendReceipt({
+    const receipt = await appendReceipt({
       nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: false,
       error: message, durationMs, policy: policy ?? { unavailable: true }, checkpointId: receiptCheckpoint
-    }).catch(() => undefined);
+    }).catch(() => null);
+    if (receipt) {
+      const receiptSpan = childSpan(failSpan);
+      await recordSpan({
+        traceId: receiptSpan.traceId, spanId: receiptSpan.spanId, parentSpanId: receiptSpan.parentSpanId,
+        stage: 'receipt', at: new Date().toISOString(), operation: request.operation,
+        nodeId: config.nodeId, actorKind: actor?.kind, ok: false, receiptId: receipt.receiptId
+      });
+    }
     return { type: 'response', id: request.id, ok: false, error: message, traceId: trace.traceId };
   } finally {
     await releaseBudgetConcurrency(config.nodeId, budgetReservationId).catch(() => undefined);

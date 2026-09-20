@@ -73,6 +73,22 @@ test('routing is explicit: unknown, blank, offline, and revoked nodes fail and n
     assert.equal(primary.sent.length, 1);
     registry.deliverForTest({ type: 'response', id: primary.sent[0]!.id, ok: true, result: 'primary-ok' });
     assert.equal(await again, 'primary-ok');
+
+    // Trace metadata survives the gateway registry boundary while the legacy request() API
+    // continues to return only the operation result.
+    const traceId = '1'.repeat(32);
+    const traced = registry.requestWithTrace(
+      'primary-mac',
+      'dex.fingerprint',
+      {},
+      { kind: 'chatgpt', clientId: 'trace', clientName: 'Trace test' },
+      { traceparent: `00-${traceId}-2222222222222222-01` }
+    );
+    const tracedRequest = primary.sent.at(-1)!;
+    assert.equal(tracedRequest.traceparent, `00-${traceId}-2222222222222222-01`);
+    registry.deliverForTest({ type: 'response', id: tracedRequest.id, ok: true, result: 'primary-traced', traceId });
+    assert.deepEqual(await traced, { result: 'primary-traced', traceId });
+
     // An out-of-process CLI revoke (credential store only) is enforced by the sweep, without touching Primary node.
     const carol = new FakeSocket();
     await auth.enroll('carol-pc');

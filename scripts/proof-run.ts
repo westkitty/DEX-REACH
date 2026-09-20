@@ -534,6 +534,7 @@ async function livePairProofs(pair: LivePair, nodeId: string): Promise<void> {
 
     const listed = await pair.call('reach_list_tools', { node_id: nodeId });
     expect(listed.ok, `listing the node's compatibility tools failed: ${listed.text.slice(0, 200)}`);
+    expect(/^[0-9a-f]{32}$/.test(listed.traceId ?? ''), 'the live MCP result did not expose a caller-visible trace id');
     const offered = (JSON.parse(listed.text) as { name: string }[]).map(tool => tool.name);
     assertSameSurface(offered, remoteCompatibilityTools(), 'compatibility tools offered to a remote client');
     // Absent rather than refused: a probe must not be able to tell a withheld tool from one that
@@ -544,6 +545,7 @@ async function livePairProofs(pair: LivePair, nodeId: string): Promise<void> {
 
     const trust = await pair.call('reach_trust_report', { node_id: nodeId });
     expect(trust.ok, `the trust report failed: ${trust.text.slice(0, 200)}`);
+    expect(/^[0-9a-f]{32}$/.test(trust.traceId ?? ''), 'the trust report did not expose a caller-visible trace id');
     const report = JSON.parse(trust.text) as {
       verdict: string; certificateHash?: string; evidenceScope?: string;
       invariants?: { count?: number; ids?: string[]; liveEvaluatedIds?: string[] };
@@ -557,7 +559,7 @@ async function livePairProofs(pair: LivePair, nodeId: string): Promise<void> {
     expect(live.length > 0 && live.length < DEX_RELEASE_INVARIANTS.length, `the report claims to have live-evaluated ${live.length} of ${DEX_RELEASE_INVARIANTS.length} invariants`);
 
     return [
-      `a real OAuth/PKCE MCP SDK client listed exactly ${names.length} first-class actions`,
+      `a real OAuth/PKCE MCP SDK client listed exactly ${names.length} first-class actions and received trace metadata`,
       `the node offered exactly ${offered.length} compatibility tools; the ${remoteBlockedCompatibilityTools().length} withheld ones were absent, not refused`,
       `reach_trust_report returned ${report.verdict} scoped to ${live.length} live-evaluated invariant(s) of ${DEX_RELEASE_INVARIANTS.length}, with a certificate hash`
     ];
@@ -673,6 +675,32 @@ async function detectAndroid(): Promise<EnvironmentAvailability> {
   }
 }
 
+async function androidDeviceProof(): Promise<void> {
+  await prove('android-adb-device', async () => {
+    const discovery = await nativeCall('proof-android', 'dex.adbDevices', {}, [roots], 'android-adb') as {
+      available?: boolean;
+      devices?: string[];
+    };
+    expect(discovery.available === true, 'DEX reported ADB unavailable');
+    const devices = (discovery.devices ?? []).filter(line => /\sdevice(?:\s|$)/.test(line));
+    expect(devices.length > 0, 'DEX did not enumerate an attached Android device');
+    const serial = devices[0]!.split(/\s+/)[0]!;
+    expect(/^[A-Za-z0-9._:-]+$/.test(serial), 'ADB serial contains unexpected characters');
+    const action = await nativeCall('proof-android', 'dex.process.run', {
+      command: `adb -s ${serial} shell getprop ro.product.model`,
+      cwd: roots,
+      timeoutMs: 10_000
+    }, [roots], 'android-adb') as { exitCode?: number; stdout?: string; stderr?: string };
+    expect(action.exitCode === 0, `Android identity action failed: ${action.stderr ?? 'unknown error'}`);
+    const model = (action.stdout ?? '').trim();
+    expect(Boolean(model), 'Android identity action returned no model');
+    return [
+      `DEX android-adb profile enumerated ${devices.length} attached ADB transport(s)`,
+      `device ${serial} answered a harmless identity action as ${model}`
+    ];
+  });
+}
+
 async function detectMacosHost(): Promise<EnvironmentAvailability> {
   if (process.platform !== 'darwin') {
     return { available: false, reason: `this run is on ${process.platform}, and the install path under proof is the macOS launchd service` };
@@ -730,6 +758,7 @@ async function main(): Promise<void> {
   try {
     await inProcessProofs();
     if (livePair) await livePairProofs(livePair, 'proof-node-a');
+    if (environments['android-device'].available) await androidDeviceProof();
   } finally {
     if (livePair) await livePair.stop();
   }

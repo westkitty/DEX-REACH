@@ -53,7 +53,8 @@ export const DEX_RELEASE_INVARIANTS: readonly ReleaseInvariant[] = [
   { id: 'DEX-INV-038', capability: 'A proof run records only what it observed, and absent hardware is never a pass', evidenceClass: 'mixed' },
   { id: 'DEX-INV-039', capability: 'The gateway never advertises an authorization behaviour it does not perform', evidenceClass: 'mixed' },
   { id: 'DEX-INV-040', capability: 'Owner-visible activity identifies DEX-owned processes without persisting command content', evidenceClass: 'mixed' },
-  { id: 'DEX-INV-041', capability: 'Machine coordination and activity have one namespace per OS account', evidenceClass: 'mixed' }
+  { id: 'DEX-INV-041', capability: 'Machine coordination and activity have one namespace per OS account', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-042', capability: 'Coordinator daemon transport is owner-private and fail-closed', evidenceClass: 'mixed' }
 ] as const;
 
 export function invariantManifest() {

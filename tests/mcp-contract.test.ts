@@ -14,7 +14,7 @@ import { DEX_REACH_VERSION } from '../src/shared/version.js';
  */
 async function connectedClient(): Promise<{ client: Client; close: () => Promise<void> }> {
   // Tool handlers are never invoked here; only the advertised surface is read.
-  const registry = { request: async () => ({}), listNodes: () => [] } as unknown as NodeRegistry;
+  const registry = { requestWithTrace: async () => ({ result: { ok: true } }), listNodes: () => [] } as unknown as NodeRegistry;
   const audit = { append: async () => undefined } as unknown as AuditLog;
 
   const server = createReachMcpServer(registry, audit, 'contract-test', { kind: 'smoke', clientId: 'contract-test', clientName: 'DEX contract test' });
@@ -118,6 +118,24 @@ test('node-targeted actions require an explicit node_id and reach_plan keeps its
     }
   } finally {
     await close();
+  }
+});
+
+test('node-routed MCP calls preserve the original payload and expose a caller-visible trace id', async () => {
+  const previous = process.env.DEX_REACH_STATE_DIR;
+  const temp = await import('node:fs/promises').then(fs => fs.mkdtemp('/tmp/dex-mcp-trace-'));
+  process.env.DEX_REACH_STATE_DIR = temp;
+  const { client, close } = await connectedClient();
+  try {
+    const result = await client.callTool({ name: 'reach_fingerprint', arguments: { node_id: 'test-node' } });
+    const content = result.content as Array<{ type: string; text?: string }>;
+    assert.equal(content[0]?.text, JSON.stringify({ ok: true }, null, 2));
+    const meta = JSON.parse(content[1]?.text || '{}') as { dex_trace_id?: string };
+    assert.match(meta.dex_trace_id || '', /^[0-9a-f]{32}$/);
+  } finally {
+    await close();
+    if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previous;
+    await import('node:fs/promises').then(fs => fs.rm(temp, { recursive: true, force: true }));
   }
 });
 

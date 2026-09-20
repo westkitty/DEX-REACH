@@ -5,6 +5,7 @@ import type { AuditLog } from '../shared/audit.js';
 import type { RequestActor } from '../shared/protocol.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
 import { PLAN_TARGET_OPERATIONS } from '../shared/operations.js';
+import { childSpan, recordSpan, traceContextFrom } from '../shared/trace.js';
 
 const NODE_ID_HINT = 'Target node ID exactly as returned by reach_list_nodes (for example "macbook-air.local"). Never guess; each node is a different machine.';
 const EXECUTION_IDENTITY_EXPECTATION = z.object({
@@ -24,8 +25,10 @@ const EXECUTION_IDENTITY_EXPECTATION = z.object({
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 const MUTATE = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } as const;
 
-function text(value: unknown) {
-  return { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
+function text(value: unknown, traceId?: string) {
+  const content = [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }];
+  if (traceId) content.push({ type: 'text' as const, text: JSON.stringify({ dex_trace_id: traceId }) });
+  return { content };
 }
 
 export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, clientId = 'unknown', actor?: RequestActor): McpServer {
@@ -33,10 +36,33 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
 
   const routed = async (nodeId: string, operation: string, args: Record<string, unknown>) => {
     const started = Date.now();
+    const trace = traceContextFrom();
+    await recordSpan({
+      traceId: trace.traceId,
+      spanId: trace.spanId,
+      parentSpanId: trace.parentSpanId,
+      stage: 'mcp',
+      at: new Date().toISOString(),
+      operation,
+      nodeId,
+      actorKind: actor?.kind
+    });
+    const gatewayTrace = childSpan(trace);
+    await recordSpan({
+      traceId: gatewayTrace.traceId,
+      spanId: gatewayTrace.spanId,
+      parentSpanId: gatewayTrace.parentSpanId,
+      stage: 'gateway',
+      at: new Date().toISOString(),
+      operation,
+      nodeId,
+      actorKind: actor?.kind
+    });
     try {
-      const result = await registry.request(nodeId, operation, args, actor);
+      const response = await registry.requestWithTrace(nodeId, operation, args, actor, gatewayTrace);
+      if (response.traceId && response.traceId !== trace.traceId) throw new Error('node returned a trace id that does not match the gateway trace');
       await audit.append({ at: new Date().toISOString(), source: 'gateway', nodeId, client: clientId, actor, operation, ok: true, durationMs: Date.now() - started, args });
-      return text(result);
+      return text(response.result, trace.traceId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await audit.append({ at: new Date().toISOString(), source: 'gateway', nodeId, client: clientId, actor, operation, ok: false, durationMs: Date.now() - started, args, error: message });

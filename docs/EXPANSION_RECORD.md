@@ -172,9 +172,9 @@ Neither of these could have been caught by any test in this repository, because 
 
 `fee7892` made a capability request that cannot be risk-classified refuse rather than quietly default to the lowest risk class. `ca1332b` made a failed provenance check say what actually failed instead of reporting a generic drift.
 
-## The 41 release-blocking invariants
+## The 42 release-blocking invariants
 
-The expansion took the count from 21 to 41: everything from `DEX-INV-022` onward is new here. They live in `docs/INVARIANTS.md` with their full preconditions and acceptable proof, and in `src/shared/invariants.ts` as a machine-readable index; a regression test fails if those two ever disagree.
+The expansion took the count from 21 to 41; post-install coordinator transport hardening added `DEX-INV-042`. Everything from `DEX-INV-022` onward is new in this expansion/hardening line. The invariants live in `docs/INVARIANTS.md` with their full preconditions and acceptable proof, and in `src/shared/invariants.ts` as a machine-readable index; a regression test fails if those two ever disagree.
 
 "Regression only" means a test proves the contract and no deployed system has exercised it. "Proof stale" means it was verified on the deployed 0.3.2 worker and has not been re-verified since the MCP SDK v2 migration.
 
@@ -221,6 +221,7 @@ The expansion took the count from 21 to 41: everything from `DEX-INV-022` onward
 | 039 | The gateway never advertises an authorization behaviour it does not perform | Regression plus one live MCP client completing OAuth |
 | 040 | Owner-visible activity identifies DEX-owned processes without persisting command content | Regression plus the installed primary-Mac runtime |
 | 041 | Machine coordination and activity have one namespace per OS account | Regression plus an installed cross-path smoke on the primary Mac |
+| 042 | Coordinator daemon transport is owner-private and fail-closed | Regression plus installed daemon lifecycle/cross-path evidence; foreign-account ownership remains regression-proven |
 
 ## What the proof run establishes, and where
 
@@ -278,7 +279,7 @@ The cross-process proofs hold every contender until all of them have reported, r
 
 **No unrelated refactoring.** Every change belongs to a phase.
 
-**The branch is installed on the primary Mac as of r47, and pull request #2 is still a draft.** It was installed before a full `npm run verify:golden` completed: the reconciled head passed 42 focused coordinator, capacity, work-run and MCP-contract tests on the Mac along with typecheck, the invariant manifest, build, audit and the backend probe, and the full-suite run was queued under machine pressure rather than finished. That is the owner's call on the owner's machine, and it is recorded here so nobody later reads the install as evidence the whole gate passed.
+**The branch is installed on the primary Mac as of r47, and pull request #2 remains a draft pending final trace/CI closure.** It was installed before a full `npm run verify:golden` completed: the reconciled head passed 42 focused coordinator, capacity, work-run and MCP-contract tests on the Mac along with typecheck, the invariant manifest, build, audit and the backend probe, and the full-suite run was queued under machine pressure rather than finished. That is the owner's call on the owner's machine, and it is recorded here so nobody later reads the install as evidence the whole gate passed.
 
 ## Where it stands, and what only the owner can do
 

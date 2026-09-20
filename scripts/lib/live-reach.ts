@@ -32,7 +32,7 @@ export type LiveNode = {
   logFile: string;
 };
 
-export type LiveCallResult = { ok: boolean; text: string };
+export type LiveCallResult = { ok: boolean; text: string; traceId?: string };
 
 export type LivePairOptions = {
   repoRoot: string;
@@ -313,11 +313,22 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
     async function call(tool: string, args: Record<string, unknown>): Promise<LiveCallResult> {
       const result = await client.callTool({ name: tool, arguments: args }) as { isError?: boolean; content?: unknown };
       const content = Array.isArray(result.content) ? result.content : [];
-      const text = content
+      const texts = content
         .filter((item): item is { type: 'text'; text: string } => Boolean(item) && (item as { type?: string }).type === 'text' && typeof (item as { text?: unknown }).text === 'string')
-        .map(item => item.text)
-        .join('\n');
-      return { ok: !result.isError, text };
+        .map(item => item.text);
+      let traceId: string | undefined;
+      for (const extra of texts.slice(1)) {
+        try {
+          const parsed = JSON.parse(extra) as { dex_trace_id?: unknown };
+          if (typeof parsed.dex_trace_id === 'string' && /^[0-9a-f]{32}$/.test(parsed.dex_trace_id)) {
+            traceId = parsed.dex_trace_id;
+            break;
+          }
+        } catch {
+          // Additional text blocks may be human-readable metadata. The first text block remains payload.
+        }
+      }
+      return { ok: !result.isError, text: texts[0] ?? '', ...(traceId ? { traceId } : {}) };
     }
 
     async function migrateNodeToAsymmetric(nodeId: string): Promise<{ authMode: string; privateKeyRefused: boolean }> {

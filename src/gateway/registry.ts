@@ -15,8 +15,13 @@ export type NodeRecord = {
   scheduler: SchedulerSnapshot | null;
 };
 
+export type NodeRequestResult = {
+  result: unknown;
+  traceId?: string;
+};
+
 type Pending = {
-  resolve: (value: unknown) => void;
+  resolve: (value: NodeRequestResult) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 };
@@ -111,9 +116,28 @@ export class NodeRegistry {
    * "first online" choice, and no fallback: an unknown, offline, or revoked node ID always throws.
    */
   async request(nodeId: string, operation: string, args: Record<string, unknown>, actor?: RequestActor, timeoutMs = 60000): Promise<unknown> {
+    return (await this.requestWithTrace(nodeId, operation, args, actor, undefined, timeoutMs)).result;
+  }
+
+  async requestWithTrace(
+    nodeId: string,
+    operation: string,
+    args: Record<string, unknown>,
+    actor?: RequestActor,
+    trace?: { traceparent?: string; tracestate?: string },
+    timeoutMs = 60000
+  ): Promise<NodeRequestResult> {
     const record = this.requireNode(nodeId);
     const id = crypto.randomUUID();
-    const request: GatewayRequest = { type: 'request', id, operation, args, ...(actor ? { actor } : {}) };
+    const request: GatewayRequest = {
+      type: 'request',
+      id,
+      operation,
+      args,
+      ...(actor ? { actor } : {}),
+      ...(trace?.traceparent ? { traceparent: trace.traceparent } : {}),
+      ...(trace?.tracestate ? { tracestate: trace.tracestate } : {})
+    };
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -216,7 +240,10 @@ export class NodeRegistry {
     if (!pending) return;
     clearTimeout(pending.timer);
     this.pending.delete(response.id);
-    if (response.ok) pending.resolve(response.result);
-    else pending.reject(new Error(response.error || 'node request failed'));
+    if (response.ok) {
+      pending.resolve({ result: response.result, ...(response.traceId ? { traceId: response.traceId } : {}) });
+    } else {
+      pending.reject(new Error(response.error || 'node request failed'));
+    }
   }
 }
