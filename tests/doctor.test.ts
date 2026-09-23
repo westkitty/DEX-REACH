@@ -60,6 +60,7 @@ test('doctor is read-only and --share omits local repository paths', async () =>
       discovery: { cimd: boolean; dcr: boolean; pkce: string; scopes: string[] };
       state: { clients: number; activeAccessTokens: number; activeRefreshTokens: number };
       tokenEndpoint: { token2xx: number; token4xx: number; token5xx: number; lastFailureCode: string };
+      canary: { ok: boolean; publicBaseUrl?: string; refreshCredentialPresent: boolean };
     };
     assert.equal(oauth.discovery.cimd, true);
     assert.equal(oauth.discovery.dcr, true);
