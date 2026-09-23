@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Client } from '@modelcontextprotocol/client';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/client';
+import { UnauthorizedError, type OAuthClientProvider, type OAuthDiscoveryState } from '@modelcontextprotocol/client';
 import type { OAuthClientInformationFull, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/server';
 import { loadOwnerSecrets } from '../src/shared/local-env.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
@@ -22,6 +22,7 @@ class SmokeOAuthProvider implements OAuthClientProvider {
   private info?: OAuthClientInformationFull;
   private savedTokens?: OAuthTokens;
   private verifier?: string;
+  private discovery?: OAuthDiscoveryState;
   authorizationUrl?: URL;
   get redirectUrl(): string | URL { return callbackUrl; }
   get clientMetadata(): OAuthClientMetadata {
@@ -34,6 +35,8 @@ class SmokeOAuthProvider implements OAuthClientProvider {
   redirectToAuthorization(url: URL): void { this.authorizationUrl = url; }
   saveCodeVerifier(value: string): void { this.verifier = value; }
   codeVerifier(): string { if (!this.verifier) throw new Error('missing PKCE verifier'); return this.verifier; }
+  saveDiscoveryState(value: OAuthDiscoveryState): void { this.discovery = value; }
+  discoveryState(): OAuthDiscoveryState | undefined { return this.discovery; }
 }
 
 /**
