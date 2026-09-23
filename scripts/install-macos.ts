@@ -9,6 +9,7 @@ import { readEnvFile } from './lib/node-files.js';
 import { atomicWriteFile } from '../src/shared/state-io.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
 import { launchdIntervalPlist, launchdOneShotPlist, launchdPlist, servicePath } from './lib/service.js';
+import { runtimeReleaseId, stageRuntimeRelease } from './lib/runtime-release.js';
 import { workspaceWorkerConfigFile, workspaceWorkerDir, workspaceWorkerRootsHash } from '../src/shared/workspace-worker.js';
 
 const execFileAsync = promisify(execFile);
@@ -19,14 +20,25 @@ const localStateDir = stateDir();
 const logsDir = path.join(localStateDir, 'logs');
 const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
 const nodeBin = process.execPath;
-const pathEnv = servicePath(nodeBin);
-const helperEntry = path.join(root, 'dist', 'scripts', 'reload-launchagents.js');
 const installStatus = path.join(localStateDir, 'install-macos.status.json');
 
 await fs.mkdir(agentsDir, { recursive: true });
 await fs.mkdir(logsDir, { recursive: true, mode: 0o700 });
 
+const releaseId = await runtimeReleaseId(root, DEX_REACH_VERSION);
+const runtimeRoot = await stageRuntimeRelease(root, localStateDir, releaseId);
+const sourceNodeBin = path.join(root, 'node_modules', '.bin');
+const inheritedPath = (process.env.PATH || '').split(path.delimiter)
+  .filter(entry => path.resolve(entry) !== path.resolve(sourceNodeBin))
+  .join(path.delimiter);
+const pathEnv = servicePath(nodeBin, inheritedPath, runtimeRoot);
+const helperEntry = path.join(runtimeRoot, 'dist', 'scripts', 'reload-launchagents.js');
+console.log(`Staged immutable runtime release ${runtimeRoot}`);
+
 const ownerEnv = await readEnvFile(path.join(localStateDir, 'secrets.env')).catch((): Record<string, string> => ({}));
+const gatewayPort = Number(ownerEnv.DEX_REACH_GATEWAY_PORT || 8787);
+if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65535) throw new Error('invalid DEX_REACH_GATEWAY_PORT');
+const healthUrl = `http://127.0.0.1:${gatewayPort}/healthz`;
 const currentNodeId = process.env.DEX_REACH_NODE_ID || ownerEnv.DEX_REACH_NODE_ID || os.hostname().toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
 const nodeEnv = path.join(localStateDir, 'nodes', `${currentNodeId}.env`);
 const nodeSettings = await readEnvFile(nodeEnv);
@@ -64,7 +76,7 @@ for (const service of services) {
     envFile: service.envFile,
     stateDir: service.stateDir,
     pathEnv,
-    root,
+    root: runtimeRoot,
     nodeBin,
     logsDir
   }), 0o600);
@@ -81,7 +93,7 @@ await atomicWriteFile(canaryTarget, launchdIntervalPlist({
   envFile: ownerEnvFile,
   stateDir: localStateDir,
   pathEnv,
-  root,
+  root: runtimeRoot,
   nodeBin,
   logsDir,
   intervalSeconds: 6 * 60 * 60,
@@ -108,6 +120,7 @@ const helperArgs = [
   '--domain', domain,
   '--status', installStatus,
   '--delay-ms', '3000',
+  '--health-url', healthUrl,
   '--cleanup-plist', helperTarget
 ];
 for (const service of services) helperArgs.push('--service', service.label, service.target);
@@ -116,7 +129,7 @@ helperArgs.push('--service', canaryLabel, canaryTarget);
 await atomicWriteFile(helperTarget, launchdOneShotPlist({
   label: helperLabel,
   programArguments: helperArgs,
-  workingDirectory: root,
+  workingDirectory: runtimeRoot,
   logsDir
 }), 0o600);
 await execFileAsync('/usr/bin/plutil', ['-lint', helperTarget]);
@@ -127,6 +140,7 @@ await atomicWriteFile(installStatus, JSON.stringify({
   scheduledAt: new Date().toISOString(),
   domain,
   helperLabel,
+  runtimeRoot,
   services: [...services.map(service => ({ label: service.label, target: service.target })), { label: canaryLabel, target: canaryTarget }]
 }, null, 2) + '\n');
 
