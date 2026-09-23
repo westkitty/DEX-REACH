@@ -67,3 +67,15 @@ test('macOS installer does not run the mutable checkout build before runtime sta
   assert.equal(packageJson.scripts?.['install:macos'], 'tsx scripts/install-macos.ts');
   assert.doesNotMatch(packageJson.scripts?.['install:macos'] || '', /npm run build|prebuild/);
 });
+
+
+test('golden verification actively proves OAuth refresh recovery before health evaluation', async () => {
+  const packageJson = JSON.parse(await fs.readFile(path.resolve('package.json'), 'utf8')) as { scripts?: Record<string, string> };
+  const golden = packageJson.scripts?.['verify:golden'] || '';
+  assert.match(golden, /npm run oauth:canary/);
+  assert.ok(
+    golden.indexOf('npm run smoke') < golden.indexOf('npm run oauth:canary') &&
+    golden.indexOf('npm run oauth:canary') < golden.indexOf('npm run oauth:health'),
+    'golden must prove public MCP first, force refresh recovery second, then evaluate token health'
+  );
+});
