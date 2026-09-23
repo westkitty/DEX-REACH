@@ -9,7 +9,7 @@ import { readEnvFile } from './lib/node-files.js';
 import { atomicWriteFile } from '../src/shared/state-io.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
 import { launchdIntervalPlist, launchdOneShotPlist, launchdPlist, servicePath } from './lib/service.js';
-import { runtimeReleaseId, stageRuntimeRelease } from './lib/runtime-release.js';
+import { buildRuntimeRelease, runtimeReleaseId } from './lib/runtime-release.js';
 import { workspaceWorkerConfigFile, workspaceWorkerDir, workspaceWorkerRootsHash } from '../src/shared/workspace-worker.js';
 
 const execFileAsync = promisify(execFile);
@@ -26,7 +26,7 @@ await fs.mkdir(agentsDir, { recursive: true });
 await fs.mkdir(logsDir, { recursive: true, mode: 0o700 });
 
 const releaseId = await runtimeReleaseId(root, DEX_REACH_VERSION);
-const runtimeRoot = await stageRuntimeRelease(root, localStateDir, releaseId);
+const runtimeRoot = await buildRuntimeRelease(root, localStateDir, releaseId, nodeBin);
 const sourceNodeBin = path.join(root, 'node_modules', '.bin');
 const inheritedPath = (process.env.PATH || '').split(path.delimiter)
   .filter(entry => path.resolve(entry) !== path.resolve(sourceNodeBin))
