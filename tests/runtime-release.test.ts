@@ -60,3 +60,10 @@ test('service PATH prefers immutable runtime binaries over mutable checkout bina
   assert.equal(entries[1], `${runtime}/node_modules/.bin`);
   assert.ok(entries.includes('/custom/bin'));
 });
+
+
+test('macOS installer does not run the mutable checkout build before runtime staging', async () => {
+  const packageJson = JSON.parse(await fs.readFile(path.resolve('package.json'), 'utf8')) as { scripts?: Record<string, string> };
+  assert.equal(packageJson.scripts?.['install:macos'], 'tsx scripts/install-macos.ts');
+  assert.doesNotMatch(packageJson.scripts?.['install:macos'] || '', /npm run build|prebuild/);
+});
