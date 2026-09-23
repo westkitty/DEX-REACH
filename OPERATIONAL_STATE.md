@@ -1,7 +1,7 @@
 # DEX//REACH Operational State
 
 <!-- operational-state:metadata
-{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":56,"last_updated":"2026-09-20T20:22:12Z","current_baseline":{"identity":"Release closure complete: installed runtime code 31bf8a1 passed real Claude Code payload plus six-stage trace acceptance; final PR head a682f627 passed validate, runtime-proof, reproducible-build and CodeQL; PR #2 merged to main as 6bf7880b30ad8b709324b537cf52297698598b66.","state":"released-merged","last_verified":"2026-09-20T20:22:12Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, Dock control terminal, project docs"],"linked_parent_state":null}
+{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":57,"last_updated":"2026-09-23T04:47:30Z","current_baseline":{"identity":"Release closure complete: installed runtime code 31bf8a1 passed real Claude Code payload plus six-stage trace acceptance; final PR head a682f627 passed validate, runtime-proof, reproducible-build and CodeQL; PR #2 merged to main as 6bf7880b30ad8b709324b537cf52297698598b66.","state":"released-merged","last_verified":"2026-09-20T20:22:12Z"},"scope_boundaries":["DEX//REACH gateway, node agent, MCP interface, local service install, Dock control terminal, project docs"],"linked_parent_state":null}
 -->
 
 ## 1. Project Identity and Scope
@@ -17,6 +17,8 @@ The primary macOS deployment is running DEX//REACH **0.3.2** from installed runt
 A real configured Claude Code 2.1.267 session was then isolated to the single explicit DEX MCP server and allowed only `mcp__dex-reach__reach_fingerprint`. Claude called `reach_fingerprint` exactly once for `node_id = macbook-air.local` and `cwd = /Users/andrew/DEX-REACH`; the tool result contained the useful fingerprint payload in `content` and trace id `7e58bf5e2dff5b8e96bdcd4ec84f0ee0` only in `_meta['dex-reach/trace-id']`. Claude rendered the fingerprint payload successfully. `npm run dex -- trace 7e58bf5e2dff5b8e96bdcd4ec84f0ee0` resolved exactly six causal stages for that same real call: `mcp → gateway → node → authorize → execute → receipt`. This closes the deployed real-client result-contract and final trace-acceptance blocker.
 
 The merged release preserves the owner's local regression-only follow-up for client-preferred structured output in `tests/mcp-contract.test.ts` plus the matching proof-harness explanation in `scripts/lib/live-reach.ts`. Those files do not change the coordinator/worker/gateway/node runtime installed at `31bf8a1`. The final PR head `a682f6274b32113362dee3232d79f2368f4e3d5a` passed GitHub `validate`, `runtime-proof`, `reproducible-build`, and CodeQL, then PR #2 merged into `main` as `6bf7880b30ad8b709324b537cf52297698598b66`.
+
+**2026-09-23 OAuth repair — SOURCE MERGED, INSTALLED RUNTIME PENDING.** Live primary-Mac evidence showed a healthy 0.3.2 gateway/node and successful OpenAI MCP initialization/tool calls followed by repeated `POST /token 500` responses from the ChatGPT OAuth connector. PR #3 repairs the source by advertising opt-in `offline_access` while still requiring `mcp:tools` for resource authority, returning typed OAuth grant/scope/token errors, and allowing the same refresh credential to survive repeated or concurrent refresh attempts until normal expiry or revocation. Regression coverage proves that `offline_access` alone cannot authorize MCP access, two concurrent refreshes can use one refresh credential safely, and invalid refresh credentials surface as `invalid_grant`. Tested PR head `70f4d3dee1c28e88be4498fd115fc7451de4e2dd` passed GitHub `validate`, `runtime-proof`, `reproducible-build`, and CodeQL, then PR #3 merged as `2343ffa60f09382f9329d450a226ad1e24161d23`. The primary Mac has **not yet installed this merged repair**, and a fresh real ChatGPT reauthorization/refresh cycle remains pending before the incident can be marked runtime-verified.
 
 Current public server surface:
 
@@ -110,12 +112,15 @@ The detailed proof obligations live in [`docs/INVARIANTS.md`](docs/INVARIANTS.md
 
 ## 6. Known Not Working
 
-No unresolved confirmed primary-Mac/runtime bug remains in the inspected 0.3.2 scope after the current repair/resweep cycle.
+- **KNOWN-001 — ChatGPT OAuth refresh failure on the currently installed primary-Mac runtime:** the installed 0.3.2 gateway/node remain locally healthy, but the observed ChatGPT connector session entered repeated `/token` HTTP 500 failures after earlier successful MCP calls. Source repair is merged in PR #3; installed-runtime activation and real ChatGPT reauthorization/refresh proof are still pending.
+
+No other unresolved confirmed primary-Mac/runtime bug remains in the inspected 0.3.2 scope after the current repair/resweep cycle.
 
 Directly issuing `launchctl kickstart -k` **from the DEX request being killed** is intentionally not a supported self-update mechanism: destroying a transport can destroy its own response. The supported path is `npm run install:macos`, which delegates replacement to the one-shot helper. This is a lifecycle constraint, not an invitation to retry the self-killing path.
 
 ## 7. Implemented but Unverified
 
+- **UNV-001 — Installed ChatGPT OAuth refresh repair:** source repair is merged and all hosted validation gates passed, but the primary Mac has not yet pulled/installed the repaired gateway and no post-install ChatGPT refresh cycle has been observed.
 - **UNV-002 — Second physical device:** no independent second machine has completed the full enrollment/policy matrix. Multi-node evidence is simulation on the primary Mac.
 - **UNV-003 — Linux service runtime:** systemd user-unit generation is implemented/shape-tested but has not run on a real Linux host.
 - **UNV-004 — macOS node-only fresh-machine install:** the node-only installer uses the same staged one-shot replacement design but has not been exercised on a fresh second Mac.
