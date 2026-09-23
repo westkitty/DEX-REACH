@@ -163,7 +163,7 @@ export class ReachOAuthProvider implements OAuthServerProvider {
     const record = this.codes.get(authorizationCode);
     if (!record || record.expiresAt < Date.now() || record.client.client_id !== client.client_id) throw new InvalidGrantError('authorization code is invalid or expired');
     this.codes.delete(authorizationCode);
-    return this.issueTokens(client.client_id, record.params.scopes?.length ? record.params.scopes : [...SUPPORTED_SCOPES], record.params.resource?.toString());
+    return this.issueTokens(client.client_id, record.params.scopes?.length ? record.params.scopes : [...DEFAULT_AUTHORIZATION_SCOPES], record.params.resource?.toString());
   }
   async exchangeRefreshToken(client: OAuthClientInformationFull, refreshToken: string, scopes?: string[], resource?: URL): Promise<OAuthTokens> {
     const record = this.state.refresh[tokenHash(refreshToken)];
