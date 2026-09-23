@@ -56,12 +56,12 @@ A node can be locally set to `off`, `read-only`, or `on`; access can be temporar
 | Exact-action plan/commit + signed receipts | **Verified in 0.3.1** — deployed plan→commit execution and signed-receipt visibility |
 | Two-node routing and policy isolation | **Verified** with a live isolated second-node simulation |
 | Second physical device | **Ready for install, not yet hardware-verified** |
-| Primary macOS service install/reload | **Verified in 0.3.1** — self-hosted install returns before a one-shot launchd reloader replaces gateway/node; node-only fresh-Mac proof remains pending |
+| Primary macOS service install/reload | **Hardened in source** — launchd runs from an immutable private runtime release rather than mutable repository `dist/`/`node_modules/`; post-merge primary-Mac activation remains separately verified |
 | Linux systemd path | **Implemented, not yet tested on a real Linux host** |
 | Windows process execution | **Not supported yet** |
 | Android ADB hardware | **Verified on primary Mac** — wireless ADB connected a Samsung SM-X910; raw ADB state was `device`, DEX `reach_adb_devices` saw the same transport, and harmless identity reads through DEX returned samsung / SM-X910 / Android 16 / SDK 36 |
 | Owner activity ledger | **Verified installed** — persistent runtime exposes owner-safe `activity` plus daemon-backed scheduler/queue state; share mode omits local paths/PIDs |
-| OAuth reliability | **Hardened in source** — dedicated auth router, ChatGPT CIMD + DCR fallback, deterministic expiry→refresh regression, share-safe OAuth diagnostics, and scheduled public-path canary |
+| OAuth reliability | **Hardened** — dedicated auth router, ChatGPT CIMD + DCR fallback, deterministic expiry→refresh regression, share-safe diagnostics, scheduled public-path canary, and immutable installed runtime isolation |
 | Local coordinator daemon | **Verified installed** — `com.stinkyweasel.dex-reach.coordinator` runs persistently and serves queue/capacity state for native and compatibility execution paths |
 
 For the detailed evidence, current limitations, and exact verification matrix, read [`OPERATIONAL_STATE.md`](OPERATIONAL_STATE.md).
@@ -482,7 +482,9 @@ Persistent gateway/primary-node installation on macOS:
 npm run install:macos
 ```
 
-The installer stages and syntax-checks the persistent DEX LaunchAgents plus the OAuth canary first, then hands their replacement to a separate one-shot launchd helper. The canary runs at load and every six hours, traverses the configured public HTTPS endpoint with a persisted OAuth client/refresh credential, and performs only read-only node discovery and fingerprinting. Its credentials and status live under `~/.dex-reach/` with mode `0600`; `doctor --share` never exposes the public endpoint or token material. The installer stages and syntax-checks both LaunchAgents first, then hands their replacement to a separate one-shot launchd helper. This makes `install:macos` safe to invoke through DEX//REACH itself: the command returns before the gateway/node transport is deliberately cycled. A brief disconnect while the services restart is expected; the helper records its final result at `~/.dex-reach/install-macos.status.json`.
+The installer first snapshots the built `dist/` tree and resolved `node_modules/` into an immutable private release under `~/.dex-reach/runtime/releases/`. Every persistent LaunchAgent, the OAuth canary, and the one-shot reload helper then execute from that release rather than from the mutable Git checkout. This keeps `npm ci`, `npm run build`, branch switches, and `verify:golden` from deleting or replacing files underneath a running gateway/node.
+
+After staging and syntax-checking the LaunchAgents, `install:macos` returns and a separate one-shot launchd helper replaces the services. The helper does not call the install complete merely because `kickstart` returned 0: it verifies each persistent DEX service remains running, loopback `/healthz` reports at least one online node, and the OAuth canary exits 0. Only then does `~/.dex-reach/install-macos.status.json` become `complete`. The canary runs at load and every six hours, traverses the configured public HTTPS endpoint with a persisted OAuth client/refresh credential, and performs only read-only node discovery and fingerprinting. Its credentials and status stay under `~/.dex-reach/`; `doctor --share` never exposes token material or the public endpoint.
 
 ### macOS Dock launcher
 
