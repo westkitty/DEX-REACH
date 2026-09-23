@@ -23,7 +23,7 @@ async function socketCall(socketPath: string, request: string): Promise<unknown>
 }
 
 async function waitForSocket(socketPath: string, stderr: () => string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
     try { if ((await fs.lstat(socketPath)).isSocket()) return; } catch { /* startup */ }
     await new Promise(resolve => setTimeout(resolve, 20));
   }
