@@ -22,6 +22,9 @@ export type OAuthCanaryStatus = {
   publicBaseUrl: string;
   nodeOnline: boolean;
   refreshCredentialPresent: boolean;
+  refreshRecoveryVerified?: boolean;
+  postRefreshMcpVerified?: boolean;
+  accessTokenChanged?: boolean;
   failureClass: string | null;
 };
 

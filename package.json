@@ -25,7 +25,7 @@
     "install:node": "npm run build && tsx scripts/install-node.ts",
     "install:dock": "zsh scripts/install-dock-launcher.sh",
     "verify": "npm run typecheck && npm run invariants -- --check && npm test && npm run build && npm audit --omit=dev --audit-level=high && npm run probe:backend",
-    "verify:golden": "npm run verify && npm run smoke && npm run oauth:health",
+    "verify:golden": "npm run verify && npm run smoke && npm run oauth:canary && npm run oauth:health",
     "oauth:canary": "tsx scripts/oauth-canary.ts",
     "oauth:health": "tsx scripts/oauth-health-check.ts"
   },

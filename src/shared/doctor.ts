@@ -139,6 +139,9 @@ export async function collectDoctorReport(options: DoctorOptions = {}): Promise<
               ok: oauthCanary.ok,
               nodeOnline: oauthCanary.nodeOnline,
               refreshCredentialPresent: oauthCanary.refreshCredentialPresent,
+              refreshRecoveryVerified: oauthCanary.refreshRecoveryVerified ?? false,
+              postRefreshMcpVerified: oauthCanary.postRefreshMcpVerified ?? false,
+              accessTokenChanged: oauthCanary.accessTokenChanged ?? false,
               failureClass: oauthCanary.failureClass
             }
           : oauthCanary
