@@ -8,3 +8,7 @@ dist/
 .DS_Store
 coverage/
 release/
+
+.dist-build-*/
+.dist-previous-*/
+.dist-build.lock/

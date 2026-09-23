@@ -4,8 +4,7 @@
   "description": "Secure AI-native remote computing control plane and MCP gateway",
   "scripts": {
     "test": "node --test --import tsx tests/*.test.ts",
-    "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsx scripts/build-atomic.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "gateway": "tsx src/gateway/main.ts",
     "coordinator": "tsx src/coordinator/main.ts",
