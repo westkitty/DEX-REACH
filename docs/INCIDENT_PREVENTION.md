@@ -177,11 +177,12 @@ The installer compounded the problem by treating successful `launchctl kickstart
 
 PR #8 separates **source/build state** from **installed runtime state**.
 
-- `install:macos` stages the current built `dist/` and resolved `node_modules/` into an immutable private release under `~/.dex-reach/runtime/releases/`.
+- `install:macos` compiles TypeScript directly into an immutable private staging release under `~/.dex-reach/runtime/releases/` and copies the resolved `node_modules/` there. It does **not** run checkout `prebuild` first, so migrating from a legacy checkout-backed installation cannot delete the old daemon's `dist/` before the replacement runtime exists.
 - Coordinator, workspace worker, gateway, node, OAuth canary, and the one-shot reload helper execute from that immutable release.
 - The service PATH prefers the immutable release's `node_modules/.bin`; the repository's npm-script `.bin` path is not required by installed services.
 - A clean committed source+lock combination reuses its existing verified release. Dirty installs receive a unique release id rather than mutating an existing release.
 - Runtime staging is atomic: an incomplete staging directory is never used as a LaunchAgent root.
+- `package.json` regression coverage locks `install:macos` to the direct installer path and refuses reintroduction of `npm run build` / `prebuild` ahead of runtime staging.
 - Regression coverage deletes/replaces the source checkout's `dist/` and `node_modules/` after staging and proves the runtime copy remains intact.
 
 The one-shot reload helper now also proves the deployment outcome before recording `state = complete`:
