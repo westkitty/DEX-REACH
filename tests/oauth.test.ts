@@ -6,7 +6,8 @@ import path from 'node:path';
 import type { Response } from 'express';
 import type { AuthorizationParams } from '@modelcontextprotocol/server-legacy/auth';
 import type { OAuthClientInformationFull } from '@modelcontextprotocol/server';
-import { ReachOAuthProvider } from '../src/gateway/auth.js';
+import { ReachOAuthProvider, OFFLINE_ACCESS_SCOPE, REQUIRED_RESOURCE_SCOPE, SUPPORTED_SCOPES } from '../src/gateway/auth.js';
+import { InvalidGrantError, InvalidScopeError } from '@modelcontextprotocol/server-legacy/auth';
 
 test('OAuth approval page escapes untrusted dynamic client names', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-oauth-'));
@@ -108,6 +109,87 @@ test('the issuer identifier defaults to the origin of the resource when none is 
     const provider = new ReachOAuthProvider(dir, 'owner', '0123456789abcdef', new URL('https://example.invalid/mcp'));
     await provider.initialize();
     assert.equal(provider.issuerIdentifier(), 'https://example.invalid/');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('OAuth scopes advertise offline access without making it sufficient for resource authority', async () => {
+  assert.deepEqual(SUPPORTED_SCOPES, [REQUIRED_RESOURCE_SCOPE, OFFLINE_ACCESS_SCOPE]);
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-oauth-offline-'));
+  try {
+    const provider = new ReachOAuthProvider(dir, 'owner', '0123456789abcdef', new URL('https://example.invalid/mcp'));
+    await provider.initialize();
+    const client = {
+      client_id: 'client-offline',
+      client_id_issued_at: Math.floor(Date.now() / 1000),
+      client_name: 'Refresh-capable client',
+      redirect_uris: ['https://client.invalid/callback']
+    } as OAuthClientInformationFull;
+    const response = { type: () => response, send: () => response } as unknown as Response;
+    const params = {
+      redirectUri: 'https://client.invalid/callback',
+      codeChallenge: 'challenge',
+      scopes: [OFFLINE_ACCESS_SCOPE],
+      resource: new URL('https://example.invalid/mcp')
+    } as AuthorizationParams;
+
+    await assert.rejects(provider.authorize(client, params, response), InvalidScopeError);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('refresh tokens survive repeated refreshes and invalid refreshes are typed invalid_grant errors', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-oauth-refresh-'));
+  try {
+    const provider = new ReachOAuthProvider(dir, 'owner', '0123456789abcdef', new URL('https://example.invalid/mcp'));
+    await provider.initialize();
+    const client = {
+      client_id: 'client-refresh',
+      client_id_issued_at: Math.floor(Date.now() / 1000),
+      client_name: 'Concurrent refresh client',
+      redirect_uris: ['https://client.invalid/callback']
+    } as OAuthClientInformationFull;
+    await provider.saveClient(client);
+
+    const params = {
+      redirectUri: 'https://client.invalid/callback',
+      codeChallenge: 'challenge',
+      scopes: [REQUIRED_RESOURCE_SCOPE, OFFLINE_ACCESS_SCOPE],
+      resource: new URL('https://example.invalid/mcp')
+    } as AuthorizationParams;
+    let body = '';
+    const response = {
+      type: () => response,
+      send: (value: string) => { body = value; return response; }
+    } as unknown as Response;
+
+    await provider.authorize(client, params, response);
+    const ticket = body.match(/name="ticket" value="([^"]+)"/)?.[1];
+    assert.ok(ticket);
+    const redirect = new URL(await provider.approve(ticket, 'owner', '0123456789abcdef'));
+    const code = redirect.searchParams.get('code');
+    assert.ok(code);
+
+    const initial = await provider.exchangeAuthorizationCode(client, code);
+    assert.ok(initial.refresh_token);
+    assert.match(initial.scope || '', /mcp:tools/);
+    assert.match(initial.scope || '', /offline_access/);
+
+    const [refreshA, refreshB] = await Promise.all([
+      provider.exchangeRefreshToken(client, initial.refresh_token!),
+      provider.exchangeRefreshToken(client, initial.refresh_token!)
+    ]);
+    assert.equal(refreshA.refresh_token, initial.refresh_token);
+    assert.equal(refreshB.refresh_token, initial.refresh_token);
+    assert.notEqual(refreshA.access_token, refreshB.access_token);
+
+    await assert.rejects(
+      provider.exchangeRefreshToken(client, 'definitely-not-a-real-refresh-token'),
+      InvalidGrantError
+    );
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

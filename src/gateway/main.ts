@@ -96,7 +96,7 @@ app.use(mcpAuthRouter({
   provider: oauth,
   issuerUrl,
   baseUrl: issuerUrl,
-  scopesSupported: ['mcp:tools'],
+  scopesSupported: ['mcp:tools', 'offline_access'],
   resourceServerUrl: resourceUrl,
   resourceName: 'DEX//REACH'
 }));

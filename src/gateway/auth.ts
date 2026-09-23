@@ -2,9 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Response } from 'express';
-import type { OAuthServerProvider, AuthorizationParams } from '@modelcontextprotocol/server-legacy/auth';
-import type { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from '@modelcontextprotocol/server';
-import type { AuthInfo } from '@modelcontextprotocol/server';
+import { InvalidGrantError, InvalidScopeError, type OAuthServerProvider, type AuthorizationParams } from '@modelcontextprotocol/server-legacy/auth';
+import { OAuthError, OAuthErrorCode, type AuthInfo, type OAuthClientInformationFull, type OAuthTokenRevocationRequest, type OAuthTokens } from '@modelcontextprotocol/server';
 import { timingSafeEqualText } from '../shared/security.js';
 import { atomicWriteFile } from '../shared/state-io.js';
 
@@ -30,7 +29,10 @@ type CodeRecord = {
 type PendingApproval = CodeRecord & { ticketId: string };
 
 const EMPTY_STATE: PersistedAuth = { clients: {}, access: {}, refresh: {} };
-export const SUPPORTED_SCOPES: readonly string[] = ['mcp:tools'];
+export const REQUIRED_RESOURCE_SCOPE = 'mcp:tools';
+export const OFFLINE_ACCESS_SCOPE = 'offline_access';
+export const SUPPORTED_SCOPES: readonly string[] = [REQUIRED_RESOURCE_SCOPE, OFFLINE_ACCESS_SCOPE];
+const DEFAULT_AUTHORIZATION_SCOPES: readonly string[] = [REQUIRED_RESOURCE_SCOPE];
 
 function tokenHash(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -114,10 +116,12 @@ export class ReachOAuthProvider implements OAuthServerProvider {
   async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
     if (!client.redirect_uris.map(String).includes(params.redirectUri)) throw new Error('unregistered redirect_uri');
     if (params.resource && params.resource.toString() !== this.resourceUrl.toString()) throw new Error('invalid resource');
-    // Clients that omit `scope` (or register without one) get the single supported scope instead of an
-    // empty grant that the bearer middleware would later reject; unknown scopes are refused outright.
-    const requestedScopes = params.scopes?.length ? params.scopes : [...SUPPORTED_SCOPES];
-    if (requestedScopes.some(scope => !SUPPORTED_SCOPES.includes(scope))) throw new Error('unsupported scope');
+    // `offline_access` is an OAuth session-longevity capability, not machine authority. Clients that
+    // omit `scope` still receive only the resource scope; clients may explicitly add offline_access
+    // so ChatGPT can retain refresh-token connectivity. Unknown scopes and offline-only grants fail.
+    const requestedScopes = params.scopes?.length ? params.scopes : [...DEFAULT_AUTHORIZATION_SCOPES];
+    if (requestedScopes.some(scope => !SUPPORTED_SCOPES.includes(scope))) throw new InvalidScopeError('unsupported scope');
+    if (!requestedScopes.includes(REQUIRED_RESOURCE_SCOPE)) throw new InvalidScopeError(`${REQUIRED_RESOURCE_SCOPE} scope is required`);
     params = { ...params, scopes: requestedScopes };
     const ticketId = randomToken(24);
     this.pending.set(ticketId, { ticketId, client, params, expiresAt: Date.now() + 10 * 60 * 1000 });
@@ -151,30 +155,36 @@ export class ReachOAuthProvider implements OAuthServerProvider {
 
   async challengeForAuthorizationCode(client: OAuthClientInformationFull, authorizationCode: string): Promise<string> {
     const record = this.codes.get(authorizationCode);
-    if (!record || record.expiresAt < Date.now() || record.client.client_id !== client.client_id) throw new Error('invalid authorization code');
+    if (!record || record.expiresAt < Date.now() || record.client.client_id !== client.client_id) throw new InvalidGrantError('authorization code is invalid or expired');
     return record.params.codeChallenge;
   }
 
   async exchangeAuthorizationCode(client: OAuthClientInformationFull, authorizationCode: string): Promise<OAuthTokens> {
     const record = this.codes.get(authorizationCode);
-    if (!record || record.expiresAt < Date.now() || record.client.client_id !== client.client_id) throw new Error('invalid authorization code');
+    if (!record || record.expiresAt < Date.now() || record.client.client_id !== client.client_id) throw new InvalidGrantError('authorization code is invalid or expired');
     this.codes.delete(authorizationCode);
-    return this.issueTokens(client.client_id, record.params.scopes?.length ? record.params.scopes : [...SUPPORTED_SCOPES], record.params.resource?.toString());
+    return this.issueTokens(client.client_id, record.params.scopes?.length ? record.params.scopes : [...DEFAULT_AUTHORIZATION_SCOPES], record.params.resource?.toString());
   }
   async exchangeRefreshToken(client: OAuthClientInformationFull, refreshToken: string, scopes?: string[], resource?: URL): Promise<OAuthTokens> {
     const record = this.state.refresh[tokenHash(refreshToken)];
-    if (!record || record.expiresAt < Date.now() || record.clientId !== client.client_id) throw new Error('invalid refresh token');
+    if (!record || record.expiresAt < Date.now() || record.clientId !== client.client_id) {
+      throw new InvalidGrantError('refresh token is invalid, expired, or revoked');
+    }
     const requested = scopes?.length ? scopes : record.scopes;
-    if (requested.some(scope => !record.scopes.includes(scope))) throw new Error('refresh scope escalation is not permitted');
-    if (resource && resource.toString() !== (record.resource || this.resourceUrl.toString())) throw new Error('invalid resource');
-    delete this.state.refresh[tokenHash(refreshToken)];
-    return this.issueTokens(client.client_id, requested, record.resource);
+    if (requested.some(scope => !record.scopes.includes(scope))) throw new InvalidScopeError('refresh scope escalation is not permitted');
+    if (resource && resource.toString() !== (record.resource || this.resourceUrl.toString())) {
+      throw new InvalidGrantError('refresh token resource does not match');
+    }
+    // Keep the refresh credential stable until expiry/revocation. ChatGPT may have several connector
+    // workers refreshing the same authorization; single-use rotation made one successful refresh
+    // invalidate the credential still held by its siblings, producing repeated /token 500 failures.
+    return this.issueAccessToken(client.client_id, requested, record.resource, refreshToken);
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     this.sweep();
     const record = this.state.access[tokenHash(token)];
-    if (!record || record.expiresAt < Date.now()) throw new Error('invalid or expired access token');
+    if (!record || record.expiresAt < Date.now()) throw new OAuthError(OAuthErrorCode.InvalidToken, 'invalid or expired access token');
     return {
       token,
       clientId: record.clientId,
@@ -192,12 +202,26 @@ export class ReachOAuthProvider implements OAuthServerProvider {
   }
 
   private async issueTokens(clientId: string, scopes: string[], resource?: string): Promise<OAuthTokens> {
-    const accessToken = randomToken(32);
     const refreshToken = randomToken(32);
-    const now = Date.now();
     const targetResource = resource || this.resourceUrl.toString();
-    this.state.access[tokenHash(accessToken)] = { clientId, scopes, expiresAt: now + 60 * 60 * 1000, resource: targetResource };
-    this.state.refresh[tokenHash(refreshToken)] = { clientId, scopes, expiresAt: now + 30 * 24 * 60 * 60 * 1000, resource: targetResource };
+    this.state.refresh[tokenHash(refreshToken)] = {
+      clientId,
+      scopes,
+      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      resource: targetResource
+    };
+    return this.issueAccessToken(clientId, scopes, targetResource, refreshToken);
+  }
+
+  private async issueAccessToken(clientId: string, scopes: string[], resource: string | undefined, refreshToken: string): Promise<OAuthTokens> {
+    const accessToken = randomToken(32);
+    const targetResource = resource || this.resourceUrl.toString();
+    this.state.access[tokenHash(accessToken)] = {
+      clientId,
+      scopes,
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      resource: targetResource
+    };
     await this.persist();
     return {
       access_token: accessToken,
