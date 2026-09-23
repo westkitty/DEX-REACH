@@ -148,3 +148,62 @@ This class of incident is dangerous operationally because it looks like one recu
 - Do not treat a fresh reauthorization as proof that refresh works.
 - Do not widen allowed Origins, roots, tool scopes, node policy, or client ceilings to make authentication pass.
 - Do not put OAuth state or canary credential files in Git, logs, screenshots, or support bundles.
+
+
+---
+
+## Incident D — maintenance deleted files underneath the installed launchd runtime
+
+### Confirmed symptom
+
+The primary Mac repeatedly showed a healthy gateway/node, then later dropped the node during or after repository maintenance and verification. Node stderr contained direct module-resolution failures against the live checkout, including missing `dist/src/node/main.js`, missing compiled shared modules under `dist/`, and missing packages under the repository's `node_modules/`.
+
+### Root cause
+
+The persistent macOS LaunchAgents executed directly from `/Users/andrew/DEX-REACH/dist/` and resolved dependencies from `/Users/andrew/DEX-REACH/node_modules/`.
+
+Those are development outputs, not durable installed-runtime paths:
+
+- `npm ci` replaces `node_modules/`;
+- `npm run build` runs `prebuild`, which removes `dist/` before rebuilding it;
+- branch switches and repository work may replace either tree;
+- `verify:golden` legitimately runs a production build.
+
+A running process may survive some of those mutations because already-loaded modules remain in memory, but any launchd restart, delayed import, adapter startup, or reconnect during the replacement window can resolve against missing files. `KeepAlive` then retries the same broken entrypoint. This made ordinary source verification capable of destabilizing the installed control plane.
+
+The installer compounded the problem by treating successful `launchctl kickstart` commands as installation completion without proving the resulting services remained alive, the node actually re-registered, or the canary completed.
+
+### Repair
+
+PR #8 separates **source/build state** from **installed runtime state**.
+
+- `install:macos` stages the current built `dist/` and resolved `node_modules/` into an immutable private release under `~/.dex-reach/runtime/releases/`.
+- Coordinator, workspace worker, gateway, node, OAuth canary, and the one-shot reload helper execute from that immutable release.
+- The service PATH prefers the immutable release's `node_modules/.bin`; the repository's npm-script `.bin` path is not required by installed services.
+- A clean committed source+lock combination reuses its existing verified release. Dirty installs receive a unique release id rather than mutating an existing release.
+- Runtime staging is atomic: an incomplete staging directory is never used as a LaunchAgent root.
+- Regression coverage deletes/replaces the source checkout's `dist/` and `node_modules/` after staging and proves the runtime copy remains intact.
+
+The one-shot reload helper now also proves the deployment outcome before recording `state = complete`:
+
+1. every persistent DEX LaunchAgent must remain `state = running` with a PID;
+2. loopback `/healthz` must report at least one online node;
+3. only after the node is online is the OAuth canary reloaded;
+4. the canary must finish with exit code 0.
+
+Any failure produces `state = failed` in `~/.dex-reach/install-macos.status.json` instead of a false-success install record.
+
+### Fast recurrence signature
+
+- **LaunchAgent stderr mentions repository `dist/` or repository `node_modules/`:** installed service is still using a legacy mutable-checkout plist and must be reinstalled from current `main`.
+- **Install status says `complete`:** current installer guarantees persistent services stayed running, at least one node registered, and the canary exited 0. If those postconditions are absent, the machine is running an older installer.
+- **Repository build/test work succeeds while the node remains online:** expected after immutable-runtime activation.
+- **Node disappears while its LaunchAgent program path is under `~/.dex-reach/runtime/releases/`:** this incident class is no longer the default explanation; diagnose gateway auth, node credentials, network state, or a real runtime crash instead.
+
+### False leads to avoid
+
+- Do not normalize repeated `launchctl kickstart` as maintenance.
+- Do not run `npm ci` or destructive build cleanup as a way to repair an already-running legacy installation; install the immutable runtime first.
+- Do not call a successful `kickstart` proof that the service stayed alive.
+- Do not remove older runtime releases merely because a newer source checkout exists; an installed LaunchAgent may still reference them until replacement is proven complete.
+- Do not place credentials or mutable policy inside a runtime release. Authority-bearing state remains under the existing private DEX state files and is loaded separately at runtime.
