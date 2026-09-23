@@ -138,7 +138,8 @@ WantedBy=default.target
 export function launchAgentsDir(): string { return path.join(os.homedir(), 'Library', 'LaunchAgents'); }
 export function systemdUserDir(): string { return path.join(os.homedir(), '.config', 'systemd', 'user'); }
 
-export function servicePath(nodeBin = process.execPath, inherited = process.env.PATH || ''): string {
-  const entries = [path.dirname(nodeBin), '/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin', ...inherited.split(path.delimiter)];
+export function servicePath(nodeBin = process.execPath, inherited = process.env.PATH || '', runtimeRoot?: string): string {
+  const runtimeBin = runtimeRoot ? path.join(runtimeRoot, 'node_modules', '.bin') : '';
+  const entries = [path.dirname(nodeBin), runtimeBin, '/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin', ...inherited.split(path.delimiter)];
   return [...new Set(entries.filter(Boolean))].join(path.delimiter);
 }
