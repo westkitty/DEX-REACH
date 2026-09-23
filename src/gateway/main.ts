@@ -1,7 +1,7 @@
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/server';
-import { createMcpExpressApp } from '@modelcontextprotocol/express';
+import { createGatewayExpressApp } from './http-app.js';
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/server-legacy/auth';
 import { requireBearerAuth } from '@modelcontextprotocol/express';
@@ -31,8 +31,7 @@ if (config.legacyNodeId && config.legacyNodeToken) await nodeAuth.importLegacy(c
 const registry = new NodeRegistry(nodeAuth, config.stateDir);
 await registry.initialize();
 
-const allowedHosts = [config.publicBaseUrl.host, config.publicBaseUrl.hostname, 'localhost', '127.0.0.1'];
-const app = createMcpExpressApp({ host: config.host, allowedHosts: [...new Set(allowedHosts)] });
+const app = createGatewayExpressApp(config.host, config.publicBaseUrl);
 // The public HTTPS ingress (Tailscale Funnel) proxies from loopback and sets X-Forwarded-For;
 // trusting loopback lets the SDK rate limiters key on the real client instead of failing validation.
 app.set('trust proxy', 'loopback');
