@@ -61,6 +61,7 @@ A node can be locally set to `off`, `read-only`, or `on`; access can be temporar
 | Windows process execution | **Not supported yet** |
 | Android ADB hardware | **Verified on primary Mac** — wireless ADB connected a Samsung SM-X910; raw ADB state was `device`, DEX `reach_adb_devices` saw the same transport, and harmless identity reads through DEX returned samsung / SM-X910 / Android 16 / SDK 36 |
 | Owner activity ledger | **Verified installed** — persistent runtime exposes owner-safe `activity` plus daemon-backed scheduler/queue state; share mode omits local paths/PIDs |
+| OAuth reliability | **Hardened in source** — dedicated auth router, ChatGPT CIMD + DCR fallback, deterministic expiry→refresh regression, share-safe OAuth diagnostics, and scheduled public-path canary |
 | Local coordinator daemon | **Verified installed** — `com.stinkyweasel.dex-reach.coordinator` runs persistently and serves queue/capacity state for native and compatibility execution paths |
 
 For the detailed evidence, current limitations, and exact verification matrix, read [`OPERATIONAL_STATE.md`](OPERATIONAL_STATE.md).
@@ -163,6 +164,8 @@ npm run dex -- policy-check
 npm run dex -- doctor
 npm run dex -- doctor --json --deep
 npm run dex -- doctor --share
+npm run oauth:canary
+npm run oauth:health
 npm run dex -- activity
 npm run dex -- activity --watch
 npm run dex -- activity --history
@@ -479,7 +482,7 @@ Persistent gateway/primary-node installation on macOS:
 npm run install:macos
 ```
 
-The installer stages and syntax-checks both LaunchAgents first, then hands their replacement to a separate one-shot launchd helper. This makes `install:macos` safe to invoke through DEX//REACH itself: the command returns before the gateway/node transport is deliberately cycled. A brief disconnect while the services restart is expected; the helper records its final result at `~/.dex-reach/install-macos.status.json`.
+The installer stages and syntax-checks the persistent DEX LaunchAgents plus the OAuth canary first, then hands their replacement to a separate one-shot launchd helper. The canary runs at load and every six hours, traverses the configured public HTTPS endpoint with a persisted OAuth client/refresh credential, and performs only read-only node discovery and fingerprinting. Its credentials and status live under `~/.dex-reach/` with mode `0600`; `doctor --share` never exposes the public endpoint or token material. The installer stages and syntax-checks both LaunchAgents first, then hands their replacement to a separate one-shot launchd helper. This makes `install:macos` safe to invoke through DEX//REACH itself: the command returns before the gateway/node transport is deliberately cycled. A brief disconnect while the services restart is expected; the helper records its final result at `~/.dex-reach/install-macos.status.json`.
 
 ### macOS Dock launcher
 
@@ -599,6 +602,8 @@ Every successful `reach_plan` captures the fresh execution fingerprint and binds
 
 If the target node is OFF, read-only for a mutation, offline, unknown, revoked, or no longer matches a planned execution identity, DEX//REACH returns an error. It does not silently choose another computer.
 
+If a ChatGPT connection must be reauthorized, treat that as **recovery**, not proof of a fix. Repeated reauthorization is an OAuth incident: run `npm run dex -- doctor --share`, inspect the canary/token-health evidence, and repair the server/client lifecycle rather than normalizing reconnects.
+
 ---
 
 ## Verification
@@ -621,7 +626,7 @@ Full deployed golden-worker gate:
 npm run verify:golden
 ```
 
-`npm run verify` runs typecheck, the machine invariant-manifest check, the complete regression suite, production build, production dependency audit, and the raw compatibility-backend probe. `npm run verify:golden` adds the live public OAuth/PKCE MCP smoke. The smoke verifies all 16 first-class tools and metadata, the evidence-scoped trust report, deployed node version, the exact 22-tool safe compatibility surface, blocked safety/history/vendor/URL-proxy paths, telemetry/allowed-root policy, child-process credential-environment sanitization, ADB availability, native file/process execution, rejected mismatched execution identity, identity-bound plan→commit, signed receipts, and reversible checkpoint behavior. See [`docs/GOLDEN_WORKER.md`](docs/GOLDEN_WORKER.md) for the end-to-end release path including persistent install and Dock proof.
+`npm run verify` runs typecheck, the machine invariant-manifest check, the complete regression suite, production build, production dependency audit, and the raw compatibility-backend probe. `npm run verify:golden` adds the live public OAuth/PKCE MCP smoke. The OAuth regression suite also drives a deliberately short-lived access token through authorization, expiry, repeated/concurrent refresh, and a subsequent valid access token; invalid refresh credentials must return `invalid_grant` rather than HTTP 500. `verify:golden` additionally fails if the deployed gateway has recorded any `/token` 5xx response since startup. The smoke verifies all 16 first-class tools and metadata, the evidence-scoped trust report, deployed node version, the exact 22-tool safe compatibility surface, blocked safety/history/vendor/URL-proxy paths, telemetry/allowed-root policy, child-process credential-environment sanitization, ADB availability, native file/process execution, rejected mismatched execution identity, identity-bound plan→commit, signed receipts, and reversible checkpoint behavior. See [`docs/GOLDEN_WORKER.md`](docs/GOLDEN_WORKER.md) for the end-to-end release path including persistent install and Dock proof.
 
 `scripts/sim-two-nodes.ts` drives a second isolated node through the live gateway and verifies multi-node routing, roots, access modes, client caps, audit attribution, credential isolation, and no-fallback behavior.
 

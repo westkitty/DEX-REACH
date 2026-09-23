@@ -25,7 +25,9 @@
     "install:node": "npm run build && tsx scripts/install-node.ts",
     "install:dock": "zsh scripts/install-dock-launcher.sh",
     "verify": "npm run typecheck && npm run invariants -- --check && npm test && npm run build && npm audit --omit=dev --audit-level=high && npm run probe:backend",
-    "verify:golden": "npm run verify && npm run smoke"
+    "verify:golden": "npm run verify && npm run smoke && npm run oauth:health",
+    "oauth:canary": "tsx scripts/oauth-canary.ts",
+    "oauth:health": "tsx scripts/oauth-health-check.ts"
   },
   "keywords": [],
   "author": "",
@@ -37,7 +39,6 @@
     "@modelcontextprotocol/express": "^2.0.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
-    "@modelcontextprotocol/server-legacy": "^2.0.0",
     "@wonderwhy-er/desktop-commander": "^0.2.50",
     "express": "^5.1.0",
     "hono": "^4.13.8",

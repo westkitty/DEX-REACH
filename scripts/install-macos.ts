@@ -8,7 +8,7 @@ import { stateDir } from '../src/shared/local-env.js';
 import { readEnvFile } from './lib/node-files.js';
 import { atomicWriteFile } from '../src/shared/state-io.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
-import { launchdOneShotPlist, launchdPlist, servicePath } from './lib/service.js';
+import { launchdIntervalPlist, launchdOneShotPlist, launchdPlist, servicePath } from './lib/service.js';
 import { workspaceWorkerConfigFile, workspaceWorkerDir, workspaceWorkerRootsHash } from '../src/shared/workspace-worker.js';
 
 const execFileAsync = promisify(execFile);
@@ -72,6 +72,24 @@ for (const service of services) {
   console.log(`Staged ${service.label}`);
 }
 
+const canaryLabel = 'com.stinkyweasel.dex-reach.oauth-canary';
+const canaryTarget = path.join(agentsDir, `${canaryLabel}.plist`);
+const ownerEnvFile = path.join(localStateDir, 'secrets.env');
+await atomicWriteFile(canaryTarget, launchdIntervalPlist({
+  label: canaryLabel,
+  entry: 'dist/scripts/oauth-canary.js',
+  envFile: ownerEnvFile,
+  stateDir: localStateDir,
+  pathEnv,
+  root,
+  nodeBin,
+  logsDir,
+  intervalSeconds: 6 * 60 * 60,
+  environment: { DEX_REACH_NODE_ID: currentNodeId }
+}), 0o600);
+await execFileAsync('/usr/bin/plutil', ['-lint', canaryTarget]);
+console.log(`Staged ${canaryLabel}`);
+
 // Clean up the experimental submitted-job label used by early 0.3.1 development. A submitted job
 // can be respawned by launchd after a successful exit. Production installation instead uses one
 // fixed RunAtLoad helper with no KeepAlive; each install unloads the prior inactive helper first.
@@ -93,6 +111,7 @@ const helperArgs = [
   '--cleanup-plist', helperTarget
 ];
 for (const service of services) helperArgs.push('--service', service.label, service.target);
+helperArgs.push('--service', canaryLabel, canaryTarget);
 
 await atomicWriteFile(helperTarget, launchdOneShotPlist({
   label: helperLabel,
@@ -108,7 +127,7 @@ await atomicWriteFile(installStatus, JSON.stringify({
   scheduledAt: new Date().toISOString(),
   domain,
   helperLabel,
-  services: services.map(service => ({ label: service.label, target: service.target }))
+  services: [...services.map(service => ({ label: service.label, target: service.target })), { label: canaryLabel, target: canaryTarget }]
 }, null, 2) + '\n');
 
 await execFileAsync('/bin/launchctl', ['bootstrap', domain, helperTarget]);
