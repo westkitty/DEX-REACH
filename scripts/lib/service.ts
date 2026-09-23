@@ -21,6 +21,19 @@ export type ServiceSpec = {
   logsDir: string;
 };
 
+export type IntervalLaunchdSpec = {
+  label: string;
+  entry: string;
+  envFile?: string;
+  stateDir?: string;
+  pathEnv?: string;
+  root: string;
+  nodeBin: string;
+  logsDir: string;
+  intervalSeconds: number;
+  environment?: Record<string, string>;
+};
+
 export type OneShotLaunchdSpec = {
   label: string;
   programArguments: string[];
@@ -46,6 +59,30 @@ export function launchdPlist(spec: ServiceSpec): string {
 ${envBlock}<key>RunAtLoad</key><true/>
 <key>KeepAlive</key><true/>
 <key>ThrottleInterval</key><integer>5</integer>
+<key>ProcessType</key><string>Background</string>
+<key>StandardOutPath</key><string>${xml(out)}</string>
+<key>StandardErrorPath</key><string>${xml(err)}</string>
+</dict></plist>\n`;
+}
+
+/** Scheduled macOS LaunchAgent for bounded read-only health canaries. */
+export function launchdIntervalPlist(spec: IntervalLaunchdSpec): string {
+  const out = path.join(spec.logsDir, `${spec.label}.log`);
+  const err = path.join(spec.logsDir, `${spec.label}.err.log`);
+  const env: string[] = [];
+  if (spec.envFile) env.push(`<key>DEX_REACH_ENV_FILE</key><string>${xml(spec.envFile)}</string>`);
+  if (spec.stateDir) env.push(`<key>DEX_REACH_STATE_DIR</key><string>${xml(spec.stateDir)}</string>`);
+  if (spec.pathEnv) env.push(`<key>PATH</key><string>${xml(spec.pathEnv)}</string>`);
+  for (const [key, value] of Object.entries(spec.environment ?? {})) env.push(`<key>${xml(key)}</key><string>${xml(value)}</string>`);
+  const envBlock = env.length ? `<key>EnvironmentVariables</key><dict>${env.join('')}</dict>\n` : '';
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>${xml(spec.label)}</string>
+<key>ProgramArguments</key><array><string>${xml(spec.nodeBin)}</string><string>${xml(path.join(spec.root, spec.entry))}</string></array>
+<key>WorkingDirectory</key><string>${xml(spec.root)}</string>
+${envBlock}<key>RunAtLoad</key><true/>
+<key>StartInterval</key><integer>${Math.max(300, Math.floor(spec.intervalSeconds))}</integer>
 <key>ProcessType</key><string>Background</string>
 <key>StandardOutPath</key><string>${xml(out)}</string>
 <key>StandardErrorPath</key><string>${xml(err)}</string>

@@ -12,6 +12,7 @@ import { invariantManifest } from './invariants.js';
 import { redactWorkStatusForShare, workStatus } from './work-coordinator.js';
 import { listSecretAliases } from './secrets.js';
 import { stateDir } from './local-env.js';
+import { inspectOAuthState, readOAuthCanaryStatus, readOAuthRuntimeHealth } from './oauth-diagnostics.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +68,9 @@ export async function collectDoctorReport(options: DoctorOptions = {}): Promise<
     : null;
   const grants = options.nodeId && access ? access.state.grants.length : 0;
   const coordination = await workStatus();
+  const oauthState = await inspectOAuthState(dir);
+  const oauthHealth = await readOAuthRuntimeHealth(dir);
+  const oauthCanary = await readOAuthCanaryStatus(dir);
   const report: Record<string, unknown> = {
     generatedAt: new Date().toISOString(),
     readOnly: true,
@@ -116,6 +120,30 @@ export async function collectDoctorReport(options: DoctorOptions = {}): Promise<
       uncoordinatedHeavy: coordination.observed.uncoordinatedHeavy,
       dexServices: coordination.observed.dexServices,
       degraded: coordination.degraded
+    },
+    oauth: {
+      discovery: {
+        cimd: true,
+        dcr: true,
+        pkce: 'S256',
+        scopes: ['mcp:tools', 'offline_access'],
+        tokenEndpointAuthMethods: ['none']
+      },
+      state: oauthState,
+      tokenEndpoint: oauthHealth,
+      canary: oauthCanary
+        ? options.share
+          ? {
+              version: oauthCanary.version,
+              checkedAt: oauthCanary.checkedAt,
+              ok: oauthCanary.ok,
+              nodeOnline: oauthCanary.nodeOnline,
+              refreshCredentialPresent: oauthCanary.refreshCredentialPresent,
+              failureClass: oauthCanary.failureClass
+            }
+          : oauthCanary
+        : null,
+      note: 'counts and status classes only; no client ids, token values, hashes, owner credentials, or redirect URIs are exposed'
     },
     mcp: {
       publicActions: 16,
@@ -171,6 +199,7 @@ export function formatDoctorReport(report: Record<string, unknown>): string[] {
     `Version:    ${(report.versions as { source: string }).source} (source; not installed-service proof)`,
     `Policy:     ${policy?.mode ?? 'n/a'} valid=${policy?.valid ?? false} grants=${policy?.grants ?? 0}`,
     `Coordinator: leases=${typeof coordinator.activeLeases === 'number' ? coordinator.activeLeases : 0} queue=${typeof coordinator.queueDepth === 'number' ? coordinator.queueDepth : 0}`,
+    `OAuth:      state=${(report.oauth as any)?.state?.valid ? 'valid' : 'unverified'} refresh=${(report.oauth as any)?.state?.activeRefreshTokens ?? 0} token5xx=${(report.oauth as any)?.tokenEndpoint?.token5xx ?? 0}`,
     `MCP:        16 public actions; live client/golden smoke is a separate proof`,
     ...((report.limitations as string[]).map(item => `Note:       ${item}`))
   ];

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { AuditLog, summarizeContent } from '../src/shared/audit.js';
 import { redact } from '../src/shared/security.js';
-import { launchdOneShotPlist, launchdPlist, servicePath, systemdUnit } from '../scripts/lib/service.js';
+import { launchdIntervalPlist, launchdOneShotPlist, launchdPlist, servicePath, systemdUnit } from '../scripts/lib/service.js';
 
 test('audit records attribute the client and omit file contents and credentials', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-audit-'));
@@ -64,4 +64,25 @@ test('self-reload helper is a true one-shot LaunchAgent with escaped arguments',
   assert.doesNotMatch(plist, /KeepAlive/);
   assert.match(plist, /a&amp;b&lt;c&gt;/);
   assert.match(plist, /WorkingDirectory<\/key><string>\/opt\/dex root<\/string>/);
+});
+
+
+test('OAuth canary launchd template is scheduled, non-persistent, and contains no secret values', () => {
+  const plist = launchdIntervalPlist({
+    label: 'com.stinkyweasel.dex-reach.oauth-canary',
+    entry: 'dist/scripts/oauth-canary.js',
+    envFile: '/Users/test/.dex-reach/secrets.env',
+    stateDir: '/Users/test/.dex-reach',
+    pathEnv: '/usr/bin:/bin',
+    root: '/Users/test/DEX-REACH',
+    nodeBin: '/usr/bin/node',
+    logsDir: '/Users/test/.dex-reach/logs',
+    intervalSeconds: 21600,
+    environment: { DEX_REACH_NODE_ID: 'macbook-air.local' }
+  });
+  assert.match(plist, /StartInterval<\/key><integer>21600<\/integer>/);
+  assert.match(plist, /DEX_REACH_NODE_ID<\/key><string>macbook-air\.local<\/string>/);
+  assert.match(plist, /DEX_REACH_ENV_FILE<\/key><string>\/Users\/test\/\.dex-reach\/secrets\.env<\/string>/);
+  assert.doesNotMatch(plist, /KeepAlive/);
+  assert.doesNotMatch(plist, /PASSWORD|TOKEN|SECRET=/);
 });

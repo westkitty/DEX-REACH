@@ -2,8 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Response } from 'express';
-import { InvalidGrantError, InvalidScopeError, type OAuthServerProvider, type AuthorizationParams } from '@modelcontextprotocol/server-legacy/auth';
 import { OAuthError, OAuthErrorCode, type AuthInfo, type OAuthClientInformationFull, type OAuthTokenRevocationRequest, type OAuthTokens } from '@modelcontextprotocol/server';
+import { InvalidGrantError, InvalidScopeError, type AuthorizationParams } from './oauth-types.js';
 import { timingSafeEqualText } from '../shared/security.js';
 import { atomicWriteFile } from '../shared/state-io.js';
 
@@ -68,7 +68,9 @@ class PersistentClientsStore {
   }
 }
 
-export class ReachOAuthProvider implements OAuthServerProvider {
+export type OAuthTokenLifetimes = { accessTokenMs?: number; refreshTokenMs?: number };
+
+export class ReachOAuthProvider {
   readonly clientsStore: PersistentClientsStore;
   private state: PersistedAuth = structuredClone(EMPTY_STATE);
   private readonly codes = new Map<string, CodeRecord>();
@@ -81,7 +83,8 @@ export class ReachOAuthProvider implements OAuthServerProvider {
     private readonly ownerUser: string,
     private readonly ownerPassword: string,
     private readonly resourceUrl: URL,
-    private readonly issuerUrl: URL = new URL('/', resourceUrl)
+    private readonly issuerUrl: URL = new URL('/', resourceUrl),
+    private readonly tokenLifetimes: OAuthTokenLifetimes = {}
   ) {
     this.stateFile = path.join(stateDir, 'oauth.json');
     this.clientsStore = new PersistentClientsStore(this);
@@ -159,11 +162,25 @@ export class ReachOAuthProvider implements OAuthServerProvider {
     return record.params.codeChallenge;
   }
 
-  async exchangeAuthorizationCode(client: OAuthClientInformationFull, authorizationCode: string): Promise<OAuthTokens> {
+  async exchangeAuthorizationCode(
+    client: OAuthClientInformationFull,
+    authorizationCode: string,
+    codeVerifier?: string,
+    redirectUri?: string,
+    resource?: URL
+  ): Promise<OAuthTokens> {
     const record = this.codes.get(authorizationCode);
-    if (!record || record.expiresAt < Date.now() || record.client.client_id !== client.client_id) throw new InvalidGrantError('authorization code is invalid or expired');
+    if (!record || record.expiresAt < Date.now() || record.client.client_id !== client.client_id) {
+      throw new InvalidGrantError('authorization code is invalid or expired');
+    }
+    if (!codeVerifier) throw new InvalidGrantError('PKCE code verifier is required');
+    const challenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+    if (!timingSafeEqualText(challenge, record.params.codeChallenge)) throw new InvalidGrantError('PKCE verification failed');
+    if (redirectUri && redirectUri !== record.params.redirectUri) throw new InvalidGrantError('redirect_uri does not match authorization request');
+    const expectedResource = record.params.resource?.toString() || this.resourceUrl.toString();
+    if (resource && resource.toString() !== expectedResource) throw new InvalidGrantError('authorization code resource does not match');
     this.codes.delete(authorizationCode);
-    return this.issueTokens(client.client_id, record.params.scopes?.length ? record.params.scopes : [...DEFAULT_AUTHORIZATION_SCOPES], record.params.resource?.toString());
+    return this.issueTokens(client.client_id, record.params.scopes?.length ? record.params.scopes : [...DEFAULT_AUTHORIZATION_SCOPES], expectedResource);
   }
   async exchangeRefreshToken(client: OAuthClientInformationFull, refreshToken: string, scopes?: string[], resource?: URL): Promise<OAuthTokens> {
     const record = this.state.refresh[tokenHash(refreshToken)];
@@ -207,7 +224,7 @@ export class ReachOAuthProvider implements OAuthServerProvider {
     this.state.refresh[tokenHash(refreshToken)] = {
       clientId,
       scopes,
-      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      expiresAt: Date.now() + (this.tokenLifetimes.refreshTokenMs ?? 30 * 24 * 60 * 60 * 1000),
       resource: targetResource
     };
     return this.issueAccessToken(clientId, scopes, targetResource, refreshToken);
@@ -219,7 +236,7 @@ export class ReachOAuthProvider implements OAuthServerProvider {
     this.state.access[tokenHash(accessToken)] = {
       clientId,
       scopes,
-      expiresAt: Date.now() + 60 * 60 * 1000,
+      expiresAt: Date.now() + (this.tokenLifetimes.accessTokenMs ?? 60 * 60 * 1000),
       resource: targetResource
     };
     await this.persist();
@@ -227,7 +244,7 @@ export class ReachOAuthProvider implements OAuthServerProvider {
       access_token: accessToken,
       refresh_token: refreshToken,
       token_type: 'Bearer',
-      expires_in: 3600,
+      expires_in: Math.max(1, Math.floor((this.tokenLifetimes.accessTokenMs ?? 60 * 60 * 1000) / 1000)),
       scope: scopes.join(' ')
     };
   }

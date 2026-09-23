@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/server';
 import { createGatewayExpressApp } from './http-app.js';
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
-import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/server-legacy/auth';
+import { createOAuthRouter, oauthProtectedResourceMetadataUrl } from './oauth-server.js';
 import { requireBearerAuth } from '@modelcontextprotocol/express';
 import { loadLocalSecrets } from '../shared/local-env.js';
 import { AuditLog } from '../shared/audit.js';
@@ -15,6 +15,7 @@ import { createReachMcpServer } from './mcp.js';
 import { classifyClient } from '../shared/access.js';
 import type { RequestActor } from '../shared/protocol.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
+import { OAuthHealthRecorder } from '../shared/oauth-diagnostics.js';
 
 loadLocalSecrets();
 const config = loadGatewayConfig();
@@ -24,8 +25,10 @@ const audit = new AuditLog();
 // issuerUrl is handed over explicitly so the `iss` on the authorization response is the same
 // string the discovery document publishes, not one derived separately and liable to drift.
 const oauth = new ReachOAuthProvider(config.stateDir, config.ownerUser, config.ownerPassword, resourceUrl, issuerUrl);
+const oauthHealth = new OAuthHealthRecorder(config.stateDir);
 const nodeAuth = new NodeAuthStore(config.stateDir);
 await oauth.initialize();
+await oauthHealth.initialize();
 await nodeAuth.initialize();
 if (config.legacyNodeId && config.legacyNodeToken) await nodeAuth.importLegacy(config.legacyNodeId, config.legacyNodeToken);
 const registry = new NodeRegistry(nodeAuth, config.stateDir);
@@ -91,16 +94,14 @@ app.post('/dex/approve', async (req, res) => {
   }
 });
 
-app.use(mcpAuthRouter({
+app.use(createOAuthRouter({
   provider: oauth,
   issuerUrl,
-  baseUrl: issuerUrl,
-  scopesSupported: ['mcp:tools', 'offline_access'],
-  resourceServerUrl: resourceUrl,
-  resourceName: 'DEX//REACH'
+  resourceUrl,
+  health: oauthHealth
 }));
 
-const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(resourceUrl);
+const resourceMetadataUrl = oauthProtectedResourceMetadataUrl(resourceUrl);
 const bearer = requireBearerAuth({
   verifier: oauth,
   requiredScopes: ['mcp:tools'],

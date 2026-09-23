@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import type { Response } from 'express';
-import type { AuthorizationParams } from '@modelcontextprotocol/server-legacy/auth';
+import type { AuthorizationParams } from '../src/gateway/oauth-types.js';
 import type { OAuthClientInformationFull } from '@modelcontextprotocol/server';
 import { ReachOAuthProvider, OFFLINE_ACCESS_SCOPE, REQUIRED_RESOURCE_SCOPE, SUPPORTED_SCOPES } from '../src/gateway/auth.js';
-import { InvalidGrantError, InvalidScopeError } from '@modelcontextprotocol/server-legacy/auth';
+import { InvalidGrantError, InvalidScopeError } from '../src/gateway/oauth-types.js';
 
 test('OAuth approval page escapes untrusted dynamic client names', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-oauth-'));
@@ -154,9 +155,10 @@ test('refresh tokens survive repeated refreshes and invalid refreshes are typed 
     } as OAuthClientInformationFull;
     await provider.saveClient(client);
 
+    const verifier = 'dex-reach-refresh-verifier-abcdefghijklmnopqrstuvwxyz0123456789';
     const params = {
       redirectUri: 'https://client.invalid/callback',
-      codeChallenge: 'challenge',
+      codeChallenge: crypto.createHash('sha256').update(verifier).digest('base64url'),
       scopes: [REQUIRED_RESOURCE_SCOPE, OFFLINE_ACCESS_SCOPE],
       resource: new URL('https://example.invalid/mcp')
     } as AuthorizationParams;
@@ -173,7 +175,7 @@ test('refresh tokens survive repeated refreshes and invalid refreshes are typed 
     const code = redirect.searchParams.get('code');
     assert.ok(code);
 
-    const initial = await provider.exchangeAuthorizationCode(client, code);
+    const initial = await provider.exchangeAuthorizationCode(client, code, verifier, 'https://client.invalid/callback', new URL('https://example.invalid/mcp'));
     assert.ok(initial.refresh_token);
     assert.match(initial.scope || '', /mcp:tools/);
     assert.match(initial.scope || '', /offline_access/);
