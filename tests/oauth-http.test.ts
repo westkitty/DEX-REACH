@@ -149,6 +149,34 @@ test('short-lived access tokens expire, refresh succeeds repeatedly, and invalid
     await provider.verifyAccessToken(aTokens.access_token);
     await provider.verifyAccessToken(bTokens.access_token);
 
+    const revoke = await fetch(new URL('/revoke', base), {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        token: aTokens.access_token,
+        token_type_hint: 'access_token'
+      })
+    });
+    assert.equal(revoke.status, 200);
+    await assert.rejects(provider.verifyAccessToken(aTokens.access_token));
+
+    const afterRevocation = await fetch(new URL('/token', base), {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: clientId,
+        refresh_token: initial.refresh_token,
+        resource: resource.href
+      })
+    });
+    assert.equal(afterRevocation.status, 200);
+    const recoveredTokens = await afterRevocation.json() as { access_token: string; refresh_token: string };
+    assert.ok(recoveredTokens.access_token);
+    assert.equal(recoveredTokens.refresh_token, initial.refresh_token);
+    await provider.verifyAccessToken(recoveredTokens.access_token);
+
     const invalid = await fetch(new URL('/token', base), {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -160,8 +188,8 @@ test('short-lived access tokens expire, refresh succeeds repeatedly, and invalid
 
     const health = await readOAuthRuntimeHealth(dir);
     assert.ok(health);
-    assert.equal(health.tokenRequests, 4);
-    assert.equal(health.token2xx, 3);
+    assert.equal(health.tokenRequests, 5);
+    assert.equal(health.token2xx, 4);
     assert.equal(health.token4xx, 1);
     assert.equal(health.token5xx, 0);
     assert.equal(health.lastFailureCode, 'invalid_grant');

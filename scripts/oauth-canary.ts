@@ -34,6 +34,9 @@ type CanaryStatus = {
   publicBaseUrl: string;
   nodeOnline: boolean;
   refreshCredentialPresent: boolean;
+  refreshRecoveryVerified: boolean;
+  postRefreshMcpVerified: boolean;
+  accessTokenChanged: boolean;
   failureClass: string | null;
 };
 
@@ -128,6 +131,19 @@ async function writeStatus(status: CanaryStatus): Promise<void> {
   await atomicWriteFile(statusFile, JSON.stringify(status, null, 2) + '\n', 0o600);
 }
 
+async function revokeCanaryAccessToken(clientId: string, accessToken: string): Promise<void> {
+  const response = await fetch(new URL('/revoke', base), {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      token: accessToken,
+      token_type_hint: 'access_token'
+    })
+  });
+  if (!response.ok) throw new Error(`access_token_revoke_${response.status}`);
+}
+
 const provider = new CanaryOAuthProvider();
 await provider.initialize();
 const client = new Client({ name: 'dex-reach-oauth-canary', version: DEX_REACH_VERSION }, { capabilities: {} });
@@ -155,17 +171,49 @@ try {
   const fingerprint = await client.callTool({ name: 'reach_fingerprint', arguments: { node_id: nodeId } });
   if (fingerprint.isError) throw new Error('reach_fingerprint_failed');
 
-  const tokens = provider.tokens();
+  // Active refresh proof: revoke only this disposable canary access token, leave its refresh
+  // credential intact, then make another real MCP call. The MCP client transport must receive
+  // invalid_token, refresh through the public /token endpoint, save the replacement access token,
+  // retry the original request, and complete it successfully. This exercises the same recovery
+  // path an expired access token uses without weakening production token lifetimes or touching
+  // any user/client credential.
+  const before = provider.tokens();
+  const clientInformation = provider.clientInformation();
+  if (!before?.access_token) throw new Error('canary_access_token_missing');
+  if (!before.refresh_token) throw new Error('canary_refresh_token_missing');
+  if (!clientInformation?.client_id) throw new Error('canary_client_id_missing');
+
+  await revokeCanaryAccessToken(clientInformation.client_id, before.access_token);
+
+  const recoveredFingerprint = await client.callTool({ name: 'reach_fingerprint', arguments: { node_id: nodeId } });
+  if (recoveredFingerprint.isError) throw new Error('post_refresh_fingerprint_failed');
+
+  const after = provider.tokens();
+  const accessTokenChanged = Boolean(after?.access_token && after.access_token !== before.access_token);
+  const refreshRecoveryVerified = Boolean(accessTokenChanged && after?.refresh_token);
+  if (!refreshRecoveryVerified) throw new Error('refresh_recovery_not_observed');
+
   await writeStatus({
     version: 1,
     checkedAt: new Date().toISOString(),
     ok: true,
     publicBaseUrl: base.origin,
     nodeOnline: true,
-    refreshCredentialPresent: Boolean(tokens?.refresh_token),
+    refreshCredentialPresent: Boolean(after?.refresh_token),
+    refreshRecoveryVerified: true,
+    postRefreshMcpVerified: true,
+    accessTokenChanged,
     failureClass: null
   });
-  console.log(JSON.stringify({ ok: true, nodeId, publicBaseUrl: base.origin, refreshCredentialPresent: Boolean(tokens?.refresh_token) }));
+  console.log(JSON.stringify({
+    ok: true,
+    nodeId,
+    publicBaseUrl: base.origin,
+    refreshCredentialPresent: Boolean(after?.refresh_token),
+    refreshRecoveryVerified: true,
+    postRefreshMcpVerified: true,
+    accessTokenChanged
+  }));
 } catch (error) {
   const failureClass = error instanceof Error ? error.message.replace(/[^a-zA-Z0-9_.:-]+/g, '_').slice(0, 120) : 'unknown_error';
   await writeStatus({
@@ -175,6 +223,9 @@ try {
     publicBaseUrl: base.origin,
     nodeOnline: false,
     refreshCredentialPresent: Boolean(provider.tokens()?.refresh_token),
+    refreshRecoveryVerified: false,
+    postRefreshMcpVerified: false,
+    accessTokenChanged: false,
     failureClass
   });
   console.error(JSON.stringify({ ok: false, failureClass }));

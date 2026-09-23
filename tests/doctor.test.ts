@@ -42,6 +42,9 @@ test('doctor is read-only and --share omits local repository paths', async () =>
       publicBaseUrl: 'https://sensitive-tailnet-name.example',
       nodeOnline: true,
       refreshCredentialPresent: true,
+      refreshRecoveryVerified: true,
+      postRefreshMcpVerified: true,
+      accessTokenChanged: true,
       failureClass: null
     }));
     const before = hashValue(await loadAccessState('n', dir));
@@ -60,7 +63,7 @@ test('doctor is read-only and --share omits local repository paths', async () =>
       discovery: { cimd: boolean; dcr: boolean; pkce: string; scopes: string[] };
       state: { clients: number; activeAccessTokens: number; activeRefreshTokens: number };
       tokenEndpoint: { token2xx: number; token4xx: number; token5xx: number; lastFailureCode: string };
-      canary: { ok: boolean; publicBaseUrl?: string; refreshCredentialPresent: boolean };
+      canary: { ok: boolean; publicBaseUrl?: string; refreshCredentialPresent: boolean; refreshRecoveryVerified: boolean; postRefreshMcpVerified: boolean; accessTokenChanged: boolean };
     };
     assert.equal(oauth.discovery.cimd, true);
     assert.equal(oauth.discovery.dcr, true);
@@ -72,9 +75,12 @@ test('doctor is read-only and --share omits local repository paths', async () =>
     assert.equal(oauth.tokenEndpoint.token2xx, 2);
     assert.equal(oauth.tokenEndpoint.token4xx, 1);
     assert.equal(oauth.tokenEndpoint.token5xx, 0);
-    const canary = oauth.canary as { ok: boolean; publicBaseUrl?: string; refreshCredentialPresent: boolean };
+    const canary = oauth.canary as { ok: boolean; publicBaseUrl?: string; refreshCredentialPresent: boolean; refreshRecoveryVerified: boolean; postRefreshMcpVerified: boolean; accessTokenChanged: boolean };
     assert.equal(canary.ok, true);
     assert.equal(canary.refreshCredentialPresent, true);
+    assert.equal(canary.refreshRecoveryVerified, true);
+    assert.equal(canary.postRefreshMcpVerified, true);
+    assert.equal(canary.accessTokenChanged, true);
     assert.equal(canary.publicBaseUrl, undefined);
     const sharedJson = JSON.stringify(share);
     assert.doesNotMatch(sharedJson, /sensitive-client-id|sensitive-access-hash|sensitive-refresh-hash|sensitive-tailnet-name/);
