@@ -69,7 +69,12 @@ export async function verifyRuntimeRelease(root: string): Promise<void> {
   }
 }
 
-export async function stageRuntimeRelease(sourceRoot: string, stateDir: string, releaseId: string): Promise<string> {
+async function createRuntimeRelease(
+  sourceRoot: string,
+  stateDir: string,
+  releaseId: string,
+  writeDist: (staging: string) => Promise<void>
+): Promise<string> {
   const releases = runtimeReleasesDir(stateDir);
   await fs.mkdir(releases, { recursive: true, mode: 0o700 });
   await fs.chmod(path.dirname(releases), 0o700).catch(() => undefined);
@@ -86,11 +91,7 @@ export async function stageRuntimeRelease(sourceRoot: string, stateDir: string, 
   await fs.mkdir(staging, { recursive: true, mode: 0o700 });
 
   try {
-    await fs.cp(path.join(sourceRoot, 'dist'), path.join(staging, 'dist'), {
-      recursive: true,
-      dereference: false,
-      verbatimSymlinks: true
-    });
+    await writeDist(staging);
     await fs.cp(path.join(sourceRoot, 'node_modules'), path.join(staging, 'node_modules'), {
       recursive: true,
       dereference: false,
@@ -113,4 +114,41 @@ export async function stageRuntimeRelease(sourceRoot: string, stateDir: string, 
   } finally {
     await fs.rm(staging, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+export async function stageRuntimeRelease(sourceRoot: string, stateDir: string, releaseId: string): Promise<string> {
+  return createRuntimeRelease(sourceRoot, stateDir, releaseId, async staging => {
+    await fs.cp(path.join(sourceRoot, 'dist'), path.join(staging, 'dist'), {
+      recursive: true,
+      dereference: false,
+      verbatimSymlinks: true
+    });
+  });
+}
+
+/**
+ * Compile directly into the private release staging directory.
+ *
+ * This is deliberately different from `npm run build`: the installed legacy launchd services may
+ * still be executing from the checkout's current `dist/`. Deleting that tree before the immutable
+ * runtime is active recreates the exact outage this installer is meant to repair.
+ */
+export async function buildRuntimeRelease(
+  sourceRoot: string,
+  stateDir: string,
+  releaseId: string,
+  nodeBin = process.execPath
+): Promise<string> {
+  return createRuntimeRelease(sourceRoot, stateDir, releaseId, async staging => {
+    const compiler = path.join(sourceRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+    if (!await exists(compiler)) throw new Error('runtime install requires the local TypeScript compiler; run npm ci only when no legacy DEX service depends on this checkout');
+    await execFileAsync(nodeBin, [
+      compiler,
+      '-p', path.join(sourceRoot, 'tsconfig.json'),
+      '--outDir', path.join(staging, 'dist')
+    ], {
+      cwd: sourceRoot,
+      maxBuffer: 10 * 1024 * 1024
+    });
+  });
 }
