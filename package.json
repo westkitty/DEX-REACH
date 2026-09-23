@@ -14,7 +14,7 @@
     "probe:backend": "tsx scripts/probe-backend.ts",
     "bootstrap": "tsx scripts/bootstrap.ts",
     "smoke": "tsx scripts/smoke.ts",
-    "install:macos": "npm run build && tsx scripts/install-macos.ts",
+    "install:macos": "tsx scripts/install-macos.ts",
     "uninstall:macos": "tsx scripts/uninstall-macos.ts",
     "nodes": "tsx scripts/node-credentials.ts",
     "dex": "tsx scripts/dex-reach.ts",
