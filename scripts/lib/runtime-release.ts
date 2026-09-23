@@ -104,7 +104,8 @@ export async function stageRuntimeRelease(sourceRoot: string, stateDir: string, 
     try {
       await fs.rename(staging, target);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST' && code !== 'ENOTEMPTY') throw error;
       await verifyRuntimeRelease(target);
     }
     await verifyRuntimeRelease(target);
