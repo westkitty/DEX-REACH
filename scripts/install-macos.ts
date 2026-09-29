@@ -58,7 +58,7 @@ await atomicWriteFile(workspaceWorkerConfigFile(), JSON.stringify({
   rootsHash: workspaceWorkerRootsHash(workerRoots)
 }, null, 2) + '\n', 0o600);
 
-type InstallService = { label: string; entry: string; envFile?: string; stateDir?: string; target: string; rollbackTarget?: string };
+type InstallService = { label: string; entry: string; envFile?: string; stateDir?: string; target: string; rollbackTarget?: string; candidateTarget?: string };
 
 const services: InstallService[] = [
   { label: 'com.stinkyweasel.dex-reach.coordinator', entry: 'dist/src/coordinator/main.js', envFile: undefined, stateDir: localStateDir },
@@ -73,11 +73,11 @@ for (const service of services) {
   if (await snapshotPlist(service.target, backup)) service.rollbackTarget = backup;
 }
 
-// Stage and syntax-check every LaunchAgent before replacing any live process. This matters when
-// install:macos is itself executed through DEX//REACH: cycling the gateway or node inline would
-// sever the request carrying the install before the caller received its result.
+// Build and lint every candidate definition in private staging before replacing any live plist.
+// A syntax/validation failure therefore leaves the currently installed definitions untouched.
 for (const service of services) {
-  await atomicWriteFile(service.target, launchdPlist({
+  service.candidateTarget = path.join(rollbackDir, `${service.label}.candidate.plist`);
+  await atomicWriteFile(service.candidateTarget, launchdPlist({
     label: service.label,
     entry: service.entry,
     envFile: service.envFile,
@@ -87,8 +87,8 @@ for (const service of services) {
     nodeBin,
     logsDir
   }), 0o600);
-  await execFileDeadline('/usr/bin/plutil', ['-lint', service.target]);
-  console.log(`Staged ${service.label}`);
+  await execFileDeadline('/usr/bin/plutil', ['-lint', service.candidateTarget]);
+  console.log(`Validated candidate ${service.label}`);
 }
 
 const canaryLabel = 'com.stinkyweasel.dex-reach.oauth-canary';
@@ -96,7 +96,8 @@ const canaryTarget = path.join(agentsDir, `${canaryLabel}.plist`);
 const ownerEnvFile = path.join(localStateDir, 'secrets.env');
 const canaryRollbackTarget = path.join(rollbackDir, `${canaryLabel}.plist`);
 const hadCanary = await snapshotPlist(canaryTarget, canaryRollbackTarget);
-await atomicWriteFile(canaryTarget, launchdIntervalPlist({
+const canaryCandidateTarget = path.join(rollbackDir, `${canaryLabel}.candidate.plist`);
+await atomicWriteFile(canaryCandidateTarget, launchdIntervalPlist({
   label: canaryLabel,
   entry: 'dist/scripts/oauth-canary.js',
   envFile: ownerEnvFile,
@@ -108,7 +109,16 @@ await atomicWriteFile(canaryTarget, launchdIntervalPlist({
   intervalSeconds: 6 * 60 * 60,
   environment: { DEX_REACH_NODE_ID: currentNodeId }
 }), 0o600);
-await execFileDeadline('/usr/bin/plutil', ['-lint', canaryTarget]);
+await execFileDeadline('/usr/bin/plutil', ['-lint', canaryCandidateTarget]);
+console.log(`Validated candidate ${canaryLabel}`);
+
+// All candidate definitions are valid. Only now replace the installed plist bytes atomically.
+for (const service of services) {
+  if (!service.candidateTarget) throw new Error(`missing candidate definition for ${service.label}`);
+  await atomicWriteFile(service.target, await fs.readFile(service.candidateTarget), 0o600);
+  console.log(`Staged ${service.label}`);
+}
+await atomicWriteFile(canaryTarget, await fs.readFile(canaryCandidateTarget), 0o600);
 console.log(`Staged ${canaryLabel}`);
 
 // Clean up the experimental submitted-job label used by early 0.3.1 development. A submitted job
