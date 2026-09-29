@@ -24,6 +24,10 @@ export class WorkspaceWorkerUnavailableError extends Error {
   constructor(message: string) { super(message); this.name = 'WorkspaceWorkerUnavailableError'; }
 }
 
+export class WorkspaceWorkerTransportError extends WorkspaceWorkerUnavailableError {
+  constructor(message: string) { super(message); this.name = 'WorkspaceWorkerTransportError'; }
+}
+
 export function workspaceWorkerDir(): string {
   const configured = process.env.DEX_WORKSPACE_WORKER_DIR?.trim();
   return configured ? path.resolve(configured) : path.join(os.homedir(), '.dex-reach-worker');
@@ -69,9 +73,9 @@ async function callWorker(payload: Record<string, unknown>, timeoutMs = 15_000):
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ path: workspaceWorkerSocketPath() });
     let received = '';
-    const timer = setTimeout(() => socket.destroy(new WorkspaceWorkerUnavailableError('workspace worker did not respond in time')), timeoutMs);
+    const timer = setTimeout(() => socket.destroy(new WorkspaceWorkerTransportError('workspace worker did not respond in time')), timeoutMs);
     socket.setEncoding('utf8');
-    socket.once('error', error => reject(new WorkspaceWorkerUnavailableError(`workspace worker unavailable: ${error.message}`)));
+    socket.once('error', error => reject(error instanceof WorkspaceWorkerTransportError ? error : new WorkspaceWorkerTransportError(`workspace worker unavailable: ${error.message}`)));
     socket.on('data', chunk => {
       received += chunk;
       if (Buffer.byteLength(received) > WORKSPACE_WORKER_MAX_FRAME_BYTES) {
@@ -96,14 +100,15 @@ export async function workspaceWorkerExecute(
   nodeId: string,
   operation: string,
   args: Record<string, unknown>,
-  expectedRootsHash: string
+  expectedRootsHash: string,
+  timeoutMs = 15_000
 ): Promise<unknown | null> {
   if (!workspaceWorkerEligible(operation, args)) return null;
   let response: WorkerResponse | null;
   try {
-    response = await callWorker({ nodeId, operation, args, expectedRootsHash });
+    response = await callWorker({ nodeId, operation, args, expectedRootsHash }, timeoutMs);
   } catch (error) {
-    if (error instanceof WorkspaceWorkerUnavailableError) return null;
+    if (error instanceof WorkspaceWorkerTransportError) return null;
     throw error;
   }
   if (response === null) return null;
