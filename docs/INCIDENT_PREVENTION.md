@@ -238,7 +238,7 @@ On 2026-09-29 the primary Mac installer staged an immutable 0.3.2 runtime, deleg
 
 - Every installer/helper launchctl call has a hard deadline.
 - One installer owns the full build/reload transaction at a time and hands the lock to the one-shot helper; concurrent retries fail fast instead of spawning duplicate runtime builds or service cycles.
-- Previous plist definitions are snapshotted before replacement; candidate definitions are bootstrapped from private staging and are persisted to canonical LaunchAgents only after the full live health/canary contract passes. Helper failure restores the known-good definitions.
+- Previous plist definitions are snapshotted before replacement; candidate definitions are bootstrapped from private staging and are persisted to canonical LaunchAgents only after the full live health/canary contract passes. Helper failure restores the known-good definitions service-by-service, prioritizing gateway recovery, and one restore failure does not abort recovery of the remaining services.
 - The gateway sends an explicit registration acknowledgement only after NodeRegistry accepts the hello.
 - Runtime status separates socket transport from gateway registration and validates PID liveness.
 - The node validates and advertises the approved compatibility manifest independently of the Desktop Commander subprocess; backend outages fail compatibility calls closed while the DEX control plane remains registered. Compatibility readiness is visible in gateway/node status, and recovered live tool schemas refresh in place without forcing a node reconnect. Backend recovery is owned by a retry loop and async socket handlers have explicit rejection boundaries.
