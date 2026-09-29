@@ -27,7 +27,7 @@ async function withServer(run: (ctx: {
   const base = new URL(`http://127.0.0.1:${port}/`);
   const resource = new URL('/mcp', base);
   const provider = new ReachOAuthProvider(dir, 'owner', '0123456789abcdef', resource, base, {
-    accessTokenMs: 80,
+    accessTokenMs: 2_000,
     refreshTokenMs: 60_000
   });
   const health = new OAuthHealthRecorder(dir);
@@ -126,7 +126,7 @@ test('short-lived access tokens expire, refresh succeeds repeatedly, and invalid
     assert.match(initial.scope, /offline_access/);
     await provider.verifyAccessToken(initial.access_token);
 
-    await new Promise(resolve => setTimeout(resolve, 120));
+    await new Promise(resolve => setTimeout(resolve, 2_200));
     await assert.rejects(provider.verifyAccessToken(initial.access_token));
 
     const refreshBody = new URLSearchParams({
