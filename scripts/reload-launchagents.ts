@@ -216,22 +216,50 @@ try {
     attempted: true,
     ok: false,
     results: [] as Array<{ label: string; definition: 'restored' | 'removed'; restarted: boolean }>,
+    failures: [] as Array<{ label: string; stage: 'restore' | 'verify' | 'health'; error: string }>,
     error: undefined as string | undefined
   };
-  try {
-    for (const service of [...services].reverse()) rollback.results.push(await rollbackService(service));
 
-    const restoredPersistent = persistent.filter(service => Boolean(service.rollbackTarget));
-    for (const service of restoredPersistent) await verifyPersistent(service);
+  // Restore transport first, then its local dependencies, then the node. One broken service must
+  // never prevent recovery of the others; especially, a node failure must not strand the gateway.
+  const rollbackPriority = (service: Service): number => {
+    if (service.label.endsWith('.gateway')) return 0;
+    if (service.label.endsWith('.coordinator')) return 1;
+    if (service.label.endsWith('.worker')) return 2;
+    if (service.label.endsWith('.node')) return 3;
+    return 4;
+  };
+  const rollbackOrder = [...services].sort((a, b) => rollbackPriority(a) - rollbackPriority(b));
 
-    const restoredGateway = restoredPersistent.some(service => service.label.endsWith('.gateway'));
-    const restoredNode = restoredPersistent.some(service => service.label.endsWith('.node'));
-    if (healthUrl && restoredGateway && restoredNode) await verifyHealth(healthUrl);
-
-    rollback.ok = true;
-  } catch (rollbackError) {
-    rollback.error = errorText(rollbackError);
+  for (const service of rollbackOrder) {
+    try {
+      rollback.results.push(await rollbackService(service));
+    } catch (rollbackError) {
+      rollback.failures.push({ label: service.label, stage: 'restore', error: errorText(rollbackError) });
+    }
   }
+
+  const restoredLabels = new Set(rollback.results.filter(result => result.restarted).map(result => result.label));
+  for (const service of persistent.filter(service => restoredLabels.has(service.label))) {
+    try {
+      await verifyPersistent(service);
+    } catch (verifyError) {
+      rollback.failures.push({ label: service.label, stage: 'verify', error: errorText(verifyError) });
+    }
+  }
+
+  const restoredGateway = persistent.some(service => service.label.endsWith('.gateway') && restoredLabels.has(service.label));
+  const restoredNode = persistent.some(service => service.label.endsWith('.node') && restoredLabels.has(service.label));
+  if (healthUrl && restoredGateway && restoredNode) {
+    try {
+      await verifyHealth(healthUrl);
+    } catch (healthError) {
+      rollback.failures.push({ label: 'gateway+node', stage: 'health', error: errorText(healthError) });
+    }
+  }
+
+  rollback.ok = rollback.failures.length === 0;
+  if (!rollback.ok) rollback.error = rollback.failures.map(failure => `${failure.label} ${failure.stage}: ${failure.error}`).join('; ');
 
   await atomicWriteFile(statusFile, JSON.stringify({
     version: DEX_REACH_VERSION,
