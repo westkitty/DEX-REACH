@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises';
-import { rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +11,7 @@ import { buildRuntimeRelease, runtimeReleaseId } from './lib/runtime-release.js'
 import { workspaceWorkerConfigFile, workspaceWorkerDir, workspaceWorkerRootsHash } from '../src/shared/workspace-worker.js';
 import { execFileDeadline } from './lib/process-deadline.js';
 import { restorePlist, snapshotPlist } from './lib/plist-rollback.js';
+import { acquireInstallLock } from './lib/install-lock.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const agentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
@@ -21,8 +21,7 @@ const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
 const nodeBin = process.execPath;
 const installStatus = path.join(localStateDir, 'install-macos.status.json');
 const rollbackDir = path.join(localStateDir, 'install-rollback', `${Date.now()}-${process.pid}`);
-const installLockDir = path.join(localStateDir, 'install-macos.lock');
-let helperOwnsLock = false;
+const installLock = await acquireInstallLock(localStateDir);
 
 await fs.mkdir(agentsDir, { recursive: true });
 await fs.mkdir(logsDir, { recursive: true, mode: 0o700 });
@@ -69,21 +68,6 @@ const services: InstallService[] = [
   { label: 'com.stinkyweasel.dex-reach.gateway', entry: 'dist/src/gateway/main.js', envFile: undefined, stateDir: localStateDir },
   { label: 'com.stinkyweasel.dex-reach.node', entry: 'dist/src/node/main.js', envFile: nodeEnv, stateDir: localStateDir }
 ].map(service => ({ ...service, target: path.join(agentsDir, `${service.label}.plist`) }));
-
-try {
-  await fs.mkdir(installLockDir, { mode: 0o700 });
-} catch (error) {
-  if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-    throw new Error('another macOS install transaction is already active; inspect the existing install status instead of starting another');
-  }
-  throw error;
-}
-// If anything fails before launchd accepts the helper, this process still owns the lock and must
-// release it synchronously on exit. After helper bootstrap succeeds, ownership transfers to the
-// one-shot helper, which removes the lock in its finally block.
-process.on('exit', () => {
-  if (!helperOwnsLock) rmSync(installLockDir, { recursive: true, force: true });
-});
 
 await fs.mkdir(rollbackDir, { recursive: true, mode: 0o700 });
 for (const service of services) {
@@ -160,7 +144,7 @@ const helperArgs = [
   '--health-url', healthUrl,
   '--cleanup-plist', helperTarget,
   '--cleanup-dir', rollbackDir,
-  '--transaction-lock', installLockDir,
+  '--install-lock', installLock.path,
   '--command-timeout-ms', '10000'
 ];
 for (const service of services) helperArgs.push('--service', service.label, service.target, service.rollbackTarget || '-');
@@ -184,9 +168,9 @@ await atomicWriteFile(installStatus, JSON.stringify({
   services: [...services.map(service => ({ label: service.label, target: service.target })), { label: canaryLabel, target: canaryTarget }]
 }, null, 2) + '\n');
 
+await installLock.handoff();
 try {
   await execFileDeadline('/bin/launchctl', ['bootstrap', domain, helperTarget], 10_000);
-  helperOwnsLock = true;
 } catch (error) {
   for (const service of services) await restorePlist(service.target, service.rollbackTarget);
   await restorePlist(canaryTarget, hadCanary ? canaryRollbackTarget : undefined);
@@ -201,6 +185,7 @@ try {
     error: error instanceof Error ? error.message : String(error),
     rollback: { attempted: true, ok: true, mode: 'definitions-only' }
   }, null, 2) + '\n');
+  await installLock.release().catch(() => undefined);
   throw error;
 }
 
