@@ -38,3 +38,34 @@ export function runDetached(
 ): void {
   void task().catch(onError);
 }
+
+/**
+ * WebSocket liveness based on actual unanswered heartbeat opportunities rather than elapsed wall
+ * time. Event-loop starvation may delay a timer, but one delayed callback counts as one missed
+ * opportunity, not many seconds of imaginary missed pongs.
+ */
+export class HeartbeatWatchdog {
+  private unanswered = 0;
+
+  constructor(private readonly maxUnanswered = 3) {
+    if (!Number.isInteger(maxUnanswered) || maxUnanswered < 1 || maxUnanswered > 12) {
+      throw new Error('heartbeat unanswered limit must be between 1 and 12');
+    }
+  }
+
+  observedActivity(): void {
+    this.unanswered = 0;
+  }
+
+  /** Returns false only after maxUnanswered prior heartbeat opportunities produced no activity. */
+  nextHeartbeat(): boolean {
+    if (this.unanswered >= this.maxUnanswered) return false;
+    this.unanswered += 1;
+    return true;
+  }
+
+  pending(): number {
+    return this.unanswered;
+  }
+}
+
