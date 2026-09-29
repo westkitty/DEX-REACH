@@ -243,6 +243,9 @@ On 2026-09-29 the primary Mac installer staged an immutable 0.3.2 runtime, deleg
 - Runtime status separates socket transport from gateway registration and validates PID liveness.
 - The node validates and advertises the approved compatibility manifest independently of the Desktop Commander subprocess; backend outages fail compatibility calls closed while the DEX control plane remains registered. Compatibility readiness is visible in gateway/node status, and recovered live tool schemas refresh in place without forcing a node reconnect. Backend recovery is owned by a retry loop and async socket handlers have explicit rejection boundaries.
 - DEX-INV-043 through DEX-INV-045 are release-blocking.
+- Hosted validation at current code head `f988ae6` passed typecheck, invariant synchronization, full tests, build, production audit, reproducible build, live gateway/node proof, and CodeQL.
+- A superseded live deployment of `6e730ba` proved explicit registration truth and automatic node restart recovery, then exposed retry amplification and compatibility-recovery disappearance; both are incorporated into the current repair.
+- The current head is not considered deployed-verified until it is installed on the primary Mac and survives the live install, degraded-backend, restart, public-client, smoke, canary, and OAuth-health checks.
 
 ### False leads to avoid
 
