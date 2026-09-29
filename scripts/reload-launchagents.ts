@@ -4,6 +4,7 @@ import { DEX_REACH_VERSION } from '../src/shared/version.js';
 import { execFileDeadline } from './lib/process-deadline.js';
 import { restorePlist } from './lib/plist-rollback.js';
 import { claimInstallLock, releaseInstallLock } from './lib/install-lock.js';
+import { runIndependentRollback } from './lib/rollback-sequence.js';
 
 type Service = { label: string; target: string; candidateTarget: string; rollbackTarget?: string };
 
@@ -222,22 +223,13 @@ try {
 
   // Restore transport first, then its local dependencies, then the node. One broken service must
   // never prevent recovery of the others; especially, a node failure must not strand the gateway.
-  const rollbackPriority = (service: Service): number => {
-    if (service.label.endsWith('.gateway')) return 0;
-    if (service.label.endsWith('.coordinator')) return 1;
-    if (service.label.endsWith('.worker')) return 2;
-    if (service.label.endsWith('.node')) return 3;
-    return 4;
-  };
-  const rollbackOrder = [...services].sort((a, b) => rollbackPriority(a) - rollbackPriority(b));
-
-  for (const service of rollbackOrder) {
-    try {
-      rollback.results.push(await rollbackService(service));
-    } catch (rollbackError) {
-      rollback.failures.push({ label: service.label, stage: 'restore', error: errorText(rollbackError) });
-    }
-  }
+  const restoreSequence = await runIndependentRollback(services, rollbackService);
+  rollback.results.push(...restoreSequence.results);
+  rollback.failures.push(...restoreSequence.failures.map(failure => ({
+    label: failure.label,
+    stage: 'restore' as const,
+    error: failure.error
+  })));
 
   const restoredLabels = new Set(rollback.results.filter(result => result.restarted).map(result => result.label));
   for (const service of persistent.filter(service => restoredLabels.has(service.label))) {
