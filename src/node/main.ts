@@ -82,6 +82,8 @@ function scheduleBackendRecovery(reason: string): void {
   if (backendRecoveryRunning || stopped) return;
   backendRecoveryRunning = true;
   backendReady = false;
+  lastStatusJson = '';
+  void publishStatus().catch(() => undefined);
   runDetached('DEX//REACH compatibility backend recovery', async () => {
     try {
       await retryUntilStopped(async () => {
@@ -95,12 +97,9 @@ function scheduleBackendRecovery(reason: string): void {
       });
       if (stopped) return;
       backendReady = true;
+      lastStatusJson = '';
       console.log(`DEX//REACH compatibility backend ready with ${backend.listTools().length} tools`);
-      if (activeSocket?.readyState === WebSocket.OPEN) {
-        // Re-register once with the live backend's full descriptions/schemas. The approved tool
-        // names were already advertised from the manifest, so this refresh never widens authority.
-        activeSocket.close(1012, 'compatibility backend recovered');
-      }
+      await publishStatus();
     } finally {
       backendRecoveryRunning = false;
     }
@@ -396,7 +395,8 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
 async function publishStatus(): Promise<void> {
   const access = await currentAccess();
   const scheduler = redactWorkStatusForShare(await coordinatedStatus()) as SchedulerSnapshot;
-  const json = JSON.stringify({ access, scheduler });
+  const tools = backend.listTools();
+  const json = JSON.stringify({ access, scheduler, compatibilityReady: backendReady, tools });
   const socketConnected = activeSocket?.readyState === WebSocket.OPEN;
   const registered = Boolean(socketConnected && gatewayRegistered);
   await writeRuntimeStatus(config.nodeId, {
@@ -410,7 +410,7 @@ async function publishStatus(): Promise<void> {
     updatedAt: new Date().toISOString()
   });
   if (json !== lastStatusJson && registered && activeSocket) {
-    const status: NodeStatus = { type: 'status', access, scheduler };
+    const status: NodeStatus = { type: 'status', access, scheduler, tools, compatibilityReady: backendReady };
     activeSocket.send(JSON.stringify(status));
   }
   lastStatusJson = json;
@@ -455,6 +455,7 @@ async function connect(): Promise<void> {
         profile: config.profile,
         fingerprint: await executionFingerprint(config.nodeId),
         tools: backend.listTools(),
+        compatibilityReady: backendReady,
         allowedRoots: config.allowedRoots,
         agentVersion: DEX_REACH_VERSION,
         access: await currentAccess(),
