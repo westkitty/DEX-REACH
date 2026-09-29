@@ -99,7 +99,13 @@ export async function workspaceWorkerExecute(
   expectedRootsHash: string
 ): Promise<unknown | null> {
   if (!workspaceWorkerEligible(operation, args)) return null;
-  const response = await callWorker({ nodeId, operation, args, expectedRootsHash });
+  let response: WorkerResponse | null;
+  try {
+    response = await callWorker({ nodeId, operation, args, expectedRootsHash });
+  } catch (error) {
+    if (error instanceof WorkspaceWorkerUnavailableError) return null;
+    throw error;
+  }
   if (response === null) return null;
   if (!response.ok) {
     if (response.code === 'config-mismatch') return null;
