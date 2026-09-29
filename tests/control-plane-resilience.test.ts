@@ -1,0 +1,175 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { EventEmitter } from 'node:events';
+import WebSocket from 'ws';
+import { execFileDeadline } from '../scripts/lib/process-deadline.js';
+import { restorePlist, snapshotPlist } from '../scripts/lib/plist-rollback.js';
+import { NodeRegistry } from '../src/gateway/registry.js';
+import { NodeAuthStore } from '../src/gateway/node-auth.js';
+import { readRuntimeStatus, writeRuntimeStatus } from '../src/node/runtime-status.js';
+import { retryUntilStopped } from '../src/node/resilience.js';
+import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type GatewayRequest, type NodeHello } from '../src/shared/protocol.js';
+
+const access: AccessSnapshot = {
+  mode: 'on', effectiveMode: 'on', until: null, revertTo: null, clients: {}
+};
+
+class FakeSocket extends EventEmitter {
+  readyState: number = WebSocket.OPEN;
+  sent: unknown[] = [];
+  closed: { code: number; reason: string } | null = null;
+  send(data: string, cb?: (error?: Error) => void): void {
+    this.sent.push(JSON.parse(data) as unknown);
+    cb?.();
+  }
+  close(code: number, reason: string): void {
+    this.closed = { code, reason };
+    this.readyState = WebSocket.CLOSED;
+    this.emit('close');
+  }
+  terminate(): void {
+    this.readyState = WebSocket.CLOSED;
+    this.emit('close');
+  }
+}
+
+function hello(nodeId: string): NodeHello {
+  return {
+    type: 'hello',
+    protocolVersion: REACH_PROTOCOL_VERSION,
+    nodeId,
+    profile: 'development',
+    fingerprint: {
+      nodeId, hostname: nodeId, platform: 'test', arch: 'test', user: 'u', home: '/',
+      cwd: '/', repositoryRoot: null, branch: null, remote: null, nodeVersion: 'v0', pythonVersion: null
+    },
+    tools: [],
+    allowedRoots: ['/'],
+    agentVersion: 'test',
+    access
+  };
+}
+
+test('external command deadline turns a hung child into a rejection', async () => {
+  const started = Date.now();
+  await assert.rejects(
+    execFileDeadline(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], 50)
+  );
+  assert.ok(Date.now() - started < 2000, 'deadline must not wait for the child to finish naturally');
+});
+
+test('plist snapshots restore a partial replacement and remove a candidate with no predecessor', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-plist-rollback-'));
+  try {
+    const first = path.join(dir, 'first.plist');
+    const firstBackup = path.join(dir, 'backup', 'first.plist');
+    const second = path.join(dir, 'second.plist');
+
+    await fs.writeFile(first, 'old-first');
+    assert.equal(await snapshotPlist(first, firstBackup), true);
+    assert.equal(await snapshotPlist(second, path.join(dir, 'backup', 'second.plist')), false);
+
+    await fs.writeFile(first, 'new-first');
+    await fs.writeFile(second, 'new-second');
+
+    assert.equal(await restorePlist(first, firstBackup), 'restored');
+    assert.equal(await restorePlist(second), 'removed');
+    assert.equal(await fs.readFile(first, 'utf8'), 'old-first');
+    await assert.rejects(fs.stat(second), /ENOENT/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('REQUEST_TIMEOUT-equivalent backend failure is owned and retried instead of escaping', async () => {
+  let attempts = 0;
+  const errors: string[] = [];
+
+  await retryUntilStopped(async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      throw Object.assign(new Error('Request timed out'), { code: 'REQUEST_TIMEOUT' });
+    }
+  }, {
+    shouldStop: () => false,
+    initialDelayMs: 1,
+    maxDelayMs: 1,
+    sleep: async () => undefined,
+    onError: error => errors.push(error instanceof Error ? error.message : String(error))
+  });
+
+  assert.equal(attempts, 2);
+  assert.deepEqual(errors, ['Request timed out']);
+});
+
+test('runtime status requires both freshness and a live PID oracle', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-status-'));
+  try {
+    await writeRuntimeStatus('n', {
+      pid: 12345,
+      connected: false,
+      socketConnected: true,
+      gatewayRegistered: false,
+      startedAt: new Date().toISOString(),
+      gateway: 'ws://127.0.0.1:8787',
+      access,
+      updatedAt: new Date().toISOString()
+    }, dir);
+
+    assert.equal(await readRuntimeStatus('n', dir, 15_000, () => false), null);
+
+    const live = await readRuntimeStatus('n', dir, 15_000, () => true);
+    assert.equal(live?.socketConnected, true);
+    assert.equal(live?.gatewayRegistered, false);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('gateway acknowledgement exists only after a valid hello is registered', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-registration-'));
+  try {
+    const auth = new NodeAuthStore(dir);
+    await auth.initialize();
+    const registry = new NodeRegistry(auth, dir);
+    await registry.initialize();
+
+    const socket = new FakeSocket();
+    registry.acceptForTest(socket as unknown as WebSocket, 'primary');
+
+    assert.equal(registry.listNodes().length, 0, 'socket open is not registration');
+
+    socket.emit('message', Buffer.from(JSON.stringify(hello('primary'))));
+
+    assert.equal(registry.listNodes().length, 1);
+    assert.deepEqual(socket.sent[0], {
+      type: 'registered',
+      nodeId: 'primary',
+      protocolVersion: REACH_PROTOCOL_VERSION
+    });
+
+    const bad = new FakeSocket();
+    registry.acceptForTest(bad as unknown as WebSocket, 'expected');
+    bad.emit('message', Buffer.from(JSON.stringify(hello('wrong'))));
+
+    assert.equal(bad.closed?.code, 1008);
+    assert.ok(!registry.listNodes().some(node => node.nodeId === 'wrong'));
+
+    registry.shutdown();
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('installer source contract includes bounded helper commands and rollback evidence', async () => {
+  const installer = await fs.readFile(path.resolve('scripts/install-macos.ts'), 'utf8');
+  const helper = await fs.readFile(path.resolve('scripts/reload-launchagents.ts'), 'utf8');
+  assert.match(installer, /snapshotPlist/);
+  assert.match(installer, /--command-timeout-ms/);
+  assert.match(helper, /execFileDeadline/);
+  assert.match(helper, /rollback/);
+  assert.doesNotMatch(helper, /promisify\(execFile\)/);
+});
