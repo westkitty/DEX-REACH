@@ -12,7 +12,7 @@ import { runIndependentRollback } from '../scripts/lib/rollback-sequence.js';
 import { NodeRegistry } from '../src/gateway/registry.js';
 import { NodeAuthStore } from '../src/gateway/node-auth.js';
 import { readRuntimeStatus, writeRuntimeStatus } from '../src/node/runtime-status.js';
-import { retryUntilStopped } from '../src/node/resilience.js';
+import { HeartbeatWatchdog, retryUntilStopped } from '../src/node/resilience.js';
 import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type GatewayRequest, type NodeHello } from '../src/shared/protocol.js';
 
 const access: AccessSnapshot = {
@@ -132,6 +132,26 @@ test('plist snapshots restore a partial replacement and remove a candidate with 
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('heartbeat liveness ignores wall-clock stalls and requires consecutive unanswered opportunities', () => {
+  const watchdog = new HeartbeatWatchdog(3);
+
+  assert.equal(watchdog.nextHeartbeat(), true);
+  assert.equal(watchdog.pending(), 1);
+
+  // A long scheduler/event-loop stall cannot increase this counter because no heartbeat opportunity
+  // actually ran. Any observed gateway traffic resets the liveness debt.
+  watchdog.observedActivity();
+  assert.equal(watchdog.pending(), 0);
+
+  assert.equal(watchdog.nextHeartbeat(), true);
+  assert.equal(watchdog.nextHeartbeat(), true);
+  assert.equal(watchdog.nextHeartbeat(), true);
+  assert.equal(watchdog.nextHeartbeat(), false);
+
+  watchdog.observedActivity();
+  assert.equal(watchdog.nextHeartbeat(), true);
 });
 
 test('REQUEST_TIMEOUT-equivalent backend failure is owned and retried instead of escaping', async () => {
