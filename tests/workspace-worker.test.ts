@@ -44,6 +44,57 @@ async function rawCall(socketPath: string, request: unknown): Promise<{ ok: bool
   });
 }
 
+test('workspace worker transport failure falls back while unsafe socket metadata still fails visibly', async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-workspace-worker-transport-'));
+  const workerDir = path.join(temp, 'worker');
+  await fs.mkdir(workerDir, { recursive: true, mode: 0o700 });
+  await fs.chmod(workerDir, 0o700);
+  const previous = process.env.DEX_WORKSPACE_WORKER_DIR;
+  process.env.DEX_WORKSPACE_WORKER_DIR = workerDir;
+  const socketPath = workspaceWorkerSocketPath();
+
+  const server = net.createServer(() => {
+    // Intentionally accept without responding so the client exercises its transport timeout path.
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(socketPath, resolve);
+    });
+    await fs.chmod(socketPath, 0o600);
+
+    const unavailable = await workspaceWorkerExecute(
+      'worker-test-node',
+      'dex.file.read',
+      { path: path.join(temp, 'unused.txt') },
+      '0'.repeat(64),
+      50
+    );
+    assert.equal(unavailable, null, 'transport unavailability must degrade to normal node execution');
+
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await fs.rm(socketPath, { force: true });
+    await fs.writeFile(socketPath, 'not a socket', { mode: 0o600 });
+
+    await assert.rejects(
+      workspaceWorkerExecute(
+        'worker-test-node',
+        'dex.file.read',
+        { path: path.join(temp, 'unused.txt') },
+        '0'.repeat(64),
+        50
+      ),
+      /not a socket/
+    );
+  } finally {
+    if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
+    if (previous === undefined) delete process.env.DEX_WORKSPACE_WORKER_DIR;
+    else process.env.DEX_WORKSPACE_WORKER_DIR = previous;
+    await fs.rm(temp, { recursive: true, force: true });
+  }
+});
+
 test('workspace worker environment is credential-free by construction', () => {
   const clean = scrubWorkspaceWorkerEnvironment({
     PATH: '/bin',
