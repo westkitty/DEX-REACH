@@ -7,6 +7,7 @@ import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
 import { execFileDeadline } from '../scripts/lib/process-deadline.js';
 import { restorePlist, snapshotPlist } from '../scripts/lib/plist-rollback.js';
+import { acquireInstallLock, claimInstallLock, releaseInstallLock } from '../scripts/lib/install-lock.js';
 import { NodeRegistry } from '../src/gateway/registry.js';
 import { NodeAuthStore } from '../src/gateway/node-auth.js';
 import { readRuntimeStatus, writeRuntimeStatus } from '../src/node/runtime-status.js';
@@ -52,6 +53,27 @@ function hello(nodeId: string): NodeHello {
     access
   };
 }
+
+
+test('macOS install ownership collapses concurrent retries and survives helper handoff', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-install-lock-'));
+  try {
+    const first = await acquireInstallLock(dir);
+    await assert.rejects(acquireInstallLock(dir), /already active/);
+
+    await first.handoff();
+    await assert.rejects(acquireInstallLock(dir), /already active/);
+
+    await claimInstallLock(first.path);
+    await assert.rejects(acquireInstallLock(dir), /already active/);
+
+    await releaseInstallLock(first.path);
+    const second = await acquireInstallLock(dir);
+    await second.release();
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
 
 test('external command deadline turns a hung child into a rejection', async () => {
   const started = Date.now();
@@ -168,6 +190,9 @@ test('installer source contract includes bounded helper commands and rollback ev
   const installer = await fs.readFile(path.resolve('scripts/install-macos.ts'), 'utf8');
   const helper = await fs.readFile(path.resolve('scripts/reload-launchagents.ts'), 'utf8');
   assert.match(installer, /snapshotPlist/);
+  assert.match(installer, /acquireInstallLock/);
+  assert.match(installer, /--install-lock/);
+  assert.match(helper, /claimInstallLock/);
   assert.match(installer, /--command-timeout-ms/);
   assert.match(helper, /execFileDeadline/);
   assert.match(helper, /rollback/);
