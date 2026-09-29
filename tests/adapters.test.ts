@@ -16,6 +16,7 @@ import { authorizeOperation, type AccessState } from '../src/shared/access.js';
 import { workspaceSafeToolRefusal } from '../src/shared/profiles.js';
 import { toolGuard } from '../src/shared/security.js';
 import type { RequestActor } from '../src/shared/protocol.js';
+import { DesktopCommanderAdapter } from '../src/node/adapters/desktop-commander.js';
 
 /**
  * The capability adapter contract. An adapter declares; DEX decides. Every test here attacks the
@@ -56,6 +57,19 @@ test('the shipped manifest is admitted and agrees with the DEX catalog on every 
   const admission = admitAdapterManifest(manifestOrThrow());
   assert.deepEqual(admission.refusals, [], 'the shipped manifest must not disagree with DEX');
   assert.equal(admission.admitted.length, COMPATIBILITY_TOOLS.length);
+});
+
+
+test('adapter preparation exposes the approved remote surface without starting the backend process', async () => {
+  const registry = new AdapterRegistry();
+  const adapter = new DesktopCommanderAdapter(registry);
+  await adapter.prepare();
+  assert.deepEqual(
+    adapter.listTools().map(tool => tool.name).sort(),
+    [...remoteCompatibilityTools()].sort()
+  );
+  assert.equal(adapter.listTools().length, 22);
+  await adapter.close();
 });
 
 test('an undeclared tool is refused rather than admitted on the adapter\'s word', () => {
