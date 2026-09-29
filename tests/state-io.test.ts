@@ -32,6 +32,6 @@ test('stale-lock recovery cannot fork replacement lock ownership', async () => {
     assert.equal(maxActive, 1);
     await assert.rejects(fs.stat(`${lock}.recovery`), /ENOENT/);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
