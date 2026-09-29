@@ -16,6 +16,7 @@ import {
   type GatewayRequest,
   type GatewayResponse,
   type NodeHello,
+  type NodeRegistered,
   type NodeStatus,
   type SchedulerSnapshot,
   type RequestActor,
@@ -39,6 +40,7 @@ import { coordinatedStatus } from '../coordinator/client.js';
 import { redactWorkStatusForShare } from '../shared/work-coordinator.js';
 import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 import { workspaceWorkerEligible, workspaceWorkerExecute, workspaceWorkerRootsHash } from '../shared/workspace-worker.js';
+import { errorText, retryUntilStopped, runDetached } from './resilience.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -49,6 +51,10 @@ const audit = new AuditLog();
 let stopped = false;
 let reconnectMs = 1000;
 let activeSocket: WebSocket | null = null;
+let gatewayRegistered = false;
+let backendReady = false;
+let backendRecoveryRunning = false;
+const startedAt = new Date().toISOString();
 /**
  * Which credential to present next. A node can hold both a transport key and an enrollment token,
  * and only the gateway knows which one its record currently accepts.
@@ -64,9 +70,45 @@ let activeSocket: WebSocket | null = null;
 let preferBearerCredential = false;
 let lastStatusJson = '';
 
-await backend.start(config.allowedRoots);
+function compatibilityTransportFailure(error: unknown): boolean {
+  const message = errorText(error);
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code?: unknown }).code ?? '')
+    : '';
+  return /REQUEST_TIMEOUT|timed out|transport|closed|ECONN|EPIPE/i.test(`${code} ${message}`);
+}
+
+function scheduleBackendRecovery(reason: string): void {
+  if (backendRecoveryRunning || stopped) return;
+  backendRecoveryRunning = true;
+  backendReady = false;
+  runDetached('DEX//REACH compatibility backend recovery', async () => {
+    try {
+      await retryUntilStopped(async () => {
+        await backend.close().catch(() => undefined);
+        await backend.start(config.allowedRoots);
+      }, {
+        shouldStop: () => stopped,
+        onError: (error, nextDelayMs) => {
+          console.error(`DEX//REACH compatibility backend unavailable (${reason}); retrying in ${nextDelayMs}ms: ${errorText(error)}`);
+        }
+      });
+      if (stopped) return;
+      backendReady = true;
+      console.log(`DEX//REACH compatibility backend ready with ${backend.listTools().length} tools`);
+      if (activeSocket?.readyState === WebSocket.OPEN) activeSocket.close(1012, 'compatibility backend recovered');
+    } finally {
+      backendRecoveryRunning = false;
+    }
+  }, error => {
+    backendRecoveryRunning = false;
+    console.error('DEX//REACH compatibility backend recovery failed:', errorText(error));
+  });
+}
+
+scheduleBackendRecovery('startup');
 await sweepExpiredPlans();
-console.log(`DEX//REACH node ${config.nodeId} started with ${backend.listTools().length} compatibility tools (state dir ${stateDir()})`);
+console.log(`DEX//REACH node ${config.nodeId} control plane started (state dir ${stateDir()}); compatibility backend recovering independently`);
 
 async function currentAccess(): Promise<AccessSnapshot> {
   return snapshot(await loadAccessState(config.nodeId));
@@ -98,7 +140,13 @@ async function executeOperation(operation: string, args: Record<string, unknown>
     if (toolBlocked) throw new Error(toolBlocked);
     const blocked = toolGuard(tool, toolArgs, profile, config.allowedRoots);
     if (blocked) throw new Error(blocked);
-    return backend.callTool(tool, toolArgs);
+    if (!backendReady) throw new Error('compatibility backend is temporarily unavailable');
+    try {
+      return await backend.callTool(tool, toolArgs);
+    } catch (error) {
+      if (compatibilityTransportFailure(error)) scheduleBackendRecovery('runtime transport failure');
+      throw error;
+    }
   }
   if (operation === 'dex.result.read') {
     return results.read(String(args.handle || ''), Number(args.offset || 0), Number(args.length || 65536));
@@ -343,15 +391,19 @@ async function publishStatus(): Promise<void> {
   const access = await currentAccess();
   const scheduler = redactWorkStatusForShare(await coordinatedStatus()) as SchedulerSnapshot;
   const json = JSON.stringify({ access, scheduler });
-  const connected = activeSocket?.readyState === WebSocket.OPEN;
+  const socketConnected = activeSocket?.readyState === WebSocket.OPEN;
+  const registered = Boolean(socketConnected && gatewayRegistered);
   await writeRuntimeStatus(config.nodeId, {
     pid: process.pid,
-    connected,
+    connected: registered,
+    socketConnected,
+    gatewayRegistered: registered,
+    startedAt,
     gateway: new URL(config.gatewayWs).origin,
     access,
     updatedAt: new Date().toISOString()
   });
-  if (json !== lastStatusJson && connected && activeSocket) {
+  if (json !== lastStatusJson && registered && activeSocket) {
     const status: NodeStatus = { type: 'status', access, scheduler };
     activeSocket.send(JSON.stringify(status));
   }
@@ -381,39 +433,60 @@ async function connect(): Promise<void> {
   let lastAliveAt = Date.now();
   ws.on('pong', () => { lastAliveAt = Date.now(); });
 
-  ws.on('open', async () => {
-    opened = true;
-    // Remember what the gateway actually accepted, so a reconnect does not go back to a credential
-    // already known to be refused and spend every retry on it.
-    preferBearerCredential = credential === 'enrollment token';
-    reconnectMs = 1000;
-    lastAliveAt = Date.now();
-    activeSocket = ws;
-    lastStatusJson = '';
-    const hello: NodeHello = {
-      type: 'hello',
-      protocolVersion: REACH_PROTOCOL_VERSION,
-      nodeId: config.nodeId,
-      profile: config.profile,
-      fingerprint: await executionFingerprint(config.nodeId),
-      tools: backend.listTools(),
-      allowedRoots: config.allowedRoots,
-      agentVersion: DEX_REACH_VERSION,
-      access: await currentAccess(),
-      scheduler: redactWorkStatusForShare(await coordinatedStatus()) as SchedulerSnapshot
-    };
-    ws.send(JSON.stringify(hello));
-    void publishStatus().catch(() => undefined);
-    console.log(`DEX//REACH node connected to ${url.origin} using its ${credential}`);
+  ws.on('open', () => {
+    runDetached('DEX//REACH websocket open handler', async () => {
+      opened = true;
+      preferBearerCredential = credential === 'enrollment token';
+      reconnectMs = 1000;
+      lastAliveAt = Date.now();
+      activeSocket = ws;
+      gatewayRegistered = false;
+      lastStatusJson = '';
+      const hello: NodeHello = {
+        type: 'hello',
+        protocolVersion: REACH_PROTOCOL_VERSION,
+        nodeId: config.nodeId,
+        profile: config.profile,
+        fingerprint: await executionFingerprint(config.nodeId),
+        tools: backendReady ? backend.listTools() : [],
+        allowedRoots: config.allowedRoots,
+        agentVersion: DEX_REACH_VERSION,
+        access: await currentAccess(),
+        scheduler: redactWorkStatusForShare(await coordinatedStatus()) as SchedulerSnapshot
+      };
+      ws.send(JSON.stringify(hello));
+      await publishStatus();
+      console.log(`DEX//REACH node socket connected to ${url.origin} using its ${credential}; awaiting gateway registration`);
+    }, error => {
+      console.error('DEX//REACH websocket open handler failed:', errorText(error));
+      if (ws.readyState === WebSocket.OPEN) ws.close(1011, 'hello preparation failed');
+    });
   });
 
-  ws.on('message', async data => {
-    lastAliveAt = Date.now();
-    let parsed: unknown;
-    try { parsed = JSON.parse(data.toString()); } catch { return; }
-    if (!parsed || typeof parsed !== 'object' || (parsed as { type?: string }).type !== 'request') return;
-    const response = await handleRequest(parsed as GatewayRequest);
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(response));
+  ws.on('message', data => {
+    runDetached('DEX//REACH websocket message handler', async () => {
+      lastAliveAt = Date.now();
+      let parsed: unknown;
+      try { parsed = JSON.parse(data.toString()); } catch { return; }
+      if (!parsed || typeof parsed !== 'object') return;
+      const typed = parsed as { type?: string };
+      if (typed.type === 'registered') {
+        const acknowledgement = parsed as NodeRegistered;
+        if (activeSocket === ws && acknowledgement.nodeId === config.nodeId && acknowledgement.protocolVersion === REACH_PROTOCOL_VERSION) {
+          gatewayRegistered = true;
+          lastStatusJson = '';
+          await publishStatus();
+          console.log(`DEX//REACH node registered by gateway ${url.origin}`);
+        }
+        return;
+      }
+      if (typed.type !== 'request' || !gatewayRegistered) return;
+      const response = await handleRequest(parsed as GatewayRequest);
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(response));
+    }, error => {
+      console.error('DEX//REACH websocket message handler failed:', errorText(error));
+      if (ws.readyState === WebSocket.OPEN) ws.close(1011, 'request handler failed');
+    });
   });
 
   const heartbeat = setInterval(() => {
@@ -429,7 +502,10 @@ async function connect(): Promise<void> {
 
   ws.on('close', () => {
     clearInterval(heartbeat);
-    if (activeSocket === ws) activeSocket = null;
+    if (activeSocket === ws) {
+      activeSocket = null;
+      gatewayRegistered = false;
+    }
     void publishStatus().catch(() => undefined);
     if (stopped) return;
     const delay = reconnectMs;
