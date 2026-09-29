@@ -128,7 +128,7 @@ export async function withFileLock<T>(
   fn: () => Promise<T>,
   options: { timeoutMs?: number; staleMs?: number } = {}
 ): Promise<T> {
-  const timeoutMs = options.timeoutMs ?? 5000;
+  const timeoutMs = options.timeoutMs ?? 15_000;
   const staleMs = options.staleMs ?? 60_000;
   const started = Date.now();
   const recoveryFile = `${file}.recovery`;
