@@ -54,7 +54,10 @@ export const DEX_RELEASE_INVARIANTS: readonly ReleaseInvariant[] = [
   { id: 'DEX-INV-039', capability: 'The gateway never advertises an authorization behaviour it does not perform', evidenceClass: 'mixed' },
   { id: 'DEX-INV-040', capability: 'Owner-visible activity identifies DEX-owned processes without persisting command content', evidenceClass: 'mixed' },
   { id: 'DEX-INV-041', capability: 'Machine coordination and activity have one namespace per OS account', evidenceClass: 'mixed' },
-  { id: 'DEX-INV-042', capability: 'Coordinator daemon transport is owner-private and fail-closed', evidenceClass: 'mixed' }
+  { id: 'DEX-INV-042', capability: 'Coordinator daemon transport is owner-private and fail-closed', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-043', capability: 'macOS service replacement is bounded and rollback-capable', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-044', capability: 'Recoverable backend failures do not terminate the node control plane', evidenceClass: 'mixed' },
+  { id: 'DEX-INV-045', capability: 'Node registration state is explicit and locally truthful', evidenceClass: 'mixed' }
 ] as const;
 
 export function invariantManifest() {
