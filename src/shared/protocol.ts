@@ -107,6 +107,9 @@ export type NodeHello = {
   scheduler?: SchedulerSnapshot;
 };
 
+/** Sent by the gateway only after the hello has been validated and installed in NodeRegistry. */
+export type NodeRegistered = { type: 'registered'; nodeId: string; protocolVersion: number };
+
 /** Pushed by a node whenever its local access policy changes. */
 export type NodeStatus = { type: 'status'; access: AccessSnapshot; scheduler?: SchedulerSnapshot };
 
@@ -132,4 +135,4 @@ export type GatewayResponse = {
 };
 
 export type Heartbeat = { type: 'heartbeat'; at: number };
-export type WireMessage = NodeHello | NodeStatus | GatewayRequest | GatewayResponse | Heartbeat;
+export type WireMessage = NodeHello | NodeRegistered | NodeStatus | GatewayRequest | GatewayResponse | Heartbeat;
