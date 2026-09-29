@@ -101,6 +101,8 @@ export type NodeHello = {
   profile: ReachProfile;
   fingerprint: ExecutionFingerprint;
   tools: ToolDescriptor[];
+  /** False means the DEX control plane is online while its optional compatibility adapter recovers. */
+  compatibilityReady?: boolean;
   allowedRoots: string[];
   agentVersion: string;
   access?: AccessSnapshot;
@@ -111,7 +113,14 @@ export type NodeHello = {
 export type NodeRegistered = { type: 'registered'; nodeId: string; protocolVersion: number };
 
 /** Pushed by a node whenever its local access policy changes. */
-export type NodeStatus = { type: 'status'; access: AccessSnapshot; scheduler?: SchedulerSnapshot };
+export type NodeStatus = {
+  type: 'status';
+  access: AccessSnapshot;
+  scheduler?: SchedulerSnapshot;
+  /** Current compatibility surface; may be empty while the adapter recovers. */
+  tools?: ToolDescriptor[];
+  compatibilityReady?: boolean;
+};
 
 export type GatewayRequest = {
   type: 'request';
