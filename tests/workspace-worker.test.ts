@@ -15,6 +15,8 @@ import {
 } from '../src/shared/workspace-worker.js';
 import { requireOperation } from '../src/shared/operations.js';
 
+const socketTmpRoot = process.platform === 'darwin' ? '/tmp' : os.tmpdir();
+
 async function waitForSocket(
   socketPath: string,
   child: ReturnType<typeof spawn>,
@@ -45,7 +47,7 @@ async function rawCall(socketPath: string, request: unknown): Promise<{ ok: bool
 }
 
 test('workspace worker transport failure falls back while unsafe socket metadata still fails visibly', async () => {
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-workspace-worker-transport-'));
+  const temp = await fs.mkdtemp(path.join(socketTmpRoot, 'dex-ww-transport-'));
   const workerDir = path.join(temp, 'worker');
   await fs.mkdir(workerDir, { recursive: true, mode: 0o700 });
   await fs.chmod(workerDir, 0o700);
@@ -53,9 +55,16 @@ test('workspace worker transport failure falls back while unsafe socket metadata
   process.env.DEX_WORKSPACE_WORKER_DIR = workerDir;
   const socketPath = workspaceWorkerSocketPath();
 
-  const server = net.createServer(() => {
+  const accepted = new Set<net.Socket>();
+  const server = net.createServer(socket => {
+    accepted.add(socket);
+    socket.once('close', () => accepted.delete(socket));
     // Intentionally accept without responding so the client exercises its transport timeout path.
   });
+  const closeServer = async () => {
+    for (const socket of accepted) socket.destroy();
+    await closeServer();
+  };
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -73,7 +82,7 @@ test('workspace worker transport failure falls back while unsafe socket metadata
     );
     assert.equal(unavailable, null, 'transport unavailability must degrade to normal node execution');
 
-    await new Promise<void>(resolve => server.close(() => resolve()));
+    await closeServer();
     await fs.rm(socketPath, { force: true });
     await fs.writeFile(socketPath, 'not a socket', { mode: 0o600 });
 
@@ -118,7 +127,7 @@ test('workspace worker environment is credential-free by construction', () => {
 });
 
 test('workspace worker serves only bounded read operations, falls back on root mismatch, and recovers its socket after restart', async () => {
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-workspace-worker-test-'));
+  const temp = await fs.mkdtemp(path.join(socketTmpRoot, 'dex-ww-test-'));
   const work = path.join(temp, 'workspace');
   const workerDir = path.join(temp, 'worker');
   await fs.mkdir(work, { recursive: true });
