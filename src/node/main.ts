@@ -40,7 +40,7 @@ import { coordinatedStatus } from '../coordinator/client.js';
 import { redactWorkStatusForShare } from '../shared/work-coordinator.js';
 import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 import { workspaceWorkerEligible, workspaceWorkerExecute, workspaceWorkerRootsHash } from '../shared/workspace-worker.js';
-import { errorText, retryUntilStopped, runDetached } from './resilience.js';
+import { errorText, HeartbeatWatchdog, retryUntilStopped, runDetached } from './resilience.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -445,8 +445,8 @@ async function connect(): Promise<void> {
   }
   const ws = new WebSocket(url, { headers });
   let opened = false;
-  let lastAliveAt = Date.now();
-  ws.on('pong', () => { lastAliveAt = Date.now(); });
+  const heartbeatWatchdog = new HeartbeatWatchdog(3);
+  ws.on('pong', () => heartbeatWatchdog.observedActivity());
 
   let registrationTimer: NodeJS.Timeout | undefined;
   ws.on('open', () => {
@@ -461,7 +461,6 @@ async function connect(): Promise<void> {
       opened = true;
       preferBearerCredential = credential === 'enrollment token';
       reconnectMs = 1000;
-      lastAliveAt = Date.now();
       activeSocket = ws;
       gatewayRegistered = false;
       lastStatusJson = '';
@@ -488,8 +487,8 @@ async function connect(): Promise<void> {
   });
 
   ws.on('message', data => {
+    heartbeatWatchdog.observedActivity();
     runDetached('DEX//REACH websocket message handler', async () => {
-      lastAliveAt = Date.now();
       let parsed: unknown;
       try { parsed = JSON.parse(data.toString()); } catch { return; }
       if (!parsed || typeof parsed !== 'object') return;
@@ -517,7 +516,7 @@ async function connect(): Promise<void> {
 
   const heartbeat = setInterval(() => {
     if (ws.readyState !== WebSocket.OPEN) return;
-    if (Date.now() - lastAliveAt > 12000) {
+    if (!heartbeatWatchdog.nextHeartbeat()) {
       ws.terminate();
       return;
     }
