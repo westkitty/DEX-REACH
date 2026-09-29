@@ -5,7 +5,7 @@ import { execFileDeadline } from './lib/process-deadline.js';
 import { restorePlist } from './lib/plist-rollback.js';
 import { claimInstallLock, releaseInstallLock } from './lib/install-lock.js';
 
-type Service = { label: string; target: string; rollbackTarget?: string };
+type Service = { label: string; target: string; candidateTarget: string; rollbackTarget?: string };
 
 function requiredArg(name: string): string {
   const index = process.argv.indexOf(name);
@@ -25,10 +25,13 @@ function serviceArgs(): Service[] {
     if (process.argv[index] !== '--service') continue;
     const label = process.argv[index + 1];
     const target = process.argv[index + 2];
-    const rollback = process.argv[index + 3];
-    if (!label || !target || !rollback) throw new Error('each --service requires LABEL PLIST_PATH ROLLBACK_PATH_OR_DASH');
-    out.push({ label, target, ...(rollback === '-' ? {} : { rollbackTarget: rollback }) });
-    index += 3;
+    const candidateTarget = process.argv[index + 3];
+    const rollback = process.argv[index + 4];
+    if (!label || !target || !candidateTarget || !rollback) {
+      throw new Error('each --service requires LABEL TARGET_PLIST CANDIDATE_PLIST ROLLBACK_PATH_OR_DASH');
+    }
+    out.push({ label, target, candidateTarget, ...(rollback === '-' ? {} : { rollbackTarget: rollback }) });
+    index += 4;
   }
   if (!out.length) throw new Error('at least one --service is required');
   return out;
@@ -66,6 +69,7 @@ await atomicWriteFile(statusFile, JSON.stringify({
   services: services.map(service => ({
     label: service.label,
     target: service.target,
+    candidateTarget: service.candidateTarget,
     rollbackAvailable: Boolean(service.rollbackTarget)
   }))
 }, null, 2) + '\n');
@@ -83,12 +87,12 @@ const results: Array<{
 async function reloadService(service: Service): Promise<void> {
   let bootout: 'ok' | 'not-loaded' = 'ok';
   try {
-    await launchctl(['bootout', domain, service.target]);
+    await launchctl(['bootout', `${domain}/${service.label}`]);
   } catch {
     bootout = 'not-loaded';
   }
   await launchctl(['enable', `${domain}/${service.label}`]);
-  await launchctl(['bootstrap', domain, service.target]);
+  await launchctl(['bootstrap', domain, service.candidateTarget]);
   await launchctl(['kickstart', `${domain}/${service.label}`]);
   results.push({ label: service.label, bootout, bootstrap: 'ok', kickstart: 'ok' });
 }
@@ -161,7 +165,7 @@ async function rollbackService(service: Service): Promise<{
   restarted: boolean;
 }> {
   try {
-    await launchctl(['bootout', domain, service.target]);
+    await launchctl(['bootout', `${domain}/${service.label}`]);
   } catch {
     // Absence is an acceptable starting state for rollback.
   }
@@ -189,6 +193,12 @@ try {
   for (const service of canaries) {
     await reloadService(service);
     await verifyCanary(service);
+  }
+
+  // Commit the candidate definitions only after the entire live replacement contract passes.
+  // Until this point the canonical LaunchAgents on disk remain the previous known-good version.
+  for (const service of services) {
+    await atomicWriteFile(service.target, await fs.readFile(service.candidateTarget), 0o600);
   }
 
   await atomicWriteFile(statusFile, JSON.stringify({
