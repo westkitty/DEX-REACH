@@ -208,3 +208,46 @@ Any failure produces `state = failed` in `~/.dex-reach/install-macos.status.json
 - Do not call a successful `kickstart` proof that the service stayed alive.
 - Do not remove older runtime releases merely because a newer source checkout exists; an installed LaunchAgent may still reference them until replacement is proven complete.
 - Do not place credentials or mutable policy inside a runtime release. Authority-bearing state remains under the existing private DEX state files and is loaded separately at runtime.
+
+---
+
+## Incident E — self-update stalled and node status disagreed with gateway registration
+
+### Confirmed symptom
+
+On 2026-09-29 the primary Mac installer staged an immutable 0.3.2 runtime, delegated replacement to `com.stinkyweasel.dex-reach.install-reloader-once`, and then left `install-macos.status.json` in `state = waiting` while the gateway was unavailable. Manual service recovery restored the gateway. A later controlled node restart produced a second contradiction: loopback health changed from one online node to zero while the local CLI still reported a running node and a connected gateway socket. Node stderr also contained repeated MCP client `REQUEST_TIMEOUT` failures followed by fresh node starts.
+
+### Root causes addressed by this repair
+
+- Self-update launchctl calls had no hard command deadline, so a wedged launchctl path could prevent the helper from reaching its failure handler.
+- Candidate LaunchAgent definitions replaced the previous plist bytes without retaining a rollback copy for helper-driven recovery.
+- The node treated WebSocket open as "connected" before the gateway had validated and installed the node hello.
+- Async WebSocket callbacks returned promises to EventEmitter without an explicit rejection owner.
+- Compatibility-backend startup was on the node's top-level await path, so a transient SDK failure could terminate the daemon rather than degrade only the compatibility surface.
+- Local runtime status freshness did not by itself prove that its recorded PID was alive.
+
+### Fast recurrence signatures
+
+- Install status remains `scheduled` or `waiting` beyond the bounded reload window.
+- A launchctl timeout appears and no terminal install record is written.
+- `/healthz` reports `onlineNodes:0` while local status claims gateway registration.
+- Node stderr contains an MCP `REQUEST_TIMEOUT` followed by a new process start.
+- A node socket repeatedly opens but never receives the registration acknowledgement.
+
+### Prevention controls
+
+- Every installer/helper launchctl call has a hard deadline.
+- Previous plist definitions are snapshotted before replacement and restored on helper failure.
+- The gateway sends an explicit registration acknowledgement only after NodeRegistry accepts the hello.
+- Runtime status separates socket transport from gateway registration and validates PID liveness.
+- Compatibility backend recovery is owned by a retry loop; async socket handlers have explicit rejection boundaries.
+- DEX-INV-043 through DEX-INV-045 are release-blocking.
+
+### False leads to avoid
+
+- Do not equate a WebSocket open event with a registered node.
+- Do not equate a fresh runtime-status file with a live process.
+- Do not normalize repeated manual `launchctl kickstart` as maintenance.
+- Do not weaken authentication, roots, profiles, Origin/Host policy, or compatibility-tool restrictions to improve reconnect behavior.
+- Historical `/Users/andrew/DEX-REACH/dist/... MODULE_NOT_FOUND` lines belong to the pre-immutable-runtime incident unless the current LaunchAgent actually points back into the checkout.
+
