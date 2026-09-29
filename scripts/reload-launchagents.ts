@@ -3,6 +3,7 @@ import { atomicWriteFile } from '../src/shared/state-io.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
 import { execFileDeadline } from './lib/process-deadline.js';
 import { restorePlist } from './lib/plist-rollback.js';
+import { claimInstallLock, releaseInstallLock } from './lib/install-lock.js';
 
 type Service = { label: string; target: string; rollbackTarget?: string };
 
@@ -41,6 +42,7 @@ const domain = requiredArg('--domain');
 const statusFile = requiredArg('--status');
 const cleanupPlist = optionalArg('--cleanup-plist');
 const cleanupDir = optionalArg('--cleanup-dir');
+const installLock = optionalArg('--install-lock');
 const healthUrl = optionalArg('--health-url');
 const delayMs = Number(optionalArg('--delay-ms') || '3000');
 const commandTimeoutMs = Number(optionalArg('--command-timeout-ms') || '10000');
@@ -49,6 +51,7 @@ const services = serviceArgs();
 if (!/^gui\/\d+$/.test(domain)) throw new Error(`invalid launchd domain: ${domain}`);
 if (!Number.isFinite(delayMs) || delayMs < 500 || delayMs > 30_000) throw new Error(`invalid delay: ${delayMs}`);
 if (!Number.isFinite(commandTimeoutMs) || commandTimeoutMs < 250 || commandTimeoutMs > 120_000) throw new Error(`invalid command timeout: ${commandTimeoutMs}`);
+if (installLock) await claimInstallLock(installLock);
 
 async function launchctl(args: string[]): Promise<{ stdout: string; stderr: string }> {
   return execFileDeadline('/bin/launchctl', args, commandTimeoutMs);
@@ -236,4 +239,5 @@ try {
     // Preserve rollback evidence after failure. A later successful installation may reclaim it.
   }
   if (cleanupPlist) await fs.rm(cleanupPlist, { force: true }).catch(() => undefined);
+  await releaseInstallLock(installLock).catch(() => undefined);
 }
