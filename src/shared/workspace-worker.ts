@@ -62,14 +62,14 @@ async function socketPresent(): Promise<boolean> {
   }
 }
 
-async function callWorker(payload: Record<string, unknown>): Promise<WorkerResponse | null> {
+async function callWorker(payload: Record<string, unknown>, timeoutMs = 15_000): Promise<WorkerResponse | null> {
   if (!(await socketPresent())) return null;
   const request = JSON.stringify({ version: WORKSPACE_WORKER_PROTOCOL_VERSION, command: 'execute', payload }) + '\n';
   if (Buffer.byteLength(request) > WORKSPACE_WORKER_MAX_FRAME_BYTES) throw new WorkspaceWorkerUnavailableError('workspace worker request exceeds protocol limit');
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ path: workspaceWorkerSocketPath() });
     let received = '';
-    const timer = setTimeout(() => socket.destroy(new WorkspaceWorkerUnavailableError('workspace worker did not respond in time')), 5_000);
+    const timer = setTimeout(() => socket.destroy(new WorkspaceWorkerUnavailableError('workspace worker did not respond in time')), timeoutMs);
     socket.setEncoding('utf8');
     socket.once('error', error => reject(new WorkspaceWorkerUnavailableError(`workspace worker unavailable: ${error.message}`)));
     socket.on('data', chunk => {
