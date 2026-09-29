@@ -3,9 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { withFileLock } from '../src/shared/state-io.js';
+import { DEFAULT_STATE_LOCK_TIMEOUT_MS, withFileLock } from '../src/shared/state-io.js';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+test('default state-lock wait tolerates loaded-host contention without becoming unbounded', () => {
+  assert.equal(DEFAULT_STATE_LOCK_TIMEOUT_MS, 15_000);
+});
 
 test('stale-lock recovery cannot fork replacement lock ownership', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-lock-race-'));
