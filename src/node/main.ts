@@ -97,9 +97,9 @@ function scheduleBackendRecovery(reason: string): void {
       backendReady = true;
       console.log(`DEX//REACH compatibility backend ready with ${backend.listTools().length} tools`);
       if (activeSocket?.readyState === WebSocket.OPEN) {
+        // Re-register once with the live backend's full descriptions/schemas. The approved tool
+        // names were already advertised from the manifest, so this refresh never widens authority.
         activeSocket.close(1012, 'compatibility backend recovered');
-      } else {
-        runDetached('DEX//REACH gateway connect after backend recovery', () => connect());
       }
     } finally {
       backendRecoveryRunning = false;
@@ -110,9 +110,11 @@ function scheduleBackendRecovery(reason: string): void {
   });
 }
 
+// Manifest admission is local and fail-closed, but does not depend on the backend process.
+await backend.prepare();
 scheduleBackendRecovery('startup');
 await sweepExpiredPlans();
-console.log(`DEX//REACH node ${config.nodeId} control plane started (state dir ${stateDir()}); compatibility backend recovering independently`);
+console.log(`DEX//REACH node ${config.nodeId} control plane started with ${backend.listTools().length} approved compatibility tools (state dir ${stateDir()}); compatibility backend recovering independently`);
 
 async function currentAccess(): Promise<AccessSnapshot> {
   return snapshot(await loadAccessState(config.nodeId));
@@ -538,6 +540,7 @@ async function shutdown(): Promise<void> {
 }
 process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
-// Gateway connection begins only after the compatibility backend passes its fail-closed startup
-// checks. A backend timeout therefore degrades availability without terminating this control process
-// or advertising an incomplete tool surface.
+// Register the control plane immediately from the already-validated adapter contract. The
+// compatibility subprocess may recover independently; its unavailability fails compatibility calls
+// closed but no longer makes the node itself disappear from the gateway.
+await connect();
