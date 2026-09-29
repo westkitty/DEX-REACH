@@ -63,7 +63,11 @@ test('workspace worker transport failure falls back while unsafe socket metadata
   });
   const closeServer = async () => {
     for (const socket of accepted) socket.destroy();
-    await closeServer();
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.close(error => error ? reject(error) : resolve());
+      });
+    }
   };
 
   try {
