@@ -195,6 +195,9 @@ test('installer source contract includes bounded helper commands and rollback ev
   assert.match(helper, /claimInstallLock/);
   assert.match(installer, /--command-timeout-ms/);
   assert.match(helper, /execFileDeadline/);
+  assert.match(helper, /candidateTarget/);
+  assert.match(helper, /Commit the candidate definitions only after the entire live replacement contract passes/);
+  assert.doesNotMatch(installer, /atomicWriteFile\(service\.target, await fs\.readFile\(service\.candidateTarget\)/);
   assert.match(helper, /rollback/);
   assert.doesNotMatch(helper, /promisify\(execFile\)/);
 });
