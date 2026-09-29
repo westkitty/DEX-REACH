@@ -54,6 +54,7 @@ let activeSocket: WebSocket | null = null;
 let gatewayRegistered = false;
 let backendReady = false;
 let backendRecoveryRunning = false;
+let connectInFlight = false;
 const startedAt = new Date().toISOString();
 /**
  * Which credential to present next. A node can hold both a transport key and an enrollment token,
@@ -422,11 +423,18 @@ const planSweepTimer = setInterval(() => void sweepExpiredPlans().catch(() => un
 planSweepTimer.unref();
 
 async function connect(): Promise<void> {
-  if (stopped) return;
+  if (stopped || connectInFlight || activeSocket?.readyState === WebSocket.OPEN) return;
+  connectInFlight = true;
   const url = new URL(config.gatewayWs);
   url.searchParams.set('nodeId', config.nodeId);
   const headers: Record<string, string> = {};
-  const transport = preferBearerCredential ? null : await loadTransportKeys(config.nodeId);
+  let transport;
+  try {
+    transport = preferBearerCredential ? null : await loadTransportKeys(config.nodeId);
+  } catch (error) {
+    connectInFlight = false;
+    throw error;
+  }
   const credential: 'transport proof' | 'enrollment token' = transport ? 'transport proof' : 'enrollment token';
   if (transport) {
     const proof = signNodeProof(transport.privateKey, expectedProofDefaults(config.nodeId));
@@ -439,7 +447,15 @@ async function connect(): Promise<void> {
   let lastAliveAt = Date.now();
   ws.on('pong', () => { lastAliveAt = Date.now(); });
 
+  let registrationTimer: NodeJS.Timeout | undefined;
   ws.on('open', () => {
+    connectInFlight = false;
+    registrationTimer = setTimeout(() => {
+      if (activeSocket === ws && !gatewayRegistered && ws.readyState === WebSocket.OPEN) {
+        ws.close(1013, 'gateway registration acknowledgement timed out');
+      }
+    }, 10_000);
+    registrationTimer.unref();
     runDetached('DEX//REACH websocket open handler', async () => {
       opened = true;
       preferBearerCredential = credential === 'enrollment token';
@@ -481,6 +497,8 @@ async function connect(): Promise<void> {
         const acknowledgement = parsed as NodeRegistered;
         if (activeSocket === ws && acknowledgement.nodeId === config.nodeId && acknowledgement.protocolVersion === REACH_PROTOCOL_VERSION) {
           gatewayRegistered = true;
+          if (registrationTimer) clearTimeout(registrationTimer);
+          registrationTimer = undefined;
           lastStatusJson = '';
           await publishStatus();
           console.log(`DEX//REACH node registered by gateway ${url.origin}`);
@@ -508,6 +526,8 @@ async function connect(): Promise<void> {
   heartbeat.unref();
 
   ws.on('close', () => {
+    connectInFlight = false;
+    if (registrationTimer) clearTimeout(registrationTimer);
     clearInterval(heartbeat);
     if (activeSocket === ws) {
       activeSocket = null;
@@ -526,7 +546,7 @@ async function connect(): Promise<void> {
     } else {
       console.warn(`DEX//REACH gateway disconnected; reconnecting in ${delay}ms`);
     }
-    setTimeout(() => void connect(), delay).unref();
+    setTimeout(() => runDetached('DEX//REACH gateway reconnect', () => connect()), delay).unref();
   });
   ws.on('error', error => { console.error('DEX//REACH node websocket error:', error.message); });
 }
