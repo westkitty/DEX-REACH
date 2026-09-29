@@ -11,6 +11,7 @@ export type RuntimeStatus = {
   connected: boolean;
   socketConnected?: boolean;
   gatewayRegistered?: boolean;
+  compatibilityReady?: boolean;
   startedAt?: string;
   gateway: string;
   access: AccessSnapshot;
