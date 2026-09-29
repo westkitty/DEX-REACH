@@ -186,6 +186,45 @@ test('gateway acknowledgement exists only after a valid hello is registered', as
   }
 });
 
+test('degraded compatibility stays online and upgrades its tool surface in place', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-degraded-compat-'));
+  try {
+    const auth = new NodeAuthStore(dir);
+    await auth.initialize();
+    const registry = new NodeRegistry(auth, dir);
+    await registry.initialize();
+
+    const socket = new FakeSocket();
+    registry.acceptForTest(socket as unknown as WebSocket, 'primary');
+    const degraded = hello('primary');
+    degraded.tools = [{ name: 'read_file' }];
+    degraded.compatibilityReady = false;
+    socket.emit('message', Buffer.from(JSON.stringify(degraded)));
+
+    const before = registry.listNodes()[0] as { online: boolean; compatibilityReady: boolean; toolCount: number };
+    assert.equal(before.online, true);
+    assert.equal(before.compatibilityReady, false);
+    assert.equal(before.toolCount, 1);
+
+    socket.emit('message', Buffer.from(JSON.stringify({
+      type: 'status',
+      access,
+      tools: [{ name: 'read_file', description: 'live schema' }, { name: 'write_file' }],
+      compatibilityReady: true
+    })));
+
+    const after = registry.listNodes()[0] as { online: boolean; compatibilityReady: boolean; toolCount: number };
+    assert.equal(after.online, true);
+    assert.equal(after.compatibilityReady, true);
+    assert.equal(after.toolCount, 2);
+    assert.equal((registry.listTools('primary')[0] as { description?: string }).description, 'live schema');
+    assert.equal(socket.readyState, WebSocket.OPEN, 'backend recovery must not require a node reconnect');
+    registry.shutdown();
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('installer source contract includes bounded helper commands and rollback evidence', async () => {
   const installer = await fs.readFile(path.resolve('scripts/install-macos.ts'), 'utf8');
   const helper = await fs.readFile(path.resolve('scripts/reload-launchagents.ts'), 'utf8');
