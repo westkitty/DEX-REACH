@@ -189,12 +189,15 @@ test('gateway acknowledgement exists only after a valid hello is registered', as
 test('installer source contract includes bounded helper commands and rollback evidence', async () => {
   const installer = await fs.readFile(path.resolve('scripts/install-macos.ts'), 'utf8');
   const helper = await fs.readFile(path.resolve('scripts/reload-launchagents.ts'), 'utf8');
+  const runtimeRelease = await fs.readFile(path.resolve('scripts/lib/runtime-release.ts'), 'utf8');
   assert.match(installer, /snapshotPlist/);
   assert.match(installer, /acquireInstallLock/);
   assert.match(installer, /--install-lock/);
   assert.match(helper, /claimInstallLock/);
   assert.match(installer, /--command-timeout-ms/);
   assert.match(helper, /execFileDeadline/);
+  assert.match(runtimeRelease, /execFileDeadline/);
+  assert.match(runtimeRelease, /120_000/);
   assert.match(helper, /candidateTarget/);
   assert.match(helper, /Commit the candidate definitions only after the entire live replacement contract passes/);
   assert.doesNotMatch(installer, /atomicWriteFile\(service\.target, await fs\.readFile\(service\.candidateTarget\)/);
