@@ -114,14 +114,15 @@ await atomicWriteFile(canaryCandidateTarget, launchdIntervalPlist({
 await execFileDeadline('/usr/bin/plutil', ['-lint', canaryCandidateTarget]);
 console.log(`Validated candidate ${canaryLabel}`);
 
-// All candidate definitions are valid. Only now replace the installed plist bytes atomically.
+// Candidate definitions stay private until the helper proves the complete replacement.
+// The helper bootstraps launchd directly from these candidate files, verifies gateway/node/canary,
+// and only then atomically persists them to the canonical LaunchAgents paths. A failed candidate
+// therefore leaves the known-good on-disk definitions untouched.
 for (const service of services) {
   if (!service.candidateTarget) throw new Error(`missing candidate definition for ${service.label}`);
-  await atomicWriteFile(service.target, await fs.readFile(service.candidateTarget), 0o600);
-  console.log(`Staged ${service.label}`);
+  console.log(`Validated ${service.label}; persistence deferred until live proof`);
 }
-await atomicWriteFile(canaryTarget, await fs.readFile(canaryCandidateTarget), 0o600);
-console.log(`Staged ${canaryLabel}`);
+console.log(`Validated ${canaryLabel}; persistence deferred until live proof`);
 
 // Clean up the experimental submitted-job label used by early 0.3.1 development. A submitted job
 // can be respawned by launchd after a successful exit. Production installation instead uses one
@@ -147,8 +148,10 @@ const helperArgs = [
   '--install-lock', installLock.path,
   '--command-timeout-ms', '10000'
 ];
-for (const service of services) helperArgs.push('--service', service.label, service.target, service.rollbackTarget || '-');
-helperArgs.push('--service', canaryLabel, canaryTarget, hadCanary ? canaryRollbackTarget : '-');
+for (const service of services) helperArgs.push(
+  '--service', service.label, service.target, service.candidateTarget!, service.rollbackTarget || '-'
+);
+helperArgs.push('--service', canaryLabel, canaryTarget, canaryCandidateTarget, hadCanary ? canaryRollbackTarget : '-');
 
 await atomicWriteFile(helperTarget, launchdOneShotPlist({
   label: helperLabel,
