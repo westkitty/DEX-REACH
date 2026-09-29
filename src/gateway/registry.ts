@@ -13,6 +13,7 @@ export type NodeRecord = {
   /** Latest node-reported local access policy (display only; the node enforces it). */
   access: AccessSnapshot | null;
   scheduler: SchedulerSnapshot | null;
+  compatibilityReady: boolean;
 };
 
 export type NodeRequestResult = {
@@ -100,6 +101,7 @@ export class NodeRegistry {
       aiAccess: record.access ? { mode: record.access.effectiveMode, until: record.access.until, clients: record.access.clients } : 'unknown',
       scheduler: record.scheduler,
       toolCount: record.hello.tools.length,
+      compatibilityReady: record.compatibilityReady,
       agentVersion: record.hello.agentVersion,
       connectedAt: new Date(record.connectedAt).toISOString(),
       lastSeenAt: new Date(record.lastSeenAt).toISOString()
@@ -189,7 +191,7 @@ export class NodeRegistry {
 
   /** Test seam: register an already-authenticated socket-like object as a node. */
   registerForTest(hello: NodeHello, socket: WebSocket): void {
-    this.nodes.set(hello.nodeId, { hello, socket, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null });
+    this.nodes.set(hello.nodeId, { hello, socket, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null, compatibilityReady: hello.compatibilityReady ?? true });
   }
 
   /** Test seam: deliver a node response as if it arrived on the socket. */
@@ -221,7 +223,7 @@ export class NodeRegistry {
         }
         const existing = this.nodes.get(hello.nodeId);
         if (existing && existing.socket !== ws) existing.socket.close(4000, 'replaced by newer connection');
-        this.nodes.set(hello.nodeId, { hello, socket: ws, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null });
+        this.nodes.set(hello.nodeId, { hello, socket: ws, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null, compatibilityReady: hello.compatibilityReady ?? true });
         registered = true;
         const acknowledgement: NodeRegistered = {
           type: 'registered',
@@ -240,6 +242,8 @@ export class NodeRegistry {
         const status = message as NodeStatus;
         record.access = status.access ?? null;
         record.scheduler = status.scheduler ?? null;
+        if (Array.isArray(status.tools)) record.hello = { ...record.hello, tools: status.tools };
+        if (typeof status.compatibilityReady === 'boolean') record.compatibilityReady = status.compatibilityReady;
       }
     });
 
