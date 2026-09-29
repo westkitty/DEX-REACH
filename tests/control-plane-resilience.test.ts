@@ -135,6 +135,7 @@ test('runtime status requires both freshness and a live PID oracle', async () =>
       connected: false,
       socketConnected: true,
       gatewayRegistered: false,
+      compatibilityReady: false,
       startedAt: new Date().toISOString(),
       gateway: 'ws://127.0.0.1:8787',
       access,
@@ -146,6 +147,7 @@ test('runtime status requires both freshness and a live PID oracle', async () =>
     const live = await readRuntimeStatus('n', dir, 15_000, () => true);
     assert.equal(live?.socketConnected, true);
     assert.equal(live?.gatewayRegistered, false);
+    assert.equal(live?.compatibilityReady, false);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
