@@ -405,6 +405,7 @@ async function publishStatus(): Promise<void> {
     connected: registered,
     socketConnected,
     gatewayRegistered: registered,
+    compatibilityReady: backendReady,
     startedAt,
     gateway: new URL(config.gatewayWs).origin,
     access,
