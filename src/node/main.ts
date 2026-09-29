@@ -96,7 +96,11 @@ function scheduleBackendRecovery(reason: string): void {
       if (stopped) return;
       backendReady = true;
       console.log(`DEX//REACH compatibility backend ready with ${backend.listTools().length} tools`);
-      if (activeSocket?.readyState === WebSocket.OPEN) activeSocket.close(1012, 'compatibility backend recovered');
+      if (activeSocket?.readyState === WebSocket.OPEN) {
+        activeSocket.close(1012, 'compatibility backend recovered');
+      } else {
+        runDetached('DEX//REACH gateway connect after backend recovery', () => connect());
+      }
     } finally {
       backendRecoveryRunning = false;
     }
@@ -448,7 +452,7 @@ async function connect(): Promise<void> {
         nodeId: config.nodeId,
         profile: config.profile,
         fingerprint: await executionFingerprint(config.nodeId),
-        tools: backendReady ? backend.listTools() : [],
+        tools: backend.listTools(),
         allowedRoots: config.allowedRoots,
         agentVersion: DEX_REACH_VERSION,
         access: await currentAccess(),
@@ -534,4 +538,6 @@ async function shutdown(): Promise<void> {
 }
 process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
-await connect();
+// Gateway connection begins only after the compatibility backend passes its fail-closed startup
+// checks. A backend timeout therefore degrades availability without terminating this control process
+// or advertising an incomplete tool surface.
