@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Server } from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
 import { parseNodeAuthorization, type NodeAuthStore } from './node-auth.js';
-import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor, type SchedulerSnapshot } from '../shared/protocol.js';
+import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeRegistered, type NodeStatus, type RequestActor, type SchedulerSnapshot } from '../shared/protocol.js';
 import { addRevokedNode, loadRevokedNodes } from '../shared/revoked-nodes.js';
 
 export type NodeRecord = {
@@ -196,6 +196,12 @@ export class NodeRegistry {
   deliverForTest(response: GatewayResponse): void {
     this.finishResponse(response);
   }
+
+  /** Test seam for the post-authentication hello/registration protocol. */
+  acceptForTest(ws: WebSocket, expectedNodeId: string): void {
+    this.accept(ws, expectedNodeId);
+  }
+
   private accept(ws: WebSocket, expectedNodeId: string): void {
     let registered = false;
     ws.on('message', data => {
@@ -217,6 +223,14 @@ export class NodeRegistry {
         if (existing && existing.socket !== ws) existing.socket.close(4000, 'replaced by newer connection');
         this.nodes.set(hello.nodeId, { hello, socket: ws, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null });
         registered = true;
+        const acknowledgement: NodeRegistered = {
+          type: 'registered',
+          nodeId: hello.nodeId,
+          protocolVersion: REACH_PROTOCOL_VERSION
+        };
+        ws.send(JSON.stringify(acknowledgement), error => {
+          if (error) ws.close(1011, 'registration acknowledgement failed');
+        });
         return;
       }
       const record = this.nodes.get(expectedNodeId);
