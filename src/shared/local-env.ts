@@ -35,8 +35,12 @@ export function loadLocalSecrets(): string | null {
  * inherit DEX_REACH_ENV_FILE pointing at that node's enrollment file; owner-side tools such as the
  * public smoke test must not silently treat that enrollment file as the gateway secrets file.
  */
+export function ownerSecretsFile(): string {
+  return path.join(machineStateDir(), 'secrets.env');
+}
+
 export function loadOwnerSecrets(): string | null {
-  const file = path.join(stateDir(), 'secrets.env');
+  const file = ownerSecretsFile();
   if (!fs.existsSync(file)) return null;
   process.loadEnvFile(file);
   return file;
