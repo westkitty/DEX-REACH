@@ -15,12 +15,21 @@ import {
 } from '../src/shared/workspace-worker.js';
 import { requireOperation } from '../src/shared/operations.js';
 
-async function waitForSocket(socketPath: string, stderr: () => string): Promise<void> {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+async function waitForSocket(
+  socketPath: string,
+  child: ReturnType<typeof spawn>,
+  stderr: () => string,
+  timeoutMs = 10_000
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     try { if ((await fs.lstat(socketPath)).isSocket()) return; } catch {}
-    await new Promise(resolve => setTimeout(resolve, 20));
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`workspace worker exited before its socket appeared (exit=${child.exitCode}, signal=${child.signalCode}): ${stderr()}`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 25));
   }
-  throw new Error(`workspace worker socket did not appear: ${stderr()}`);
+  throw new Error(`workspace worker socket did not appear within ${timeoutMs}ms: ${stderr()}`);
 }
 
 async function rawCall(socketPath: string, request: unknown): Promise<{ ok: boolean; error?: string; code?: string }> {
@@ -92,7 +101,7 @@ test('workspace worker serves only bounded read operations, falls back on root m
   child.stderr?.on('data', chunk => { stderr += chunk; });
 
   try {
-    await waitForSocket(workspaceWorkerSocketPath(), () => stderr);
+    await waitForSocket(workspaceWorkerSocketPath(), child, () => stderr);
     const stat = await fs.lstat(workspaceWorkerSocketPath());
     assert.equal(stat.mode & 0o777, 0o600);
 
@@ -133,7 +142,7 @@ test('workspace worker serves only bounded read operations, falls back on root m
     });
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', chunk => { stderr += chunk; });
-    await waitForSocket(workspaceWorkerSocketPath(), () => stderr);
+    await waitForSocket(workspaceWorkerSocketPath(), child, () => stderr);
     const afterRestart = await workspaceWorkerExecute('worker-test-node', 'dex.file.read', { path: file }, rootsHash) as { text?: string };
     assert.equal(afterRestart.text, 'hello worker\n');
   } finally {
