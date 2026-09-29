@@ -237,6 +237,7 @@ On 2026-09-29 the primary Mac installer staged an immutable 0.3.2 runtime, deleg
 ### Prevention controls
 
 - Every installer/helper launchctl call has a hard deadline.
+- One installer owns the full build/reload transaction at a time and hands the lock to the one-shot helper; concurrent retries fail fast instead of spawning duplicate runtime builds or service cycles.
 - Previous plist definitions are snapshotted before replacement and restored on helper failure.
 - The gateway sends an explicit registration acknowledgement only after NodeRegistry accepts the hello.
 - Runtime status separates socket transport from gateway registration and validates PID liveness.
