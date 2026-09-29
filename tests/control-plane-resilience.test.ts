@@ -8,6 +8,7 @@ import WebSocket from 'ws';
 import { execFileDeadline } from '../scripts/lib/process-deadline.js';
 import { restorePlist, snapshotPlist } from '../scripts/lib/plist-rollback.js';
 import { acquireInstallLock, claimInstallLock, releaseInstallLock } from '../scripts/lib/install-lock.js';
+import { runIndependentRollback } from '../scripts/lib/rollback-sequence.js';
 import { NodeRegistry } from '../src/gateway/registry.js';
 import { NodeAuthStore } from '../src/gateway/node-auth.js';
 import { readRuntimeStatus, writeRuntimeStatus } from '../src/node/runtime-status.js';
@@ -73,6 +74,33 @@ test('macOS install ownership collapses concurrent retries and survives helper h
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('rollback continues after one service restore fails and prioritizes gateway recovery', async () => {
+  const attempted: string[] = [];
+  const services = [
+    { label: 'com.stinkyweasel.dex-reach.node' },
+    { label: 'com.stinkyweasel.dex-reach.worker' },
+    { label: 'com.stinkyweasel.dex-reach.gateway' },
+    { label: 'com.stinkyweasel.dex-reach.coordinator' }
+  ];
+
+  const result = await runIndependentRollback(services, async service => {
+    attempted.push(service.label);
+    if (service.label.endsWith('.node')) throw new Error('node restore failed');
+    return service.label;
+  });
+
+  assert.deepEqual(attempted, [
+    'com.stinkyweasel.dex-reach.gateway',
+    'com.stinkyweasel.dex-reach.coordinator',
+    'com.stinkyweasel.dex-reach.worker',
+    'com.stinkyweasel.dex-reach.node'
+  ]);
+  assert.equal(result.results.length, 3);
+  assert.deepEqual(result.failures, [
+    { label: 'com.stinkyweasel.dex-reach.node', error: 'node restore failed' }
+  ]);
 });
 
 test('external command deadline turns a hung child into a rejection', async () => {
