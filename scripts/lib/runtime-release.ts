@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { execFileDeadline } from './process-deadline.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -36,8 +37,8 @@ export async function runtimeReleaseId(sourceRoot: string, version: string): Pro
   let dirty = false;
   try {
     const [{ stdout: head }, { stdout: status }] = await Promise.all([
-      execFileAsync('/usr/bin/git', ['-C', sourceRoot, 'rev-parse', '--verify', 'HEAD']),
-      execFileAsync('/usr/bin/git', ['-C', sourceRoot, 'status', '--porcelain'])
+      execFileAsync('/usr/bin/git', ['-C', sourceRoot, 'rev-parse', '--verify', 'HEAD'], { timeout: 10_000 }),
+      execFileAsync('/usr/bin/git', ['-C', sourceRoot, 'status', '--porcelain'], { timeout: 10_000 })
     ]);
     commit = head.trim().slice(0, 12) || 'nogit';
     dirty = Boolean(status.trim());
@@ -142,13 +143,10 @@ export async function buildRuntimeRelease(
   return createRuntimeRelease(sourceRoot, stateDir, releaseId, async staging => {
     const compiler = path.join(sourceRoot, 'node_modules', 'typescript', 'bin', 'tsc');
     if (!await exists(compiler)) throw new Error('runtime install requires the local TypeScript compiler; run npm ci only when no legacy DEX service depends on this checkout');
-    await execFileAsync(nodeBin, [
+    await execFileDeadline(nodeBin, [
       compiler,
       '-p', path.join(sourceRoot, 'tsconfig.json'),
       '--outDir', path.join(staging, 'dist')
-    ], {
-      cwd: sourceRoot,
-      maxBuffer: 10 * 1024 * 1024
-    });
+    ], 120_000);
   });
 }
