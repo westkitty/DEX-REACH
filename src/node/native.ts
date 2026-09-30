@@ -48,15 +48,19 @@ export async function repoInfo(cwd: string): Promise<Record<string, unknown>> {
   return { root, branch: branch.trim(), remote: remote.trim(), status: status.trimEnd(), log: log.trimEnd() };
 }
 
-export async function adbDevices(): Promise<Record<string, unknown>> {
+type NativeCommandRunner = (command: string, args: string[]) => Promise<string>;
+
+export async function adbDevices(
+  runner: NativeCommandRunner = (command, args) => run(command, args)
+): Promise<Record<string, unknown>> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      const output = await run('adb', ['devices', '-l']);
+      const output = await runner('adb', ['devices', '-l']);
       const devices = output.split('\n').slice(1).map(line => line.trim()).filter(Boolean);
       let mdnsServices: string[] = [];
       try {
-        const mdns = await run('adb', ['mdns', 'services']);
+        const mdns = await runner('adb', ['mdns', 'services']);
         mdnsServices = mdns.split('\n').slice(1).map(line => line.trim()).filter(Boolean);
       } catch {}
       return { available: true, devices, mdnsServices };
