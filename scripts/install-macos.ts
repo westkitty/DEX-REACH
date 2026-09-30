@@ -146,7 +146,8 @@ const helperArgs = [
   '--cleanup-plist', helperTarget,
   '--cleanup-dir', rollbackDir,
   '--install-lock', installLock.path,
-  '--command-timeout-ms', '10000'
+  '--command-timeout-ms', '10000',
+  '--canary-timeout-ms', '180000'
 ];
 for (const service of services) helperArgs.push(
   '--service', service.label, service.target, service.candidateTarget!, service.rollbackTarget || '-'
