@@ -1,0 +1,12 @@
+interface:
+  display_name: DEX//MAINT
+  short_description: Safe DEX//REACH Mac storage maintenance with verified metrics, bounded cleanup, and Drive-preserve removal.
+  icon_small: assets/dexmaint-icon.svg
+  icon_large: assets/dexmaint-icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true
