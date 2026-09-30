@@ -355,3 +355,14 @@ The current 0.3.2 source baseline now also adds bounded local portfolio intellig
 - **r3** — Added per-node credential migration/rotation, native file/process/repo/checkpoint/ADB paths, and Claude registration/authentication.
 - **r2** — Implemented and validated the initial persistent gateway/node/OAuth/MCP path plus public HTTPS ingress and recovery proof.
 - **r1** — Initialized the authoritative operational record from repository/runtime evidence.
+
+
+## 14. DEX//MAINT Storage Guardian — 2026-09-30
+
+DEX//MAINT is now tracked inside the canonical repository at `skills/dexreach-mac-maintenance/` as version **2.3.0**. Implementation commit `cec47d0479f864205d874929bb9157ce240cb0d6` adds the deterministic Storage Guardian kernel, APFS reclaim receipts, persisted hotspot growth observations, pressure thresholds, bounded maintenance adapters, deleted-open detection, release/runtime retention guards, Git-aware Claude worktree handling, and launchd watcher generation.
+
+Primary-Mac activation is live through user LaunchAgent `com.stinkyweasel.dexmaint.watch` on a 4-hour cadence. The installed watcher invokes the canonical repository kernel and its last independently observed exit code was 0. The first controlled AUTO_SAFE campaign reclaimed net free space while preserving REPORT_ONLY/USER_DECISION data; receipts and observations persist under `~/.local/state/dexmaint/`. Brave code-sign clones, Apple/cloud-managed data, Maccy history, active runtimes/releases, unverified worktrees, and other unknown durable state remain protected.
+
+Repository validation for the imported package on 2026-09-30: **40/40 Python tests passed**, Python compilation passed, kernel SHA256 `4047df14782d48694e8e77be2305f6059d0724a560f8d4d087adae2c579549ed` and Storage Governor SHA256 `58568a73d3da06e3a351c90446adb21a982d2cbd46567fbe3199ba2dd0a9605e` matched `references/kernel-integrity.md`, and `git diff --check` passed before commit.
+
+DexCleaner integration is deliberately **not implemented in this revision**. Current product analysis indicates DexCleaner should become a thin status/launch client for DEX//MAINT's authoritative maintenance transaction rather than duplicate or broaden deletion authority. The existing DexCleaner protected journey and Finder-Trash cleanup semantics remain unchanged until a separately approved integration change.
