@@ -14,6 +14,12 @@ Do not substitute SSH, Desktop Commander, or freehand remote deletion when DEX//
 
 ## Standard commands
 
+Read-only status for local UI clients:
+
+`python3 /tmp/dexmaint_remote.py status --target macbook`
+
+The status contract is schema-versioned and reports current APFS free space/pressure, watcher activity, and the most recent persisted run summary. It does not discover candidates, reconcile state, or mutate storage.
+
 Inspect:
 
 `python3 /tmp/dexmaint_remote.py inspect --target macbook`

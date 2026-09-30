@@ -35,7 +35,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import storage_governor as governor
 
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 POLICY_VERSION = "2.3.0"
 ARCHIVE_COPY_TIMEOUT_SECONDS = 300
 ARCHIVE_VERIFY_TIMEOUT_SECONDS = 90
@@ -1715,6 +1715,93 @@ def print_json(data: Any) -> None:
     print(json.dumps(data, indent=2, sort_keys=True))
 
 
+def status_payload(identity: Identity) -> dict[str, Any]:
+    """Return a small stable status contract for local UI clients.
+
+    This deliberately avoids candidate discovery and mutation. It reports current
+    APFS capacity plus the most recent persisted watcher evidence.
+    """
+    state = state_dir()
+    storage = storage_snapshot()
+    lock = state / governor.LOCK_FILE
+    watcher_running = False
+    watcher_pid: int | None = None
+    if lock.exists():
+        try:
+            candidate_pid = int(lock.read_text(encoding="utf-8").strip())
+            command = pid_command(candidate_pid)
+            if command and "dexmaint_remote.py watch" in command:
+                watcher_running = True
+                watcher_pid = candidate_pid
+        except (OSError, ValueError):
+            pass
+
+    latest_run: dict[str, Any] | None = None
+    run_files = sorted(
+        (state / "runs").glob(f"maint-{identity.target}-*.json"),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    for path in run_files:
+        try:
+            candidate = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if candidate.get("target") != identity.target:
+            continue
+        latest_run = candidate
+        break
+
+    last_run_summary: dict[str, Any] | None = None
+    if latest_run is not None:
+        run_id = str(latest_run.get("run_id", ""))
+        receipts = [
+            row for row in governor.history(state / governor.RECEIPT_FILE)
+            if row.get("run_id") == run_id
+        ]
+        before = latest_run.get("before") if isinstance(latest_run.get("before"), dict) else {}
+        before_storage = before.get("storage") if isinstance(before.get("storage"), dict) else {}
+        deleted_open = before.get("deleted_but_open") if isinstance(before.get("deleted_but_open"), dict) else {}
+        candidates = before.get("candidates") if isinstance(before.get("candidates"), list) else []
+        protected_count = sum(
+            1 for item in candidates
+            if isinstance(item, dict) and item.get("disposition") in {PROTECTED, REPORT_ONLY, DURABLE_USER_DECISION}
+        )
+        last_run_summary = {
+            "run_id": run_id,
+            "created_at": latest_run.get("created_at"),
+            "status": latest_run.get("status"),
+            "pressure": before_storage.get("pressure"),
+            "action_count": len(receipts),
+            "accounted_candidate_bytes": sum(int(row.get("accounted_size_before_bytes", 0)) for row in receipts),
+            "measured_reclaim_bytes": sum(int(row.get("measured_reclaim_delta_bytes", 0)) for row in receipts),
+            "deleted_open_bytes": deleted_open.get("pinned_bytes"),
+            "reboot_recommended": bool(deleted_open.get("reboot_recommended", False)),
+            "protected_or_blocked_count": protected_count,
+        }
+
+    return {
+        "schema_version": 1,
+        "status": "ok",
+        "observed_at": utc_now(),
+        "kernel_version": VERSION,
+        "policy_version": POLICY_VERSION,
+        "target": identity.target,
+        "immediately_free_bytes": int(storage["immediately_free_bytes"]),
+        "available_for_work_bytes": storage.get("available_for_work_bytes"),
+        "pressure": storage["pressure"],
+        "target_free_bytes": 30 * 1024**3,
+        "watcher_running": watcher_running,
+        "watcher_pid": watcher_pid,
+        "last_run": last_run_summary,
+    }
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    identity = detect_identity(args.target, args.bigmac_ack)
+    print_json(status_payload(identity))
+
+
 def cmd_capabilities(args: argparse.Namespace) -> None:
     identity = detect_identity(args.target, args.bigmac_ack)
     print_json({
@@ -1985,6 +2072,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("capabilities")
     add_target(s); s.set_defaults(func=cmd_capabilities)
+
+    s = sub.add_parser("status")
+    add_target(s); s.set_defaults(func=cmd_status)
 
     s = sub.add_parser("inspect")
     add_target(s)

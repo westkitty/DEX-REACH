@@ -1,3 +1,8 @@
+## 2.3.1
+
+- Add a bounded, read-only `status --target macbook` JSON contract for local UI integrations.
+- Report current APFS free space and pressure, watcher activity, and the most recent persisted run/reclaim summary without performing candidate discovery or mutation.
+
 # Changelog
 
 ## 2.2.2 - 2026-09-21

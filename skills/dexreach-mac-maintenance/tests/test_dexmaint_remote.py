@@ -377,6 +377,70 @@ class DexMaintPolicyTests(unittest.TestCase):
 
 
 class StorageGuardianTests(unittest.TestCase):
+    def test_status_contract_is_read_only_and_summarizes_latest_run(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = Path(td)
+            (state / "runs").mkdir()
+            run_id = "maint-macbook-20260930T120000Z-aaaaaaaa"
+            run = {
+                "run_id": run_id,
+                "target": "macbook",
+                "created_at": "2026-09-30T12:00:00Z",
+                "status": "WATCHED",
+                "before": {
+                    "storage": {"pressure": "LOW"},
+                    "deleted_but_open": {"pinned_bytes": 123, "reboot_recommended": False},
+                    "candidates": [
+                        {"disposition": dm.PROTECTED},
+                        {"disposition": dm.REPORT_ONLY},
+                        {"disposition": dm.AUTO_SAFE},
+                    ],
+                },
+            }
+            (state / "runs" / f"{run_id}.json").write_text(json.dumps(run), encoding="utf-8")
+            dm.governor.append_jsonl(state / dm.governor.RECEIPT_FILE, {
+                "run_id": run_id,
+                "accounted_size_before_bytes": 1000,
+                "measured_reclaim_delta_bytes": 700,
+            })
+            identity = dm.Identity("macbook", "MacBook-Air.local", "andrew", "darwin", "arm64", str(state))
+            with mock.patch.object(dm, "state_dir", return_value=state), \
+                 mock.patch.object(dm, "storage_snapshot", return_value={
+                     "immediately_free_bytes": 12 * 1024**3,
+                     "available_for_work_bytes": 13 * 1024**3,
+                     "pressure": "LOW",
+                 }), \
+                 mock.patch.object(dm, "pid_command") as pid_command:
+                payload = dm.status_payload(identity)
+            pid_command.assert_not_called()
+            self.assertEqual(payload["schema_version"], 1)
+            self.assertEqual(payload["pressure"], "LOW")
+            self.assertFalse(payload["watcher_running"])
+            self.assertEqual(payload["last_run"]["run_id"], run_id)
+            self.assertEqual(payload["last_run"]["action_count"], 1)
+            self.assertEqual(payload["last_run"]["accounted_candidate_bytes"], 1000)
+            self.assertEqual(payload["last_run"]["measured_reclaim_bytes"], 700)
+            self.assertEqual(payload["last_run"]["protected_or_blocked_count"], 2)
+
+    def test_status_contract_reports_live_watcher_lock_without_mutating_it(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = Path(td)
+            (state / "runs").mkdir()
+            lock = state / dm.governor.LOCK_FILE
+            lock.write_text("4321", encoding="utf-8")
+            identity = dm.Identity("macbook", "MacBook-Air.local", "andrew", "darwin", "arm64", str(state))
+            with mock.patch.object(dm, "state_dir", return_value=state), \
+                 mock.patch.object(dm, "storage_snapshot", return_value={
+                     "immediately_free_bytes": 31 * 1024**3,
+                     "available_for_work_bytes": None,
+                     "pressure": "HEALTHY",
+                 }), \
+                 mock.patch.object(dm, "pid_command", return_value="python dexmaint_remote.py watch --target macbook"):
+                payload = dm.status_payload(identity)
+            self.assertTrue(payload["watcher_running"])
+            self.assertEqual(payload["watcher_pid"], 4321)
+            self.assertTrue(lock.exists())
+
     def test_pressure_transitions_use_immediate_apfs_free_bytes(self):
         self.assertEqual(dm.governor.pressure_state(30 * 1024**3), "HEALTHY")
         self.assertEqual(dm.governor.pressure_state(20 * 1024**3), "WATCH")
