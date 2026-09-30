@@ -284,6 +284,9 @@ test('installer source contract includes bounded helper commands and rollback ev
   assert.match(installer, /--install-lock/);
   assert.match(helper, /claimInstallLock/);
   assert.match(installer, /--command-timeout-ms/);
+  assert.match(installer, /--canary-timeout-ms/);
+  assert.match(installer, /180000/);
+  assert.match(helper, /canaryTimeoutMs/);
   assert.match(helper, /execFileDeadline/);
   assert.match(runtimeRelease, /execFileDeadline/);
   assert.match(runtimeRelease, /120_000/);
