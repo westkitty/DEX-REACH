@@ -50,11 +50,13 @@ const installLock = optionalArg('--install-lock');
 const healthUrl = optionalArg('--health-url');
 const delayMs = Number(optionalArg('--delay-ms') || '3000');
 const commandTimeoutMs = Number(optionalArg('--command-timeout-ms') || '10000');
+const canaryTimeoutMs = Number(optionalArg('--canary-timeout-ms') || '180000');
 const services = serviceArgs();
 
 if (!/^gui\/\d+$/.test(domain)) throw new Error(`invalid launchd domain: ${domain}`);
 if (!Number.isFinite(delayMs) || delayMs < 500 || delayMs > 30_000) throw new Error(`invalid delay: ${delayMs}`);
 if (!Number.isFinite(commandTimeoutMs) || commandTimeoutMs < 250 || commandTimeoutMs > 120_000) throw new Error(`invalid command timeout: ${commandTimeoutMs}`);
+if (!Number.isFinite(canaryTimeoutMs) || canaryTimeoutMs < 5_000 || canaryTimeoutMs > 300_000) throw new Error(`invalid canary timeout: ${canaryTimeoutMs}`);
 if (installLock) await claimInstallLock(installLock);
 
 async function launchctl(args: string[]): Promise<{ stdout: string; stderr: string }> {
@@ -141,7 +143,8 @@ async function verifyHealth(url: string): Promise<void> {
 
 async function verifyCanary(service: Service): Promise<void> {
   let last = '';
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  const deadline = Date.now() + canaryTimeoutMs;
+  while (Date.now() < deadline) {
     try {
       last = await launchdPrint(service.label);
     } catch (error) {
@@ -157,7 +160,7 @@ async function verifyCanary(service: Service): Promise<void> {
     }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
-  throw new Error(`${service.label} did not complete successfully after reload: ${last.slice(0, 400)}`);
+  throw new Error(`${service.label} did not complete successfully within ${canaryTimeoutMs}ms after reload: ${last.slice(0, 400)}`);
 }
 
 async function rollbackService(service: Service): Promise<{
