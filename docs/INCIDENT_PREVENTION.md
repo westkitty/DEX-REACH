@@ -237,6 +237,7 @@ On 2026-09-29 the primary Mac installer staged an immutable 0.3.2 runtime, deleg
 ### Prevention controls
 
 - Every installer/helper launchctl call has a hard deadline.
+- The installer helper previously allowed only about 30 seconds for the public OAuth canary. On the primary Mac under load, a healthy canary completed in 78 seconds, causing a false rollback. Canary verification now uses an explicit bounded 180-second wall-clock deadline.
 - One installer owns the full build/reload transaction at a time and hands the lock to the one-shot helper; concurrent retries fail fast instead of spawning duplicate runtime builds or service cycles.
 - Previous plist definitions are snapshotted before replacement; candidate definitions are bootstrapped from private staging and are persisted to canonical LaunchAgents only after the full live health/canary contract passes. Helper failure restores the known-good definitions service-by-service, prioritizing gateway recovery, and one restore failure does not abort recovery of the remaining services.
 - The gateway sends an explicit registration acknowledgement only after NodeRegistry accepts the hello.
