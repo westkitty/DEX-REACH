@@ -9,6 +9,7 @@ import { execFileDeadline } from '../scripts/lib/process-deadline.js';
 import { restorePlist, snapshotPlist } from '../scripts/lib/plist-rollback.js';
 import { acquireInstallLock, claimInstallLock, releaseInstallLock } from '../scripts/lib/install-lock.js';
 import { runIndependentRollback } from '../scripts/lib/rollback-sequence.js';
+import { bootstrapLaunchdWithRetry, waitForLaunchdUnload } from '../scripts/lib/launchd-transition.js';
 import { NodeRegistry } from '../src/gateway/registry.js';
 import { NodeAuthStore } from '../src/gateway/node-auth.js';
 import { readRuntimeStatus, writeRuntimeStatus } from '../src/node/runtime-status.js';
@@ -74,6 +75,63 @@ test('macOS install ownership collapses concurrent retries and survives helper h
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('launchd transition waits for a same-label job to disappear before continuing', async () => {
+  let prints = 0;
+  const sleeps: number[] = [];
+  await waitForLaunchdUnload(
+    'gui/501',
+    'com.example.worker',
+    async args => {
+      assert.deepEqual(args, ['print', 'gui/501/com.example.worker']);
+      prints += 1;
+      if (prints < 4) return { stdout: 'state = running', stderr: '' };
+      throw new Error('service not found');
+    },
+    {
+      timeoutMs: 1000,
+      pollMs: 25,
+      sleep: async ms => { sleeps.push(ms); }
+    }
+  );
+  assert.equal(prints, 4);
+  assert.deepEqual(sleeps, [25, 25, 25]);
+});
+
+test('launchd bootstrap retries a transient miss and accepts observable registration', async () => {
+  let bootstrapAttempts = 0;
+  let registered = false;
+  const calls: string[][] = [];
+
+  await bootstrapLaunchdWithRetry(
+    'gui/501',
+    'com.example.worker',
+    '/tmp/com.example.worker.plist',
+    async args => {
+      calls.push(args);
+      if (args[0] === 'bootstrap') {
+        bootstrapAttempts += 1;
+        if (bootstrapAttempts === 1) throw new Error('Bootstrap failed: 5: Input/output error');
+        registered = true;
+        return { stdout: '', stderr: '' };
+      }
+      if (args[0] === 'print') {
+        if (registered) return { stdout: 'state = running', stderr: '' };
+        throw new Error('service not found');
+      }
+      throw new Error(`unexpected args: ${args.join(' ')}`);
+    },
+    {
+      attempts: 3,
+      retryDelayMs: 10,
+      sleep: async () => undefined
+    }
+  );
+
+  assert.equal(bootstrapAttempts, 2);
+  assert.deepEqual(calls[0], ['bootstrap', 'gui/501', '/tmp/com.example.worker.plist']);
+  assert.deepEqual(calls[1], ['print', 'gui/501/com.example.worker']);
 });
 
 test('rollback continues after one service restore fails and prioritizes gateway recovery', async () => {
