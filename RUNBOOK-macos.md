@@ -44,7 +44,7 @@ Health never changes owner policy. Public HTTPS ingress failures remain separate
 | Failure | Fix |
 | --- | --- |
 | Checkout `MODULE_NOT_FOUND` | `npm run install:macos:wait` rebuilds privately; do not restore checkout-backed launchd definitions. |
-| Incomplete private release | Preserve it; restore from a known-good backup or install a new source revision. Never remove a running release. |
+| Incomplete private release | Run `install:macos:wait`; installer preserves it and builds a verified repair release. Repeating install reuses that repair. Never remove a running release. |
 | `EX_CONFIG` / exit 78 | Repair the named key in the named file using existing owner/enrollment settings, then reinstall. No blind credential rotation. |
 | Gateway up / node down | Validate enrollment file, reinstall, assert health. |
 | `onlineNodes:0` / reconnect pending | Let health wait; on timeout inspect gateway URL and enrollment/revocation. HTTP 200 alone is insufficient. |

@@ -88,6 +88,26 @@ test('service PATH prefers immutable runtime binaries over mutable checkout bina
   assert.ok(entries.includes('/custom/bin'));
 });
 
+test('reinstall rebuilds a damaged private release without replacing its files', async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-repair-'));
+  const source = path.join(base, 'checkout');
+  const state = path.join(base, 'state');
+  try {
+    for (const entry of ['dist/src/coordinator/main.js', 'dist/src/worker/main.js',
+      'dist/src/gateway/main.js', 'dist/src/node/main.js', 'dist/scripts/oauth-canary.js',
+      'dist/scripts/reload-launchagents.js', 'node_modules/@modelcontextprotocol/client/package.json']) {
+      await write(path.join(source, entry), 'fixture-v1');
+    }
+    const damaged = await stageRuntimeRelease(source, state, 'repair-test');
+    await fs.rename(path.join(damaged, 'dist/src/gateway/main.js'), path.join(damaged, 'dist/src/gateway/main.js.saved'));
+    const repaired = await stageRuntimeRelease(source, state, 'repair-test');
+    assert.notEqual(repaired, damaged);
+    await verifyRuntimeRelease(repaired);
+    assert.equal(await fs.readFile(path.join(damaged, 'dist/src/gateway/main.js.saved'), 'utf8'), 'fixture-v1');
+    assert.equal(await stageRuntimeRelease(source, state, 'repair-test'), repaired);
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
+});
+
 
 test('macOS installer does not run the mutable checkout build before runtime staging', async () => {
   const packageJson = JSON.parse(await fs.readFile(path.resolve('package.json'), 'utf8')) as { scripts?: Record<string, string> };

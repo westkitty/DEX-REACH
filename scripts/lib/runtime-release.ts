@@ -82,10 +82,19 @@ async function createRuntimeRelease(
   await fs.chmod(path.dirname(releases), 0o700).catch(() => undefined);
   await fs.chmod(releases, 0o700).catch(() => undefined);
 
-  const target = path.join(releases, safeId(releaseId));
-  if (await exists(target)) {
-    await verifyRuntimeRelease(target);
-    return target;
+  const baseTarget = path.join(releases, safeId(releaseId));
+  let target = baseTarget;
+  let repair = 0;
+  while (await exists(target)) {
+    try {
+      await verifyRuntimeRelease(target);
+      return target;
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith('runtime release is incomplete:')) throw error;
+      // A process may still use the damaged release. Preserve it and publish a verified sibling;
+      // subsequent installs reuse that sibling instead of modifying/removing a live release.
+      target = `${baseTarget}-repair-${++repair}`;
+    }
   }
 
   const staging = path.join(releases, `.${path.basename(target)}.staging-${process.pid}-${crypto.randomUUID()}`);
