@@ -21,7 +21,7 @@ import {
   type RequestActor,
   type ReachProfile
 } from '../shared/protocol.js';
-import { loadLocalSecrets, stateDir } from '../shared/local-env.js';
+import { loadServiceConfig, stateDir } from '../shared/local-env.js';
 import { authorizeOperation, loadAccessState, reserveOperation, snapshot } from '../shared/access.js';
 import { releaseBudgetConcurrency } from '../shared/budget-usage.js';
 import { createCapabilityRequest } from '../shared/capability-requests.js';
@@ -40,8 +40,7 @@ import { redactWorkStatusForShare } from '../shared/work-coordinator.js';
 import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 import { workspaceWorkerEligible, workspaceWorkerExecute, workspaceWorkerRootsHash } from '../shared/workspace-worker.js';
 
-loadLocalSecrets();
-const config = loadNodeConfig();
+const config = loadServiceConfig(loadNodeConfig);
 const adapters = new AdapterRegistry();
 const backend = new DesktopCommanderAdapter(adapters);
 const results = new ResultStore();
@@ -349,6 +348,7 @@ async function publishStatus(): Promise<void> {
     connected,
     gateway: new URL(config.gatewayWs).origin,
     access,
+    profile: config.profile,
     updatedAt: new Date().toISOString()
   });
   if (json !== lastStatusJson && connected && activeSocket) {

@@ -3,6 +3,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { atomicWriteFile } from '../src/shared/state-io.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
+import { waitMacHealth, type MacHealth } from './lib/macos-health.js';
+import { readMacConfig } from './lib/macos-config.js';
+import { isReachProfile } from '../src/shared/profiles.js';
+import { isAccessMode } from '../src/shared/access.js';
+import { verifyRuntimeRelease } from './lib/runtime-release.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -96,24 +101,6 @@ async function verifyPersistent(service: Service): Promise<void> {
   throw new Error(`${service.label} did not remain running after reload: ${last.slice(0, 400)}`);
 }
 
-async function verifyHealth(url: string): Promise<void> {
-  let last = '';
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
-      last = await response.text();
-      if (response.ok) {
-        const body = JSON.parse(last) as { onlineNodes?: number };
-        if (Number(body.onlineNodes) >= 1) return;
-      }
-    } catch (error) {
-      last = errorText(error);
-    }
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  throw new Error(`DEX health verification failed: ${last.slice(0, 300)}`);
-}
-
 async function verifyCanary(service: Service): Promise<void> {
   let last = '';
   for (let attempt = 0; attempt < 60; attempt += 1) {
@@ -133,20 +120,34 @@ async function verifyCanary(service: Service): Promise<void> {
 
 const canaries = services.filter(service => service.label.endsWith('.oauth-canary'));
 const persistent = services.filter(service => !service.label.endsWith('.oauth-canary'));
+let health: MacHealth | undefined;
 
 try {
+  let expectation;
+  if (healthUrl) {
+    await verifyRuntimeRelease(process.cwd());
+    const dir = requiredArg('--state-dir');
+    const nodeId = requiredArg('--node-id');
+    const profile = requiredArg('--expected-profile');
+    const mode = requiredArg('--expected-mode');
+    if (!isReachProfile(profile) || !isAccessMode(mode)) throw new Error('invalid expected profile or AI mode');
+    const config = await readMacConfig(dir, nodeId);
+    expectation = { dir, nodeId, healthUrl, gatewayWs: config.node.gatewayWs, profile, mode };
+  }
   for (const service of persistent) {
     await reloadService(service);
     if (service.label.endsWith('.gateway')) await new Promise(resolve => setTimeout(resolve, 500));
   }
 
   for (const service of persistent) await verifyPersistent(service);
-  if (healthUrl) await verifyHealth(healthUrl);
+  if (expectation) health = await waitMacHealth(expectation);
 
   for (const service of canaries) {
     await reloadService(service);
     await verifyCanary(service);
   }
+  // The public canary takes time; recheck local health before publishing completion.
+  if (expectation) health = await waitMacHealth(expectation);
 
   await atomicWriteFile(statusFile, JSON.stringify({
     version: DEX_REACH_VERSION,
@@ -154,7 +155,8 @@ try {
     startedAt,
     completedAt: new Date().toISOString(),
     domain,
-    results
+    results,
+    health
   }, null, 2) + '\n');
 } catch (error) {
   await atomicWriteFile(statusFile, JSON.stringify({

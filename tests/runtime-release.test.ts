@@ -3,13 +3,40 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { stageRuntimeRelease, verifyRuntimeRelease } from '../scripts/lib/runtime-release.js';
+import { runtimeReleaseId, stageRuntimeRelease, verifyRuntimeRelease } from '../scripts/lib/runtime-release.js';
 import { servicePath } from '../scripts/lib/service.js';
 
 async function write(file: string, text: string): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, text);
 }
+
+test('release identity is stable for identical build inputs, including dirty sources', async () => {
+  const source = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-id-'));
+  try {
+    await write(path.join(source, 'src/main.ts'), 'export const value = 1;');
+    await write(path.join(source, 'package-lock.json'), '{}');
+    const first = await runtimeReleaseId(source, '0.3.2');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    await write(path.join(source, 'unrelated/cache.pyc'), 'owner work');
+    assert.equal(await runtimeReleaseId(source, '0.3.2'), first);
+    await write(path.join(source, 'src/main.ts'), 'export const value = 2;');
+    assert.notEqual(await runtimeReleaseId(source, '0.3.2'), first);
+  } finally {
+    await fs.rm(source, { recursive: true, force: true });
+  }
+});
+
+test('incomplete runtime is rejected before it can be launched', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-incomplete-'));
+  try {
+    await write(path.join(root, 'dist/src/coordinator/main.js'), '');
+    await write(path.join(root, 'dist/src/worker/main.js'), '');
+    await assert.rejects(verifyRuntimeRelease(root), /missing dist\/src\/gateway\/main.js/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 test('immutable runtime release survives source dist and node_modules replacement', async () => {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-release-'));

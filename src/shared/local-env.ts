@@ -25,9 +25,24 @@ export function machineStateDir(): string {
 /** Load the environment file explicitly selected for the current process (node or owner context). */
 export function loadLocalSecrets(): string | null {
   const file = process.env.DEX_REACH_ENV_FILE || path.join(stateDir(), 'secrets.env');
-  if (!fs.existsSync(file)) return null;
+  if (!fs.existsSync(file)) {
+    if (process.env.DEX_REACH_ENV_FILE) throw new Error(`DEX_REACH_ENV_FILE is missing: ${file}`);
+    return null;
+  }
   process.loadEnvFile(file);
   return file;
+}
+
+/** Configuration failures stop before adapters/listeners start, with a safe key-specific error. */
+export function loadServiceConfig<T>(loader: () => T): T {
+  const file = process.env.DEX_REACH_ENV_FILE || path.join(stateDir(), 'secrets.env');
+  try {
+    loadLocalSecrets();
+    return loader();
+  } catch (error) {
+    console.error(`DEX configuration error (${file}): ${error instanceof Error ? error.message : 'invalid configuration'}`);
+    process.exit(78);
+  }
 }
 
 /**

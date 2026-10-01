@@ -1,17 +1,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { parseEnv } from 'node:util';
 import { stateDir } from '../../src/shared/local-env.js';
 import { atomicWriteFile } from '../../src/shared/state-io.js';
 
 /** Parses a KEY=VALUE env file. Values are returned as-is; callers must never print DEX_REACH_NODE_TOKEN. */
 export async function readEnvFile(file: string): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
-  for (const line of (await fs.readFile(file, 'utf8')).split(/\r?\n/)) {
-    if (!line || line.startsWith('#') || !line.includes('=')) continue;
-    const [key, ...rest] = line.split('=');
-    if (key) out[key.trim()] = rest.join('=').trim();
-  }
-  return out;
+  const parsed = parseEnv(await fs.readFile(file, 'utf8'));
+  const values: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed)) if (value !== undefined) values[key] = value;
+  return values;
 }
 
 export async function writeEnvFile(file: string, values: Record<string, string>): Promise<void> {

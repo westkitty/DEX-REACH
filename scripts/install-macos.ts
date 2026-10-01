@@ -5,11 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { stateDir } from '../src/shared/local-env.js';
-import { readEnvFile } from './lib/node-files.js';
-import { atomicWriteFile } from '../src/shared/state-io.js';
+import { atomicWriteFile, withFileLock } from '../src/shared/state-io.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
 import { launchdIntervalPlist, launchdOneShotPlist, launchdPlist, servicePath } from './lib/service.js';
 import { buildRuntimeRelease, runtimeReleaseId } from './lib/runtime-release.js';
+import { readMacConfig } from './lib/macos-config.js';
+import { parseServiceHealth, waitInstallStatus } from './lib/macos-health.js';
+import { loadAccessState, resolveMode } from '../src/shared/access.js';
 import { workspaceWorkerConfigFile, workspaceWorkerDir, workspaceWorkerRootsHash } from '../src/shared/workspace-worker.js';
 
 const execFileAsync = promisify(execFile);
@@ -21,6 +23,20 @@ const logsDir = path.join(localStateDir, 'logs');
 const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
 const nodeBin = process.execPath;
 const installStatus = path.join(localStateDir, 'install-macos.status.json');
+
+if (process.platform !== 'darwin') throw new Error('install:macos requires macOS launchd');
+await withFileLock(path.join(localStateDir, 'install-macos.lock'), async () => {
+// Never boot out an in-flight reloader. Serializing staging and waiting for the previous helper
+// prevents two installs from replacing each other's definitions/status or killing a half-reload.
+const prior = await fs.readFile(installStatus, 'utf8').then(text => JSON.parse(text) as { state?: string }).catch(() => null);
+if (prior && ['scheduled', 'waiting'].includes(prior.state || '')) {
+  const helper = await execFileAsync('/bin/launchctl', ['print', `${domain}/com.stinkyweasel.dex-reach.install-reloader-once`])
+    .then(({ stdout }) => parseServiceHealth(stdout)).catch(() => null);
+  if (helper && (helper.running || helper.runs === 0)) await waitInstallStatus(localStateDir);
+}
+// Preflight owner and enrollment files before building or mutating any service definition.
+const { node, ownerFile, nodeFile, healthUrl } = await readMacConfig(localStateDir, process.env.DEX_REACH_NODE_ID);
+const expectedMode = resolveMode(await loadAccessState(node.nodeId));
 
 await fs.mkdir(agentsDir, { recursive: true });
 await fs.mkdir(logsDir, { recursive: true, mode: 0o700 });
@@ -35,20 +51,13 @@ const pathEnv = servicePath(nodeBin, inheritedPath, runtimeRoot);
 const helperEntry = path.join(runtimeRoot, 'dist', 'scripts', 'reload-launchagents.js');
 console.log(`Staged immutable runtime release ${runtimeRoot}`);
 
-const ownerEnv = await readEnvFile(path.join(localStateDir, 'secrets.env')).catch((): Record<string, string> => ({}));
-const gatewayPort = Number(ownerEnv.DEX_REACH_GATEWAY_PORT || 8787);
-if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65535) throw new Error('invalid DEX_REACH_GATEWAY_PORT');
-const healthUrl = `http://127.0.0.1:${gatewayPort}/healthz`;
-const currentNodeId = process.env.DEX_REACH_NODE_ID || ownerEnv.DEX_REACH_NODE_ID || os.hostname().toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
-const nodeEnv = path.join(localStateDir, 'nodes', `${currentNodeId}.env`);
-const nodeSettings = await readEnvFile(nodeEnv);
-const workerNodeId = nodeSettings.DEX_REACH_NODE_ID || currentNodeId;
+const currentNodeId = node.nodeId;
+const workerNodeId = node.nodeId;
 // Parsed exactly as `loadNodeConfig` parses it, including the order: empty segments are dropped
 // before resolution, because `path.resolve('')` is the installer's working directory. Resolving
 // first would write that directory into the worker's allowed roots and put the roots hash out of
 // step with the node's, leaving the worker permanently unusable for a trailing `:` in the env.
-const workerRoots = (nodeSettings.DEX_REACH_ALLOWED_ROOTS || os.homedir())
-  .split(path.delimiter).map(root => root.trim()).filter(Boolean).map(root => path.resolve(root));
+const workerRoots = node.allowedRoots;
 if (!workerRoots.length) throw new Error('workspace worker requires at least one configured node root');
 await fs.mkdir(workspaceWorkerDir(), { recursive: true, mode: 0o700 });
 await fs.chmod(workspaceWorkerDir(), 0o700);
@@ -62,8 +71,8 @@ await atomicWriteFile(workspaceWorkerConfigFile(), JSON.stringify({
 const services = [
   { label: 'com.stinkyweasel.dex-reach.coordinator', entry: 'dist/src/coordinator/main.js', envFile: undefined, stateDir: localStateDir },
   { label: 'com.stinkyweasel.dex-reach.worker', entry: 'dist/src/worker/main.js', envFile: undefined, stateDir: undefined },
-  { label: 'com.stinkyweasel.dex-reach.gateway', entry: 'dist/src/gateway/main.js', envFile: undefined, stateDir: localStateDir },
-  { label: 'com.stinkyweasel.dex-reach.node', entry: 'dist/src/node/main.js', envFile: nodeEnv, stateDir: localStateDir }
+  { label: 'com.stinkyweasel.dex-reach.gateway', entry: 'dist/src/gateway/main.js', envFile: ownerFile, stateDir: localStateDir },
+  { label: 'com.stinkyweasel.dex-reach.node', entry: 'dist/src/node/main.js', envFile: nodeFile, stateDir: localStateDir }
 ].map(service => ({ ...service, target: path.join(agentsDir, `${service.label}.plist`) }));
 
 // Stage and syntax-check every LaunchAgent before replacing any live process. This matters when
@@ -86,11 +95,10 @@ for (const service of services) {
 
 const canaryLabel = 'com.stinkyweasel.dex-reach.oauth-canary';
 const canaryTarget = path.join(agentsDir, `${canaryLabel}.plist`);
-const ownerEnvFile = path.join(localStateDir, 'secrets.env');
 await atomicWriteFile(canaryTarget, launchdIntervalPlist({
   label: canaryLabel,
   entry: 'dist/scripts/oauth-canary.js',
-  envFile: ownerEnvFile,
+  envFile: ownerFile,
   stateDir: localStateDir,
   pathEnv,
   root: runtimeRoot,
@@ -121,6 +129,10 @@ const helperArgs = [
   '--status', installStatus,
   '--delay-ms', '3000',
   '--health-url', healthUrl,
+  '--state-dir', localStateDir,
+  '--node-id', currentNodeId,
+  '--expected-profile', node.profile,
+  '--expected-mode', expectedMode,
   '--cleanup-plist', helperTarget
 ];
 for (const service of services) helperArgs.push('--service', service.label, service.target);
@@ -150,3 +162,5 @@ console.log(`DEX//REACH ${DEX_REACH_VERSION} launchd definitions staged and vali
 console.log(`DEX service reload delegated to one-shot helper ${helperLabel}.`);
 console.log(`Reload status: ${installStatus}`);
 console.log('The helper waits briefly so a DEX-hosted install can return before replacing its own transport.');
+console.log('Install is scheduled, not yet healthy. Run npm run healthz:assert -- --wait-install from a local terminal.');
+}, { timeoutMs: 240_000 });
