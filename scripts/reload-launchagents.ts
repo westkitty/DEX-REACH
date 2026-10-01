@@ -5,6 +5,7 @@ import { execFileDeadline } from './lib/process-deadline.js';
 import { restorePlist } from './lib/plist-rollback.js';
 import { claimInstallLock, releaseInstallLock } from './lib/install-lock.js';
 import { runIndependentRollback } from './lib/rollback-sequence.js';
+import { bootstrapLaunchdWithRetry, waitForLaunchdUnload } from './lib/launchd-transition.js';
 
 type Service = { label: string; target: string; candidateTarget: string; rollbackTarget?: string };
 
@@ -94,8 +95,9 @@ async function reloadService(service: Service): Promise<void> {
   } catch {
     bootout = 'not-loaded';
   }
+  await waitForLaunchdUnload(domain, service.label, launchctl);
   await launchctl(['enable', `${domain}/${service.label}`]);
-  await launchctl(['bootstrap', domain, service.candidateTarget]);
+  await bootstrapLaunchdWithRetry(domain, service.label, service.candidateTarget, launchctl);
   await launchctl(['kickstart', `${domain}/${service.label}`]);
   results.push({ label: service.label, bootout, bootstrap: 'ok', kickstart: 'ok' });
 }
@@ -173,10 +175,11 @@ async function rollbackService(service: Service): Promise<{
   } catch {
     // Absence is an acceptable starting state for rollback.
   }
+  await waitForLaunchdUnload(domain, service.label, launchctl);
   const definition = await restorePlist(service.target, service.rollbackTarget);
   if (definition === 'removed') return { label: service.label, definition, restarted: false };
   await launchctl(['enable', `${domain}/${service.label}`]);
-  await launchctl(['bootstrap', domain, service.target]);
+  await bootstrapLaunchdWithRetry(domain, service.label, service.target, launchctl);
   await launchctl(['kickstart', `${domain}/${service.label}`]);
   return { label: service.label, definition, restarted: true };
 }
