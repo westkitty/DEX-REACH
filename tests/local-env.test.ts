@@ -37,6 +37,12 @@ test('owner tools load gateway secrets even when invoked beneath a node environm
   }
 });
 
+test('OAuth runtime health diagnostic reads machine state rather than virtual HOME state', async () => {
+  const source = await fs.readFile(path.resolve('scripts/oauth-health-check.ts'), 'utf8');
+  assert.match(source, /readOAuthRuntimeHealth\(machineStateDir\(\)\)/);
+  assert.doesNotMatch(source, /readOAuthRuntimeHealth\(stateDir\(\)\)/);
+});
+
 test('machine evidence ignores virtual HOME without exposing authority state', () => {
   const previousHome = process.env.HOME;
   const previousState = process.env.DEX_REACH_STATE_DIR;
