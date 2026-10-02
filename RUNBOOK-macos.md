@@ -25,6 +25,8 @@ block on self-replacement inside a remote DEX request. Identical build inputs re
 release; repeated installs reconcile/restart services. Concurrent installers serialize and await
 an active earlier reload. Installation compiles directly into private staging and validates every
 entry before replacing services; ordinary checkout `dist/` rebuilds do not affect live services.
+Node launches after gateway readiness. Agents use the stable Homebrew Node alias when it selects
+the current executable, avoiding a removed versioned Cellar binary after Homebrew upgrades.
 
 Canonical configuration: `~/.dex-reach/secrets.env` for gateway owner settings and
 `~/.dex-reach/nodes/<node-id>.env` for enrollment. `DEX_REACH_STATE_DIR` selects isolated state;

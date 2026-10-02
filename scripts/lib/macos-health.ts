@@ -84,23 +84,37 @@ export async function readMacHealth(expected: HealthExpectation): Promise<MacHea
   return result;
 }
 
+/** Node launch must wait for the new gateway listener, rather than accumulate reconnect backoff. */
+export async function waitGatewayReady(url: string, timeoutMs = 60_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
+      if (response.ok && (await response.json() as { ok?: unknown }).ok === true) return;
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  throw new Error(`gateway listener did not become ready within ${timeoutMs}ms; node was not launched`);
+}
+
 /** Require unchanged PIDs/run counts for five seconds, rather than a transient connected sample. */
 export async function waitMacHealth(expected: HealthExpectation, timeoutMs = 60_000): Promise<MacHealth> {
   const deadline = Date.now() + timeoutMs;
   let stableSince = 0;
   let identity = '';
   let last: MacHealth | undefined;
+  let lastUnhealthy = 'none';
   while (Date.now() < deadline) {
     last = await readMacHealth(expected);
     const next = JSON.stringify([last.gateway.pid, last.gateway.runs, last.node.pid, last.node.runs]);
-    if (!last.ok) { stableSince = 0; identity = ''; }
+    if (!last.ok) { lastUnhealthy = last.reason; stableSince = 0; identity = ''; }
     else {
       if (next !== identity) { identity = next; stableSince = Date.now(); }
       if (Date.now() - stableSince >= 5000) return last;
     }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
-  throw new Error(`DEX health timed out after ${timeoutMs}ms: ${last?.reason ?? 'no observation'}; gateway pid=${last?.gateway.pid ?? 'none'}, node pid=${last?.node.pid ?? 'none'}, onlineNodes=${last?.onlineNodes ?? 'unknown'}`);
+  throw new Error(`DEX health timed out after ${timeoutMs}ms: ${last?.reason ?? 'no observation'}; last unhealthy=${lastUnhealthy}; stable for ${stableSince ? Date.now() - stableSince : 0}ms; gateway pid=${last?.gateway.pid ?? 'none'}, node pid=${last?.node.pid ?? 'none'}, onlineNodes=${last?.onlineNodes ?? 'unknown'}`);
 }
 
 export async function waitInstallStatus(dir: string, timeoutMs = 180_000): Promise<void> {

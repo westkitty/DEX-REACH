@@ -4,8 +4,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import http from 'node:http';
 import { readMacConfig } from '../scripts/lib/macos-config.js';
-import { assessMacHealth, parseServiceHealth } from '../scripts/lib/macos-health.js';
+import { assessMacHealth, parseServiceHealth, waitGatewayReady } from '../scripts/lib/macos-health.js';
+import { serviceNodeBinary } from '../scripts/lib/service.js';
 import type { RuntimeStatus } from '../src/node/runtime-status.js';
 
 const expected = { profile: 'full-local' as const, mode: 'on' as const, gatewayWs: 'ws://127.0.0.1:8787/node' };
@@ -17,6 +19,35 @@ const runtime: RuntimeStatus = {
   updatedAt: new Date().toISOString()
 };
 const body = { ok: true, onlineNodes: 1 };
+
+test('node launch readiness waits for the gateway listener without requiring an existing node', async () => {
+  let calls = 0;
+  const server = http.createServer((_req, res) => {
+    calls++;
+    res.writeHead(calls === 1 ? 503 : 200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: calls > 1, onlineNodes: 0 }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    await waitGatewayReady(`http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}/healthz`, 3000);
+    assert.ok(calls >= 2);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+test('service executable prefers a stable alias only when it selects the current Node', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-node-bin-'));
+  try {
+    const current = path.join(dir, 'cellar/node/26/bin/node');
+    const alias = path.join(dir, 'bin-node');
+    const other = path.join(dir, 'other-node');
+    await fs.mkdir(path.dirname(current), { recursive: true });
+    await fs.writeFile(current, 'node-fixture');
+    await fs.writeFile(other, 'different-node');
+    await fs.symlink(current, alias);
+    assert.equal(await serviceNodeBinary(current, [other, alias]), alias);
+    assert.equal(await serviceNodeBinary(current, [other]), current);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
 
 test('health needs a live matching node, one online node, and AI ON/full-local', () => {
   assert.equal(assessMacHealth(gateway, node, runtime, body, expected).ok, true);

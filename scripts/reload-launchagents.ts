@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { atomicWriteFile } from '../src/shared/state-io.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
-import { waitMacHealth, type MacHealth } from './lib/macos-health.js';
+import { waitGatewayReady, waitMacHealth, type MacHealth } from './lib/macos-health.js';
 import { readMacConfig } from './lib/macos-config.js';
 import { isReachProfile } from '../src/shared/profiles.js';
 import { isAccessMode } from '../src/shared/access.js';
@@ -136,7 +136,7 @@ try {
   }
   for (const service of persistent) {
     await reloadService(service);
-    if (service.label.endsWith('.gateway')) await new Promise(resolve => setTimeout(resolve, 500));
+    if (service.label.endsWith('.gateway') && healthUrl) await waitGatewayReady(healthUrl);
   }
 
   for (const service of persistent) await verifyPersistent(service);

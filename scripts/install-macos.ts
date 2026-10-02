@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { stateDir } from '../src/shared/local-env.js';
 import { atomicWriteFile, withFileLock } from '../src/shared/state-io.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
-import { launchdIntervalPlist, launchdOneShotPlist, launchdPlist, servicePath } from './lib/service.js';
+import { launchdIntervalPlist, launchdOneShotPlist, launchdPlist, servicePath, serviceNodeBinary } from './lib/service.js';
 import { buildRuntimeRelease, runtimeReleaseId } from './lib/runtime-release.js';
 import { readMacConfig } from './lib/macos-config.js';
 import { parseServiceHealth, waitInstallStatus } from './lib/macos-health.js';
@@ -21,7 +21,7 @@ const agentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
 const localStateDir = stateDir();
 const logsDir = path.join(localStateDir, 'logs');
 const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
-const nodeBin = process.execPath;
+const nodeBin = await serviceNodeBinary();
 const installStatus = path.join(localStateDir, 'install-macos.status.json');
 
 if (process.platform !== 'darwin') throw new Error('install:macos requires macOS launchd');
