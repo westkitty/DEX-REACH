@@ -33,7 +33,7 @@ import { DEX_REACH_VERSION } from '../shared/version.js';
 import { checkpointStrategyFor, plannableOperations } from '../shared/operations.js';
 import { workspaceSafeOperationRefusal, workspaceSafeToolRefusal } from '../shared/profiles.js';
 import { AdapterRegistry, remoteAdapterToolRefusal } from '../shared/adapter-contract.js';
-import { childSpan, recordSpan, traceContextFrom, type ReachTraceContext } from '../shared/trace.js';
+import { childSpan, enqueueSpan, flushTraces, traceContextFrom, type ReachTraceContext } from '../shared/trace.js';
 import { loadTransportKeys } from './transport-keys.js';
 import { coordinatedStatus } from '../coordinator/client.js';
 import { redactWorkStatusForShare } from '../shared/work-coordinator.js';
@@ -251,7 +251,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     traceparent: typeof request.traceparent === 'string' ? request.traceparent : undefined,
     tracestate: typeof request.tracestate === 'string' ? request.tracestate : undefined
   });
-  await recordSpan({
+  enqueueSpan({
     traceId: trace.traceId, spanId: trace.spanId, parentSpanId: trace.parentSpanId,
     stage: 'node', at: new Date().toISOString(), operation: request.operation,
     nodeId: config.nodeId, actorKind: actor?.kind
@@ -263,7 +263,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     budgetReservationId = reservation.budgetReservationId;
     policy = reservation.policy;
     const authorizeSpan = childSpan(trace);
-    await recordSpan({
+    enqueueSpan({
       traceId: authorizeSpan.traceId, spanId: authorizeSpan.spanId, parentSpanId: authorizeSpan.parentSpanId,
       stage: 'authorize', at: new Date().toISOString(), operation: request.operation,
       nodeId: config.nodeId, actorKind: actor?.kind, ok: true,
@@ -282,7 +282,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     const result = results.bound(value);
     const durationMs = Date.now() - started;
     const executeSpan = childSpan(authorizeSpan);
-    await recordSpan({
+    enqueueSpan({
       traceId: executeSpan.traceId, spanId: executeSpan.spanId, parentSpanId: executeSpan.parentSpanId,
       stage: request.operation === 'dex.plan' ? 'plan' : request.operation === 'dex.commitPlan' ? 'commit' : 'execute',
       at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId,
@@ -299,7 +299,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       result: value, durationMs, policy, checkpointId: receiptCheckpoint
     });
     const receiptSpan = childSpan(executeSpan);
-    await recordSpan({
+    enqueueSpan({
       traceId: receiptSpan.traceId, spanId: receiptSpan.spanId, parentSpanId: receiptSpan.parentSpanId,
       stage: 'receipt', at: new Date().toISOString(), operation: request.operation,
       nodeId: config.nodeId, actorKind: actor?.kind, ok: true, receiptId: receipt.receiptId
@@ -309,7 +309,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     const message = error instanceof Error ? error.message : String(error);
     const durationMs = Date.now() - started;
     const failSpan = childSpan(trace);
-    await recordSpan({
+    enqueueSpan({
       traceId: failSpan.traceId, spanId: failSpan.spanId, parentSpanId: failSpan.parentSpanId,
       stage: 'execute', at: new Date().toISOString(), operation: request.operation,
       nodeId: config.nodeId, actorKind: actor?.kind, ok: false, durationMs,
@@ -327,7 +327,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     }).catch(() => null);
     if (receipt) {
       const receiptSpan = childSpan(failSpan);
-      await recordSpan({
+      enqueueSpan({
         traceId: receiptSpan.traceId, spanId: receiptSpan.spanId, parentSpanId: receiptSpan.parentSpanId,
         stage: 'receipt', at: new Date().toISOString(), operation: request.operation,
         nodeId: config.nodeId, actorKind: actor?.kind, ok: false, receiptId: receipt.receiptId
@@ -453,7 +453,7 @@ async function shutdown(): Promise<void> {
   stopped = true;
   clearInterval(statusTimer);
   clearInterval(planSweepTimer);
-  await backend.close();
+  await Promise.all([backend.close(), flushTraces({ shutdown: true })]);
   process.exit(0);
 }
 process.on('SIGINT', () => void shutdown());

@@ -5,9 +5,9 @@ import type { AuditLog } from '../shared/audit.js';
 import type { RequestActor } from '../shared/protocol.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
 import { PLAN_TARGET_OPERATIONS } from '../shared/operations.js';
-import { childSpan, recordSpan, traceContextFrom } from '../shared/trace.js';
+import { childSpan, enqueueSpan, traceContextFrom } from '../shared/trace.js';
 
-const NODE_ID_HINT = 'Target node ID exactly as returned by reach_list_nodes (for example "macbook-air.local"). Never guess; each node is a different machine.';
+const NODE_ID_HINT = 'Target node ID exactly as returned by reach_list_nodes (for example "macbook-air.local"). Discover when this bounded task has no explicitly selected node. Reuse that exact ID for at most 60 seconds by client elapsed time, only with known connection continuity and unchanged task, target, credentials, identity, access and capabilities. Reset or unknown freshness requires rediscovery. Never guess or fall back; every operation is authorized again by the node.';
 const EXECUTION_IDENTITY_EXPECTATION = z.object({
   nodeId: z.string().optional(),
   hostname: z.string().optional(),
@@ -43,7 +43,7 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
   const routed = async (nodeId: string, operation: string, args: Record<string, unknown>) => {
     const started = Date.now();
     const trace = traceContextFrom();
-    await recordSpan({
+    enqueueSpan({
       traceId: trace.traceId,
       spanId: trace.spanId,
       parentSpanId: trace.parentSpanId,
@@ -54,7 +54,7 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
       actorKind: actor?.kind
     });
     const gatewayTrace = childSpan(trace);
-    await recordSpan({
+    enqueueSpan({
       traceId: gatewayTrace.traceId,
       spanId: gatewayTrace.spanId,
       parentSpanId: gatewayTrace.parentSpanId,
@@ -78,10 +78,17 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
 
   server.registerTool('reach_list_nodes', {
     title: 'List DEX Nodes',
-    description: 'List every online DEX//REACH node (machine) with its node ID, identity fingerprint, execution profile, owner-controlled aiAccess mode, and privacy-safe scheduler state. Call this first and inspect scheduler.queueDepth and scheduler.queueLatencyMs before submitting work; a node whose aiAccess is off or read-only will refuse operations locally regardless of what you request.',
-    inputSchema: {},
+    description: 'List every online DEX//REACH node (machine) with its node ID, identity fingerprint, execution profile, owner-controlled aiAccess mode, and privacy-safe scheduler state. Default compact responses retain scheduler summaries and cursors with events:[] and eventsOmitted:true; detail:true includes the existing privacy-redacted history with eventsOmitted:false. Discover when no valid explicitly selected node remains for this bounded task (selection expires after 60 seconds by client elapsed time); inspect scheduler.queueDepth and scheduler.queueLatencyMs before submitting work; a node whose aiAccess is off or read-only will refuse operations locally regardless of what you request.',
+    inputSchema: { detail: z.boolean().default(false).describe('Include privacy-redacted scheduler event history; false returns summary and cursors only.') },
     annotations: READ
-  }, async () => text(registry.listNodes()));
+  }, async ({ detail }) => text(registry.listNodes().map(node => ({
+    ...node,
+    scheduler: node.scheduler ? {
+      ...(node.scheduler as Record<string, unknown>),
+      events: detail ? (node.scheduler as Record<string, unknown>).events ?? [] : [],
+      eventsOmitted: !detail
+    } : node.scheduler
+  }))));
 
   server.registerTool('reach_list_tools', {
     title: 'List Node Compatibility Tools',

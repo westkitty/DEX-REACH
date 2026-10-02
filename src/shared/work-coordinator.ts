@@ -67,6 +67,8 @@ export type ObservationCacheMetrics = {
   hits: number;
   misses: number;
   hitRate: number;
+  sampledAt?: string | null;
+  ageMs?: number | null;
 };
 
 const MAX_LABEL_LENGTH = 64;

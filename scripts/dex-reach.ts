@@ -24,7 +24,7 @@ import type { AccessClass, WorkloadClass } from '../src/shared/machine-capacity.
 import type { WorkExecutor } from '../src/shared/work-coordinator.js';
 import { CAPACITY_PROFILES, loadCapacityProfile, setCapacityProfile, type CapacityProfile } from '../src/shared/capacity-profile.js';
 import { runWithWorkLease } from '../src/shared/work-run.js';
-import { describeTrace, isValidTraceId, listTraces, otelExportEnabled, readTrace } from '../src/shared/trace.js';
+import { describeTrace, traceQueueDiagnostics, isValidTraceId, listTraces, otelExportEnabled, readTrace } from '../src/shared/trace.js';
 import {
   BUDGET_SCOPES,
   clearBudgetRule,
@@ -914,7 +914,10 @@ async function traceCommand(): Promise<void> {
   if (!traceId) throw new Error('usage: trace <trace-id> [--json]');
   if (!isValidTraceId(traceId)) throw new Error('trace id must be 32 lowercase hex characters');
   const spans = await readTrace(traceId);
-  if (flag('--json', argv)) { console.log(JSON.stringify(spans, null, 2)); return; }
+  if (flag('--json', argv)) {
+    if (traceQueueDiagnostics().incompleteFlush) console.error('Trace flush incomplete: queued evidence may be missing.');
+    console.log(JSON.stringify(spans, null, 2)); return;
+  }
   console.log(describeTrace(spans).join('\n'));
   if (!spans.length) return;
   console.log(`OpenTelemetry export: ${otelExportEnabled() ? 'ENABLED by DEX_REACH_OTEL_EXPORT' : 'off (default)'}`);
@@ -999,7 +1002,11 @@ async function evidenceCommand(): Promise<void> {
 async function tracesCommand(): Promise<void> {
   const limit = Number(arg('--limit', argv) || 20);
   const traces = await listTraces(Number.isFinite(limit) && limit > 0 ? limit : 20);
-  if (flag('--json', argv)) { console.log(JSON.stringify(traces, null, 2)); return; }
+  if (flag('--json', argv)) {
+    if (traceQueueDiagnostics().incompleteFlush) console.error('Trace flush incomplete: queued evidence may be missing.');
+    console.log(JSON.stringify(traces, null, 2)); return;
+  }
+  console.log(`Trace queue: ${JSON.stringify(traceQueueDiagnostics())}`);
   if (!traces.length) { console.log('No traces recorded.'); return; }
   console.log(`Recent traces (${traces.length}):`);
   for (const entry of traces) {

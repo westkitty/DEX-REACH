@@ -89,7 +89,7 @@ export type SchedulerSnapshot = {
   eventCursor?: number;
   eventWindowStartCursor?: number;
   events?: SchedulerEventSnapshot[];
-  observationCache?: { hits: number; misses: number; hitRate: number };
+  observationCache?: { hits: number; misses: number; hitRate: number; sampledAt?: string | null; ageMs?: number | null };
   observedUncoordinatedHeavy: number;
   degraded: boolean;
 };

@@ -116,6 +116,14 @@ Nodes connect **outbound** to the gateway. They do not expose a raw inbound shel
 
 Every remote operation names a `node_id`. Unknown, blank, offline, or revoked IDs fail. There is no default execution target and no fallback to another machine.
 
+Discover with `reach_list_nodes` when a bounded task lacks a previously discovered, explicitly selected node. Its optional `detail` boolean defaults to false: the outer node array, identity, roots, access, profile, connectivity, freshness, capacity, pressure, queue and scheduler cursors remain; `scheduler.events` is empty with `eventsOmitted:true`. Set `detail:true` for the existing privacy-redacted event snapshot and `eventsOmitted:false`. An omitted history does not mean no events occurred. Other registry consumers and node status publication retain their full snapshots.
+
+During that task a client may reuse its selected exact node ID for at most 60 seconds, measured using client elapsed time when possible. Each operation still sends that ID and the node rechecks current authorization. Node wall-clock timestamps are not a cross-machine freshness guarantee. Rediscover on task/client context reset, target or repository change, disconnect/reconnect or unknown connection continuity, credential revocation, observed identity/access/capability change, expiry, or unknown selection freshness. Never infer a target from hostname similarity or fall back to another node.
+
+Selection reuse does not replace a required trust report or the fresh execution fingerprint bound by `reach_plan` and rechecked by `reach_commit_plan`. Branch and dirty state are advisory; reread them when the task needs them. This is a prescribed client workflow, not a claim that ChatGPT automatically adopts it.
+
+A reproducible read-only schedule is discovery and explicit selection, fingerprint when the task requires identity proof, then repeated `reach_file_read` calls with that same ID and bounded `max_bytes`. Rediscover if any invalidation above occurs. Compare to the actual client schedule: a client that already discovers once saves zero discovery calls through this guidance.
+
 ---
 
 ## What It Can Do
@@ -319,6 +327,8 @@ A trace shows the stages an action passed through, the operation, the node, the 
 **What a span cannot carry.** Spans are an explicit allowlist of identifiers, stage, outcome and hashes. Arguments, file content, process output, raw plan arguments, tokens and credentials are structurally refused rather than filtered out after the fact. A refusal is traced as an outcome class only: the refusal message can quote a path or a command, so it is deliberately not traced, and the local audit log remains the place that holds the redacted detail.
 
 **Inbound context.** A well-formed `traceparent` is continued so a caller's trace and DEX's evidence join up. A malformed one starts a fresh trace rather than being repaired or trusted. `tracestate` is accepted only when every member validates and the whole stays within the W3C bounds. `baggage` is never accepted at all: it is arbitrary caller-controlled key/value data, and a control plane has no reason to propagate it.
+
+**Persistence.** Request handlers enqueue sanitized diagnostic spans; authorization, audits, signed receipts and budget release remain awaited and authoritative. A process queues at most 1,024 spans and 512 KiB of serialized data including in-flight batches, drops the newest span on overflow, and schedules flushing within 100 ms using batches of at most 64 spans. Trace files still retain at most 500 spans under cross-process locks. Writer failures lose diagnostic spans without failing requests or retrying indefinitely. Local trace diagnostics expose content-free queue/drop/failure counters. Diagnostic reads attempt a captured-watermark flush for at most two seconds; an incomplete flush is flagged locally. Graceful shutdown attempts the same bounded flush and closes unreferenced timers. A crash or forced termination can lose queued trace evidence; receipt guarantees are unchanged.
 
 **Where it goes.** Traces are local, bounded, and outside Git, under `~/.dex-reach/traces/`. OpenTelemetry export is off unless the owner sets `DEX_REACH_OTEL_EXPORT=1`, and telemetry is never enabled by default.
 

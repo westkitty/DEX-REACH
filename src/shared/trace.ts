@@ -162,20 +162,141 @@ export function sanitizeSpan(span: TraceSpan): TraceSpan {
   return out as unknown as TraceSpan;
 }
 
-/** Append one causal step. Tracing is best effort: it must never fail a real operation. */
-export async function recordSpan(span: TraceSpan): Promise<void> {
-  if (!isValidTraceId(span.traceId) || !isValidSpanId(span.spanId)) return;
-  const file = traceFile(span.traceId);
-  await fs.mkdir(traceDir(), { recursive: true, mode: 0o700 });
+/** Bounded rewrite shared by awaited and queued persistence. One trace per file lock. */
+async function persistSpans(file: string, linesToWrite: readonly string[]): Promise<void> {
+  await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   await withFileLock(`${file}.lock`, async () => {
     let lines: string[] = [];
-    try { lines = (await fs.readFile(file, 'utf8')).split('\n').filter(Boolean); } catch { /* first span */ }
-    lines.push(JSON.stringify(sanitizeSpan(span)));
+    try { lines = (await fs.readFile(file, 'utf8')).split('\n').filter(Boolean); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    lines.push(...linesToWrite);
     await atomicWriteFile(file, lines.slice(-TRACE_SPAN_LIMIT).join('\n') + '\n');
-  }, { timeoutMs: 5000 }).catch(() => undefined);
+  }, { timeoutMs: 5000 });
+}
+
+/** Awaited persistence remains available to existing diagnostic callers. */
+export async function recordSpan(span: TraceSpan): Promise<void> {
+  if (!isValidTraceId(span.traceId) || !isValidSpanId(span.spanId)) return;
+  await persistSpans(path.resolve(traceFile(span.traceId)), [JSON.stringify(sanitizeSpan(span))]).catch(() => undefined);
+}
+
+export const TRACE_QUEUE_SPANS = 1024;
+export const TRACE_QUEUE_BYTES = 512 * 1024;
+export const TRACE_BATCH_SPANS = 64;
+type QueuedSpan = { sequence: number; file: string; line: string; bytes: number };
+const pendingSpans: QueuedSpan[] = [];
+let queuedSpans = 0;
+let queuedBytes = 0;
+let enqueued = 0;
+let completed = 0;
+let droppedSpans = 0;
+let failedSpans = 0;
+let incompleteFlushes = 0;
+let incompleteFlush = false;
+let closing = false;
+let flushTimer: NodeJS.Timeout | undefined;
+let writer: Promise<void> | undefined;
+let persist = persistSpans;
+const waiters = new Set<() => void>();
+
+/** Content-free local diagnostics; totals include the batch currently in flight. */
+export function traceQueueDiagnostics() {
+  return { queuedSpans, queuedBytes, droppedSpans, failedSpans, incompleteFlushes, incompleteFlush };
+}
+
+/** Internal delayed/failing writer seam. No public MCP surface. */
+export const traceTesting = {
+  setWriter(next?: typeof persistSpans): void {
+    if (writer || queuedSpans) throw new Error('trace writer must be idle before replacement');
+    persist = next ?? persistSpans;
+    closing = false;
+  }
+};
+
+function scheduleFlush(): void {
+  if (flushTimer || writer || closing || !pendingSpans.length) return;
+  flushTimer = setTimeout(() => { flushTimer = undefined; startWriter(); }, 100);
+  flushTimer.unref();
+}
+
+function startWriter(): void {
+  if (writer || !pendingSpans.length) return;
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined; }
+  // Outstanding counters retain this batch until persistence finishes, including on failure.
+  const batch = pendingSpans.splice(0, TRACE_BATCH_SPANS);
+  writer = (async () => {
+    const groups = new Map<string, QueuedSpan[]>();
+    for (const entry of batch) {
+      const group = groups.get(entry.file) ?? [];
+      group.push(entry); groups.set(entry.file, group);
+    }
+    for (const [file, entries] of groups) {
+      try { await persist(file, entries.map(entry => entry.line)); }
+      catch { failedSpans += entries.length; } // Best effort, no retries and no request rejection.
+    }
+    queuedSpans -= batch.length;
+    queuedBytes -= batch.reduce((sum, entry) => sum + entry.bytes, 0);
+    completed = batch.at(-1)!.sequence;
+  })().finally(() => {
+    writer = undefined;
+    for (const wake of waiters) wake();
+    if (pendingSpans.length) {
+      // Flush waiters drive continuation immediately; ordinary traffic uses the bounded timer.
+      if (waiters.size || closing) startWriter(); else scheduleFlush();
+    }
+  });
+}
+
+/** Request-path API: only sanitize, serialize and insert. Destination is frozen now. */
+export function enqueueSpan(span: TraceSpan): boolean {
+  if (!isValidTraceId(span.traceId) || !isValidSpanId(span.spanId)
+    || (span.parentSpanId !== undefined && !isValidSpanId(span.parentSpanId))
+    || !TRACE_STAGES.includes(span.stage)) return false;
+  const safe = sanitizeSpan(span);
+  // Enforce scalar types before serialization: unexpected objects cannot carry nested secrets.
+  for (const field of SPAN_FIELDS) {
+    const value = safe[field];
+    if (value === undefined) continue;
+    if (field === 'ok' ? typeof value !== 'boolean'
+      : field === 'durationMs' ? typeof value !== 'number' || !Number.isFinite(value)
+      : typeof value !== 'string') return false;
+  }
+  const line = JSON.stringify(safe);
+  const bytes = Buffer.byteLength(line, 'utf8') + 1;
+  if (closing || queuedSpans >= TRACE_QUEUE_SPANS || queuedBytes + bytes > TRACE_QUEUE_BYTES) {
+    droppedSpans += 1; return false;
+  }
+  pendingSpans.push({ sequence: ++enqueued, file: path.resolve(traceFile(safe.traceId)), line, bytes });
+  queuedSpans += 1; queuedBytes += bytes;
+  scheduleFlush();
+  return true;
+}
+
+/** Wait for the captured watermark only. Timeout is visible through local diagnostics. */
+export async function flushTraces(options: { timeoutMs?: number; shutdown?: boolean } = {}): Promise<boolean> {
+  const watermark = enqueued;
+  if (options.shutdown) { closing = true; if (flushTimer) clearTimeout(flushTimer); flushTimer = undefined; }
+  if (completed >= watermark) { incompleteFlush = false; return true; }
+  return new Promise<boolean>(resolve => {
+    const finish = (ok: boolean) => {
+      clearTimeout(timer); waiters.delete(wake);
+      incompleteFlush = !ok;
+      if (!ok) incompleteFlushes += 1;
+      resolve(ok);
+    };
+    const wake = () => { if (completed >= watermark) finish(true); };
+    const timer = setTimeout(() => finish(false), Math.min(2000, Math.max(0, options.timeoutMs ?? 2000)));
+    waiters.add(wake);
+    startWriter();
+  });
 }
 
 export async function readTrace(traceId: string): Promise<TraceSpan[]> {
+  await flushTraces();
+  return readStoredTrace(traceId);
+}
+
+async function readStoredTrace(traceId: string): Promise<TraceSpan[]> {
   try {
     const raw = await fs.readFile(traceFile(traceId), 'utf8');
     return raw.split('\n').filter(Boolean).flatMap(line => {
@@ -187,13 +308,14 @@ export async function readTrace(traceId: string): Promise<TraceSpan[]> {
 }
 
 export async function listTraces(limit = 20): Promise<{ traceId: string; at: string; spans: number }[]> {
+  await flushTraces();
   let names: string[];
   try { names = await fs.readdir(traceDir()); } catch { return []; }
   const traces = [];
   for (const name of names.filter(entry => entry.endsWith('.jsonl'))) {
     const traceId = name.slice(0, -6);
     if (!isValidTraceId(traceId)) continue;
-    const spans = await readTrace(traceId);
+    const spans = await readStoredTrace(traceId);
     if (!spans.length) continue;
     traces.push({ traceId, at: spans[spans.length - 1]!.at, spans: spans.length });
   }
@@ -205,10 +327,12 @@ export async function listTraces(limit = 20): Promise<{ traceId: string; at: str
  * reproduces what was read, written or executed.
  */
 export function describeTrace(spans: readonly TraceSpan[]): string[] {
-  if (!spans.length) return ['No spans recorded for that trace id.'];
+  const warning = traceQueueDiagnostics().incompleteFlush ? ['Trace flush incomplete: queued diagnostic evidence may be missing.'] : [];
+  if (!spans.length) return [...warning, 'No spans recorded for that trace id.'];
   const ordered = [...spans].sort((a, b) => a.at.localeCompare(b.at));
   const first = ordered[0]!;
   const lines = [
+    ...warning,
     `Trace ${first.traceId}`,
     `Steps:  ${ordered.length}`,
     `Window: ${first.at.replace('T', ' ').slice(0, 19)} → ${ordered[ordered.length - 1]!.at.replace('T', ' ').slice(0, 19)}`,

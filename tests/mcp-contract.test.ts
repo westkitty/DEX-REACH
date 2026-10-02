@@ -1,3 +1,4 @@
+import { flushTraces, traceTesting, traceQueueDiagnostics, enqueueSpan } from '../src/shared/trace.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
@@ -12,9 +13,9 @@ import { DEX_REACH_VERSION } from '../src/shared/version.js';
  * tools through a real MCP client over an in-memory transport, so they prove what is served rather
  * than what the source file happens to say.
  */
-async function connectedClient(): Promise<{ client: Client; close: () => Promise<void> }> {
+async function connectedClient(nodes: Record<string, unknown>[] = []): Promise<{ client: Client; close: () => Promise<void> }> {
   // Tool handlers are never invoked here; only the advertised surface is read.
-  const registry = { requestWithTrace: async () => ({ result: { ok: true } }), listNodes: () => [] } as unknown as NodeRegistry;
+  const registry = { requestWithTrace: async () => ({ result: { ok: true } }), listNodes: () => nodes } as unknown as NodeRegistry;
   const audit = { append: async () => undefined } as unknown as AuditLog;
 
   const server = createReachMcpServer(registry, audit, 'contract-test', { kind: 'smoke', clientId: 'contract-test', clientName: 'DEX contract test' });
@@ -160,6 +161,7 @@ test('node-routed MCP calls preserve the original payload and expose a caller-vi
     );
   } finally {
     await close();
+    await flushTraces();
     if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previous;
     await import('node:fs/promises').then(fs => fs.rm(temp, { recursive: true, force: true }));
   }
@@ -173,5 +175,68 @@ test('the server reports the DEX version it was built from', async () => {
     assert.equal(info?.version, DEX_REACH_VERSION);
   } finally {
     await close();
+  }
+});
+
+
+test('discovery defaults to compact history, retains fields and never mutates stored status', async () => {
+  const { redactWorkStatusForShare } = await import('../src/shared/work-coordinator.js');
+  const scheduler = redactWorkStatusForShare({
+    capacity: { substantiveSlots: 2, heavySlots: 1, logicalCpuCount: 8, livePressure: { memory: 'warning', cpu: 'healthy', thermal: 'unknown' }, activeHeavy: 0 },
+    leases: [], tickets: [], observed: { uncoordinatedHeavy: 0, dexServices: 4 }, degraded: false,
+    eventWindow: { cursor: 32, startCursor: 1, hasMore: false, events: Array.from({ length: 32 }, (_, i) => ({ cursor: i + 1, at: '2026-10-02T00:00:00.000Z', event: 'cache-hit', phase: '/private/secret' })) }
+  } as unknown as import('../src/shared/work-coordinator.js').WorkStatus);
+  const nodes = [{ nodeId: 'explicit-node', online: true, profile: 'development', fingerprint: { nodeId: 'explicit-node', branch: null }, allowedRoots: ['/fixture'], aiAccess: 'unknown', scheduler, toolCount: 22, agentVersion: '0.3.2', connectedAt: '2026-10-02T00:00:00.000Z', lastSeenAt: '2026-10-02T00:00:00.000Z' }, { nodeId: 'unknown-status', scheduler: null }];
+  const stored = JSON.stringify(nodes);
+  const { client, close } = await connectedClient(nodes);
+  try {
+    const tool = (await client.listTools()).tools[0]!;
+    assert.ok((tool.inputSchema.properties as Record<string, unknown>).detail);
+    assert.ok(!tool.inputSchema.required?.includes('detail'));
+    const compact = clientPreferredOutput(await client.callTool({ name: 'reach_list_nodes', arguments: {} })) as typeof nodes;
+    const detailed = clientPreferredOutput(await client.callTool({ name: 'reach_list_nodes', arguments: { detail: true } })) as typeof nodes;
+    assert.deepEqual(compact[0], { ...nodes[0], scheduler: { ...scheduler, events: [], eventsOmitted: true } });
+    assert.deepEqual(detailed[0], { ...nodes[0], scheduler: { ...scheduler, eventsOmitted: false } });
+    assert.equal(compact[1]!.scheduler, null);
+    assert.equal(JSON.stringify(nodes), stored);
+    assert.ok(!JSON.stringify(detailed).includes('/private/secret'));
+    const before = Buffer.byteLength(JSON.stringify(nodes), 'utf8');
+    const after = Buffer.byteLength(JSON.stringify(compact), 'utf8');
+    assert.ok(after < before);
+    console.log(`Discovery fixture UTF-8 bytes: baseline=${before} compact=${after} reduction=${before - after}`);
+  } finally { await close(); }
+});
+
+test('routed response awaits the authoritative gateway audit while diagnostic persistence is blocked', async () => {
+  const temp = await import('node:fs/promises').then(fs => fs.mkdtemp('/tmp/dex-blocked-trace-'));
+  const previous = process.env.DEX_REACH_STATE_DIR; process.env.DEX_REACH_STATE_DIR = temp;
+  let releaseWriter!: () => void; let writerStarted!: () => void; let releaseAudit!: () => void; let auditStarted!: () => void;
+  const blocked = new Promise<void>(resolve => { releaseWriter = resolve; });
+  const started = new Promise<void>(resolve => { writerStarted = resolve; });
+  const auditGate = new Promise<void>(resolve => { releaseAudit = resolve; });
+  const auditing = new Promise<void>(resolve => { auditStarted = resolve; });
+  traceTesting.setWriter(async () => { writerStarted(); await blocked; });
+  const registry = { requestWithTrace: async () => ({ result: { useful: 'file payload' } }) } as unknown as NodeRegistry;
+  const audit = { append: async () => { auditStarted(); await auditGate; } } as unknown as AuditLog;
+  const server = createReachMcpServer(registry, audit);
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'blocked-trace-test', version: DEX_REACH_VERSION });
+  let completed = false;
+  try {
+    await Promise.all([server.connect(b), client.connect(a)]);
+    const call = client.callTool({ name: 'reach_file_read', arguments: { node_id: 'explicit-node', path: '/fixture' } }).then(result => { completed = true; return result; });
+    await auditing;
+    const flush = flushTraces(); await started;
+    assert.equal(completed, false, 'gateway audit remains authoritative');
+    releaseAudit();
+    const result = await call;
+    assert.deepEqual(clientPreferredOutput(result), { useful: 'file payload' });
+    assert.ok(traceQueueDiagnostics().queuedSpans > 0, 'response completes with persistence still blocked');
+    releaseWriter(); assert.equal(await flush, true);
+  } finally {
+    releaseAudit(); releaseWriter(); await flushTraces(); traceTesting.setWriter();
+    await client.close(); await server.close();
+    if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previous;
+    await import('node:fs/promises').then(fs => fs.rm(temp, { recursive: true, force: true }));
   }
 });

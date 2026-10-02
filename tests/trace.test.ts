@@ -5,6 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   TRACE_SPAN_LIMIT,
+  TRACE_QUEUE_SPANS, TRACE_QUEUE_BYTES, TRACE_BATCH_SPANS,
+  enqueueSpan, flushTraces, traceQueueDiagnostics, traceTesting,
+  type TraceSpan,
   childSpan,
   describeTrace,
   formatTraceparent,
@@ -197,4 +200,112 @@ test('OpenTelemetry export is off unless the owner turns it on', () => {
   } finally {
     if (previous === undefined) delete process.env.DEX_REACH_OTEL_EXPORT; else process.env.DEX_REACH_OTEL_EXPORT = previous;
   }
+});
+
+
+const queuedSpan = (overrides: Partial<TraceSpan> = {}): TraceSpan => ({ traceId: newTraceId(), spanId: newSpanId(), stage: 'execute', at: new Date().toISOString(), ...overrides });
+
+test('enqueue strips secret fields before writing, validates IDs, and preserves causal order and retention', async () => {
+  await withStateDir(async () => {
+    const traceId = newTraceId(); const parent = newSpanId();
+    assert.equal(enqueueSpan(queuedSpan({ traceId: 'invalid' })), false);
+    assert.equal(enqueueSpan(queuedSpan({ spanId: '0'.repeat(16) })), false);
+    assert.equal(enqueueSpan(queuedSpan({ parentSpanId: 'invalid' })), false);
+    assert.equal(enqueueSpan(queuedSpan({ operation: { secret: 'nested' } as never })), false);
+    for (let i = 0; i < 525; i += 1) {
+      assert.equal(enqueueSpan({ ...queuedSpan({ traceId, parentSpanId: parent, durationMs: i }), args: { secret: 'private' }, token: 'private' } as TraceSpan), true);
+    }
+    assert.equal(await flushTraces(), true);
+    const spans = await readTrace(traceId);
+    assert.equal(spans.length, 500);
+    assert.deepEqual(spans.map(span => span.durationMs), Array.from({ length: 500 }, (_, i) => i + 25));
+    assert.ok(spans.every(span => span.parentSpanId === parent));
+    assert.ok(!JSON.stringify(spans).includes('private'));
+    assert.equal((await fs.stat(path.join(traceDir(), `${traceId}.jsonl`))).mode & 0o777, 0o600);
+  });
+});
+
+test('both queue limits count in-flight memory, drop newest, and writers receive sanitized batches', async () => {
+  for (const bound of ['spans', 'bytes'] as const) {
+    let release!: () => void; let entered!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const before = traceQueueDiagnostics();
+    const batches: string[][] = [];
+    traceTesting.setWriter(async (_file, lines) => { batches.push([...lines]); entered(); await blocked; });
+    try {
+      const traceId = newTraceId();
+      const large = bound === 'bytes' ? Object.fromEntries(['operation', 'nodeId', 'actorKind', 'requestHash', 'policyHash', 'planId', 'checkpointId', 'receiptId', 'outcome'].map(field => [field, '界'.repeat(200)])) : {};
+      assert.ok(enqueueSpan(queuedSpan({ traceId, ...large })));
+      const flush = flushTraces({ timeoutMs: 20 }); await started;
+      let inserted = 1;
+      while (enqueueSpan({ ...queuedSpan({ traceId, ...large }), token: 'private' } as TraceSpan)) inserted += 1;
+      const full = traceQueueDiagnostics();
+      assert.equal(full.queuedSpans, inserted);
+      assert.ok(full.queuedBytes <= TRACE_QUEUE_BYTES);
+      assert.equal(full.droppedSpans, before.droppedSpans + 1);
+      if (bound === 'spans') assert.equal(inserted, TRACE_QUEUE_SPANS);
+      else assert.ok(inserted < TRACE_QUEUE_SPANS);
+      assert.equal(await flush, false);
+      assert.equal(traceQueueDiagnostics().incompleteFlush, true);
+      assert.match(describeTrace([]).join(' '), /incomplete/);
+      release(); assert.equal(await flushTraces(), true);
+      assert.ok(batches.every(batch => batch.length <= TRACE_BATCH_SPANS));
+      assert.ok(!JSON.stringify(batches).includes('private'));
+      assert.equal(traceQueueDiagnostics().queuedBytes, 0);
+    } finally { release(); await flushTraces(); traceTesting.setWriter(); }
+  }
+});
+
+test('writer failures lose diagnostics without rejecting enqueue or flush and do not retry', async () => {
+  const before = traceQueueDiagnostics().failedSpans; let calls = 0;
+  traceTesting.setWriter(async () => { calls += 1; throw new Error('disk failed'); });
+  try {
+    assert.ok(enqueueSpan(queuedSpan()));
+    assert.equal(await flushTraces(), true);
+    assert.equal(traceQueueDiagnostics().failedSpans, before + 1);
+    assert.equal(calls, 1); assert.equal(traceQueueDiagnostics().queuedSpans, 0);
+  } finally { traceTesting.setWriter(); }
+});
+
+test('queued destinations stay separate and diagnostic reads flush immediately', async () => {
+  await withStateDir(async () => {
+    const first = process.env.DEX_REACH_STATE_DIR!;
+    const second = path.join(first, 'second'); const a = queuedSpan(); const b = queuedSpan();
+    enqueueSpan(a); process.env.DEX_REACH_STATE_DIR = second; enqueueSpan(b);
+    assert.equal((await readTrace(b.traceId)).length, 1);
+    assert.equal((await listTraces()).length, 1);
+    assert.equal((await readTrace(a.traceId)).length, 0);
+    process.env.DEX_REACH_STATE_DIR = first;
+    assert.equal((await readTrace(a.traceId)).length, 1);
+    assert.equal((await readTrace(b.traceId)).length, 0);
+    enqueueSpan(queuedSpan()); assert.equal((await listTraces()).length, 2);
+  });
+});
+
+test('flush captures a watermark instead of waiting for future arrivals', async () => {
+  let releaseFirst!: () => void; let releaseSecond!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const first = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const second = new Promise<void>(resolve => { releaseSecond = resolve; });
+  let calls = 0;
+  traceTesting.setWriter(async () => { if (++calls === 1) { entered(); await first; } else await second; });
+  try {
+    enqueueSpan(queuedSpan()); const flush = flushTraces(); await started;
+    enqueueSpan(queuedSpan()); releaseFirst(); assert.equal(await flush, true);
+    assert.equal(traceQueueDiagnostics().queuedSpans, 1);
+    releaseSecond(); await flushTraces();
+  } finally { releaseFirst(); releaseSecond(); await flushTraces(); traceTesting.setWriter(); }
+});
+
+test('shutdown flush is bounded and closes the scheduled writer timer', async () => {
+  let release!: () => void; const pending = new Promise<void>(resolve => { release = resolve; });
+  traceTesting.setWriter(async () => pending);
+  try {
+    enqueueSpan(queuedSpan());
+    assert.equal(await flushTraces({ shutdown: true, timeoutMs: 20 }), false);
+    assert.equal(enqueueSpan(queuedSpan()), false);
+    assert.equal(traceQueueDiagnostics().incompleteFlush, true);
+  } finally { release(); await flushTraces(); traceTesting.setWriter(); }
 });

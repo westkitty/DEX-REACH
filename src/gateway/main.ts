@@ -1,3 +1,4 @@
+import { flushTraces } from '../shared/trace.js';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/server';
@@ -176,10 +177,11 @@ async function shutdown(): Promise<void> {
   registry.shutdown();
   const fallback = setTimeout(() => process.exit(0), 2000);
   fallback.unref();
-  httpServer.close(error => {
-    if (error) console.error(error);
-    process.exit(error ? 1 : 0);
-  });
+  const closed = new Promise<Error | undefined>(resolve => httpServer.close(error => resolve(error)));
+  const [error] = await Promise.all([closed, flushTraces({ shutdown: true })]);
+  if (error) console.error(error);
+  clearTimeout(fallback);
+  process.exit(error ? 1 : 0);
 }
 
 process.on('SIGINT', () => void shutdown());
