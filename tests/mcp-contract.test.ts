@@ -259,14 +259,22 @@ test('repo-info inspection is additive and routes once to exactly the supplied n
     const tools = (await client.listTools()).tools;
     assert.deepEqual(tools.map(tool => tool.name), EXPECTED_TOOLS);
     const schema = tools.find(tool => tool.name === 'reach_repo_info')!.inputSchema;
+    assert.ok(schema.properties?.inspection, 'the advertised schema must include inspection');
     assert.equal(schema.required?.includes('inspection'), false);
     assert.equal(tools.find(tool => tool.name === 'reach_repo_info')!.annotations?.readOnlyHint, true);
     await client.callTool({ name: 'reach_repo_info', arguments: { node_id: 'only-this-node', cwd: '/fixture' } });
     assert.deepEqual(calls[0], { nodeId: 'only-this-node', operation: 'dex.repoInfo', args: { cwd: '/fixture' } });
-    const result = await client.callTool({ name: 'reach_repo_info', arguments: { node_id: 'only-this-node', cwd: '/fixture', inspection: { operations: [{ kind: 'read', path: '/fixture/a.ts', maxLines: 5 }] } } });
+    const operations = [
+      { kind: 'tree', path: '/fixture/src', depth: 2, maxEntries: 20 },
+      { kind: 'search', paths: ['/fixture/src'], patterns: ['checkAccess'], maxMatches: 20 },
+      { kind: 'search', paths: ['/fixture/src'], patterns: ['requireNode'], maxMatches: 20 },
+      ...['a.ts', 'b.ts', 'c.ts'].map(file => ({ kind: 'read', path: `/fixture/src/${file}`, startLine: 1, maxLines: 5 }))
+    ];
+    const result = await client.callTool({ name: 'reach_repo_info', arguments: { node_id: 'only-this-node', cwd: '/fixture', inspection: { operations } } });
     assert.equal(calls.length, 2);
     assert.equal((calls[1] as any).nodeId, 'only-this-node');
-    assert.equal((calls[1] as any).args.inspection.operations[0].maxLines, 5);
+    assert.deepEqual((calls[1] as any).args.inspection.operations.map((op: any) => op.kind), ['tree', 'search', 'search', 'read', 'read', 'read']);
+    assert.equal((calls[1] as any).args.inspection.operations[3].maxLines, 5);
     assert.equal((clientPreferredOutput(result) as any).root, '/fixture');
     assert.ok(result._meta?.['dex-reach/trace-id']); assert.equal(result.structuredContent, undefined);
     const invalid = await client.callTool({ name: 'reach_repo_info', arguments: { node_id: 'only-this-node', inspection: { operations: [{ kind: 'shell', command: 'pwd' }] } } });

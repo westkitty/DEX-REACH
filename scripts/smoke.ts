@@ -99,9 +99,14 @@ try {
     if (!tool) throw new Error(`missing MCP tool: ${name}`);
     if (!tool.title || !tool.description || typeof tool.annotations?.readOnlyHint !== 'boolean') throw new Error(`MCP tool ${name} is missing title, description, or readOnlyHint annotation`);
   }
-  if (tools.tools.length < required.length) throw new Error(`tool count ${tools.tools.length} is below required ${required.length}`);
+  if (JSON.stringify(tools.tools.map(tool => tool.name)) !== JSON.stringify(required)) throw new Error('public MCP tool names/order differ from the intended 16-action contract');
+  const repoTool = tools.tools.find(tool => tool.name === 'reach_repo_info')!;
+  if (!repoTool.inputSchema.properties?.inspection || repoTool.inputSchema.required?.includes('inspection')) throw new Error('reach_repo_info must advertise optional inspection');
+  if (repoTool.annotations?.readOnlyHint !== true) throw new Error('reach_repo_info must remain annotated read-only');
 
-  const nodeId = process.env.DEX_REACH_NODE_ID || '';
+  const contractOnly = process.argv.includes('--contract-only');
+  const option = (name: string) => { const index = process.argv.indexOf(name); return index < 0 ? undefined : process.argv[index + 1]; };
+  const nodeId = (contractOnly ? option('--node') : process.env.DEX_REACH_NODE_ID) || '';
   if (!nodeId) throw new Error('DEX_REACH_NODE_ID missing');
   type NodeRecord = { nodeId: string; online: boolean; allowedRoots: string[]; agentVersion: string; aiAccess?: { mode?: string } };
   const nodes = jsonContent<NodeRecord[]>(await client.callTool({ name: 'reach_list_nodes', arguments: {} }), 'reach_list_nodes');
@@ -111,6 +116,34 @@ try {
 
   const fingerprint = jsonContent<{ nodeId: string }>(await client.callTool({ name: 'reach_fingerprint', arguments: { node_id: nodeId } }), 'reach_fingerprint');
   if (fingerprint.nodeId !== nodeId) throw new Error('reach_fingerprint returned the wrong node');
+
+  // Fresh external discovery proof without the ordinary smoke's mutation fixtures. This proves
+  // the gateway response, not whether a hosted client's connector metadata has been refreshed.
+  if (contractOnly) {
+    const cwd = option('--cwd');
+    if (!cwd || !path.isAbsolute(cwd)) throw new Error('--contract-only requires an absolute --cwd');
+    const legacy = jsonContent<Record<string, unknown>>(await client.callTool({ name: 'reach_repo_info', arguments: { node_id: nodeId, cwd } }), 'legacy repo info');
+    for (const field of ['root', 'branch', 'remote', 'status', 'log']) if (!(field in legacy)) throw new Error(`legacy repo info omitted ${field}`);
+    const started = performance.now();
+    const result = await client.callTool({ name: 'reach_repo_info', arguments: { node_id: nodeId, cwd, inspection: {
+      operations: [
+        { kind: 'tree', path: path.join(cwd, 'src'), depth: 1, maxEntries: 15 },
+        { kind: 'search', paths: [path.join(cwd, 'src/gateway/mcp.ts')], patterns: ['REPO_INSPECTION_SCHEMA'], maxMatches: 3, maxBytes: 32768 },
+        { kind: 'search', paths: [path.join(cwd, 'src/shared/repo-inspection.ts')], patterns: ['INSPECTION_LIMITS'], maxMatches: 3, maxBytes: 8192 },
+        { kind: 'read', path: path.join(cwd, 'src/gateway/mcp.ts'), startLine: 1, maxLines: 5, maxBytes: 32768 },
+        { kind: 'read', path: path.join(cwd, 'src/shared/repo-inspection.ts'), startLine: 1, maxLines: 8, maxBytes: 8192 },
+        { kind: 'read', path: path.join(cwd, 'README.md'), startLine: 1, maxLines: 5, maxBytes: 8192 }
+      ], maxResultBytes: 12000, timeoutMs: 5000
+    } } });
+    const elapsedMs = performance.now() - started;
+    const evidence = jsonContent<{ inspection: { context: { node_id: string; repositoryRoot: string; advisory: boolean; selectionRequired: boolean; snapshotAtomic: boolean }; results: { kind: string }[] } }>(result, 'bundled inspection');
+    const context = evidence.inspection.context;
+    if (context.node_id !== nodeId || context.repositoryRoot !== await fs.realpath(cwd) || !context.advisory || !context.selectionRequired || context.snapshotAtomic !== false) throw new Error('inspection context does not match the explicit advisory target');
+    if (JSON.stringify(evidence.inspection.results.map(item => item.kind)) !== JSON.stringify(['tree', 'search', 'search', 'read', 'read', 'read'])) throw new Error('inspection operation results differ');
+    const responseUtf8Bytes = Buffer.byteLength(textContent(result));
+    if (responseUtf8Bytes > 12000) throw new Error('inspection exceeded the requested result bound');
+    console.log(JSON.stringify({ ok: true, mode: 'read-only-contract', gateway: base.origin, mcpTools: tools.tools.length, toolNames: required, inspectionAdvertised: true, inspectionRequired: false, legacyCompatible: true, context, elapsedMs, responseUtf8Bytes, freshHostedClient: 'UNVERIFIED' }, null, 2));
+  } else {
 
   const trust = jsonContent<{ verdict: string; certificateHash: string; invariants: { count: number } }>(await client.callTool({ name: 'reach_trust_report', arguments: { node_id: nodeId } }), 'reach_trust_report');
   if (trust.verdict !== 'PASS') throw new Error(`reach_trust_report did not pass: ${JSON.stringify(trust)}`);
@@ -221,6 +254,7 @@ try {
     compatibilityPolicyVerified: true, remoteCompatibilityTools: expectedCompat.length, compatibilityMutationBlocked: true, urlProxyBlocked: true, nativeFileRoundTrip: true, nativeProcessExecution: true, childEnvironmentSanitized: true,
     adbBinaryAvailable: true, trustReport: true, transactionalPlanCommit: true, executionIdentityPlanGuard: true, executionIdentityDriftBlocked: true, signedReceiptsVisible: true, checkpoint: true
   }, null, 2));
+  }
 } finally {
   for (const file of cleanupFiles) await fs.unlink(file).catch(() => undefined);
   if (fixture) await fs.rm(fixture, { recursive: true, force: true }).catch(() => undefined);

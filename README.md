@@ -660,6 +660,20 @@ The additive `inspection.context` contains the exact `node_id`, repository root,
 
 The matched isolated benchmark reduced this complete inspection intent from nine serial MCP calls to one; response bytes increased because structured evidence replaces adapter text. [Phase 2 evidence](docs/PERFORMANCE_PHASE2.md) records the measurements and reproduction command. Installed-client performance remains unverified.
 
+### Check gateway discovery independently of hosted app metadata
+
+Run a fresh authenticated, read-only public-gateway contract proof against the explicit primary node:
+
+```bash
+npm run smoke -- --contract-only --node macbook-air.local --cwd /Users/andrew/DEX-REACH
+```
+
+This mode verifies the exact 16 tool names/order, advertised optional `inspection`, read-only annotation, legacy repo-info fields and one bounded tree/two-search/three-read bundle with its advisory context. It uses the existing owner OAuth flow and does not run the ordinary smoke's write/process/plan/checkpoint fixtures. It is specific to a DEX source repository containing the documented files. It proves gateway discovery and installed execution, not a ChatGPT metadata refresh.
+
+ChatGPT workspace apps can retain an approved tool/input snapshot across new conversations. Server updates alone do not update that snapshot. OpenAI documents Enterprise/Edu **Workspace settings → Apps → Action control → Refresh** (new actions initially disabled), while published Business apps currently require recreation and republication to update their tools/metadata. An admin must review the intended actions and preserve the existing access controls. See [OpenAI's app update documentation](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt). After the applicable admin update, a genuinely fresh ChatGPT conversation must observe the 16 tools and optional `inspection` before consumer acceptance is complete. Do not reinstall DEX merely to refresh hosted app metadata.
+
+[Client contract evidence](docs/CLIENT_CONTRACT_EVIDENCE.md) separates source, installed-runtime, public-gateway and hosted-client proof.
+
 ## Verification
 
 Primary deterministic source/build gate:
