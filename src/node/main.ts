@@ -1,3 +1,4 @@
+import { parseRepoInspection } from '../shared/repo-inspection.js';
 import WebSocket from 'ws';
 import path from 'node:path';
 import { DesktopCommanderAdapter } from './adapters/desktop-commander.js';
@@ -259,6 +260,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
   try {
     // The final authorization reservation happens immediately before execution and is serialized with
     // owner policy updates. OFF therefore wins over stale remote state instead of being overwritten.
+    if (request.operation === 'dex.repoInfo' && request.args.inspection !== undefined) parseRepoInspection(request.args.inspection);
     const reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args);
     budgetReservationId = reservation.budgetReservationId;
     policy = reservation.policy;

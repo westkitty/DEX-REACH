@@ -1,3 +1,4 @@
+import { REPO_INSPECTION_SCHEMA } from '../shared/repo-inspection.js';
 import * as z from 'zod/v4';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { NodeRegistry } from './registry.js';
@@ -124,10 +125,10 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
 
   server.registerTool('reach_repo_info', {
     title: 'Inspect Git Repository',
-    description: 'Inspect a Git repository on the selected node: root, branch, remotes, working-tree status, and recent commits. Read-only; never mutates the repository.',
-    inputSchema: { node_id: z.string().min(1).describe(NODE_ID_HINT), cwd: z.string().optional().describe('Directory inside the repository; defaults to the node working directory.') },
+    description: 'Inspect a Git repository on the selected node: root, branch, remotes, working-tree status, and recent commits. Read-only; never mutates the repository. Optional inspection bundles up to 8 bounded tree, literal-search and line-range reads; max 16 requested paths, 4 tree levels, 200 entries, 4 patterns/search, 100 matches/search, 2 context lines, 32 KiB scanned/file, 200 read lines, 16 KiB aggregate JSON and 5 seconds. Generated/vendor, sensitive and symlink traversal is excluded. Results are advisory non-atomic evidence; every call still names node_id.',
+    inputSchema: { node_id: z.string().min(1).describe(NODE_ID_HINT), cwd: z.string().optional().describe('Directory inside the repository; defaults to the node working directory.'), inspection: REPO_INSPECTION_SCHEMA.optional().describe('Optional bounded repository evidence query. Paths must be absolute and inside the selected repository; patterns are case-sensitive literal text, never shell or regular expressions.') },
     annotations: READ
-  }, async ({ node_id, cwd }) => routed(node_id, 'dex.repoInfo', cwd ? { cwd } : {}));
+  }, async ({ node_id, cwd, inspection }) => routed(node_id, 'dex.repoInfo', { ...(cwd ? { cwd } : {}), ...(inspection ? { inspection } : {}) }));
 
   server.registerTool('reach_adb_devices', {
     title: 'List Android ADB Devices',

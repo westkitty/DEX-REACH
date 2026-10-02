@@ -240,3 +240,40 @@ test('routed response awaits the authoritative gateway audit while diagnostic pe
     await import('node:fs/promises').then(fs => fs.rm(temp, { recursive: true, force: true }));
   }
 });
+
+
+test('repo-info inspection is additive and routes once to exactly the supplied node', async () => {
+  const calls: unknown[] = [];
+  const registry = { requestWithTrace: async (nodeId: string, operation: string, args: unknown) => {
+    calls.push({ nodeId, operation, args }); return { result: { root: '/fixture', branch: 'fixture', inspection: { results: [] } } };
+  } } as unknown as NodeRegistry;
+  const audit = { append: async () => undefined } as unknown as AuditLog;
+  const server = createReachMcpServer(registry, audit);
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'inspection-contract', version: DEX_REACH_VERSION });
+  const fs = await import('node:fs/promises');
+  const temp = await fs.mkdtemp('/tmp/dex-inspection-mcp-'); const previous = process.env.DEX_REACH_STATE_DIR;
+  process.env.DEX_REACH_STATE_DIR = temp;
+  try {
+    await Promise.all([server.connect(b), client.connect(a)]);
+    const tools = (await client.listTools()).tools;
+    assert.deepEqual(tools.map(tool => tool.name), EXPECTED_TOOLS);
+    const schema = tools.find(tool => tool.name === 'reach_repo_info')!.inputSchema;
+    assert.equal(schema.required?.includes('inspection'), false);
+    assert.equal(tools.find(tool => tool.name === 'reach_repo_info')!.annotations?.readOnlyHint, true);
+    await client.callTool({ name: 'reach_repo_info', arguments: { node_id: 'only-this-node', cwd: '/fixture' } });
+    assert.deepEqual(calls[0], { nodeId: 'only-this-node', operation: 'dex.repoInfo', args: { cwd: '/fixture' } });
+    const result = await client.callTool({ name: 'reach_repo_info', arguments: { node_id: 'only-this-node', cwd: '/fixture', inspection: { operations: [{ kind: 'read', path: '/fixture/a.ts', maxLines: 5 }] } } });
+    assert.equal(calls.length, 2);
+    assert.equal((calls[1] as any).nodeId, 'only-this-node');
+    assert.equal((calls[1] as any).args.inspection.operations[0].maxLines, 5);
+    assert.equal((clientPreferredOutput(result) as any).root, '/fixture');
+    assert.ok(result._meta?.['dex-reach/trace-id']); assert.equal(result.structuredContent, undefined);
+    const invalid = await client.callTool({ name: 'reach_repo_info', arguments: { node_id: 'only-this-node', inspection: { operations: [{ kind: 'shell', command: 'pwd' }] } } });
+    assert.equal(invalid.isError, true); assert.equal(calls.length, 2);
+  } finally {
+    await client.close(); await server.close(); await flushTraces();
+    if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previous;
+    await fs.rm(temp, { recursive: true, force: true });
+  }
+});

@@ -1,3 +1,4 @@
+import { inspectRepository } from './repo-inspection.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,7 +6,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { executionFingerprint } from '../shared/fingerprint.js';
-import { canonicalPathForScope, commandGuard, pathAllowed, parseReadonlyCommand } from '../shared/security.js';
+import { canonicalPathForScope, commandGuard, pathAllowed, parseReadonlyCommand, redactSensitiveText } from '../shared/security.js';
 import type { ReachProfile } from '../shared/protocol.js';
 import { workspaceSafeOperationRefusal } from '../shared/profiles.js';
 import { stateDir } from '../shared/local-env.js';
@@ -30,18 +31,18 @@ function redactKnownEnvironmentSecrets(text: string, source: NodeJS.ProcessEnv =
   return output;
 }
 
-async function run(command: string, args: string[], cwd?: string, maxBuffer = 4 * 1024 * 1024): Promise<string> {
-  const { stdout } = await execFileAsync(command, args, { cwd, timeout: 15000, maxBuffer, env: safeChildEnvironment() });
+async function run(command: string, args: string[], cwd?: string, maxBuffer = 4 * 1024 * 1024, signal?: AbortSignal): Promise<string> {
+  const { stdout } = await execFileAsync(command, args, { cwd, timeout: 15000, maxBuffer, signal, env: { ...safeChildEnvironment(), ...(signal ? { GIT_OPTIONAL_LOCKS: '0' } : {}) } });
   return stdout;
 }
 
-export async function repoInfo(cwd: string): Promise<Record<string, unknown>> {
-  const root = (await run('git', ['rev-parse', '--show-toplevel'], cwd)).trim();
+export async function repoInfo(cwd: string, signal?: AbortSignal, maxBuffer = 4 * 1024 * 1024): Promise<Record<string, unknown>> {
+  const root = (await run('git', ['rev-parse', '--show-toplevel'], cwd, maxBuffer, signal)).trim();
   const [branch, remote, status, log] = await Promise.all([
-    run('git', ['branch', '--show-current'], root),
-    run('git', ['remote', '-v'], root),
-    run('git', ['status', '--short', '--branch'], root),
-    run('git', ['log', '--oneline', '-10'], root)
+    run('git', ['branch', '--show-current'], root, maxBuffer, signal),
+    run('git', ['remote', '-v'], root, maxBuffer, signal),
+    run('git', ['status', '--short', '--branch'], root, maxBuffer, signal),
+    run('git', ['log', '--oneline', '-10'], root, maxBuffer, signal)
   ]);
   return { root, branch: branch.trim(), remote: remote.trim(), status: status.trimEnd(), log: log.trimEnd() };
 }
@@ -216,8 +217,11 @@ export async function nativeCall(nodeId: string, operation: string, args: Record
   switch (operation) {
     case 'dex.fingerprint':
       return executionFingerprint(nodeId, scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd'));
-    case 'dex.repoInfo':
-      return repoInfo(scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd'));
+    case 'dex.repoInfo': {
+      const cwd = scopedPath(typeof args.cwd === 'string' ? args.cwd : defaultCwd(roots), roots, 'cwd');
+      if (args.inspection === undefined) return repoInfo(cwd);
+      return inspectRepository(nodeId, cwd, roots, args.inspection, (directory, signal) => repoInfo(directory, signal, 8192), text => redactKnownEnvironmentSecrets(redactSensitiveText(text)));
+    }
     case 'dex.adbDevices':
       return adbDevices();
     case 'dex.checkpoint': {

@@ -39,6 +39,8 @@ export function workspaceWorkerRootsHash(roots: readonly string[]): string {
 export function workspaceWorkerEligible(operation: string, args: Record<string, unknown>): operation is WorkspaceWorkerOperation {
   if (!(WORKSPACE_WORKER_OPERATIONS as readonly string[]).includes(operation)) return false;
   if (Object.prototype.hasOwnProperty.call(args, 'secrets')) return false;
+  // Bundles stay with the node's live private-state scope and bounded native executor.
+  if (operation === 'dex.repoInfo' && args.inspection !== undefined) return false;
   return true;
 }
 

@@ -137,7 +137,7 @@ DEX//REACH currently exposes 16 first-class MCP actions:
 | `reach_call` | Invoke one compatibility tool on one explicit node |
 | `reach_fingerprint` | Prove which physical/runtime environment will execute work |
 | `reach_trust_report` | Return a fresh evidence-scoped trust certificate with runtime checks, fingerprint, access state, invariant IDs, and certificate hash |
-| `reach_repo_info` | Inspect Git repository state without mutating it |
+| `reach_repo_info` | Inspect Git state; optionally bundle bounded tree, literal-search and file-range evidence |
 | `reach_adb_devices` | Discover Android devices visible to a node through ADB |
 | `reach_checkpoint` | Capture a reversible Git worktree checkpoint |
 | `reach_file_read` | Read a bounded UTF-8 file inside the node's allowed roots |
@@ -617,6 +617,48 @@ If the target node is OFF, read-only for a mutation, offline, unknown, revoked, 
 If a ChatGPT connection must be reauthorized, treat that as **recovery**, not proof of a fix. Repeated reauthorization is an OAuth incident: run `npm run dex -- doctor --share`, inspect the canary/token-health evidence, and repair the server/client lifecycle rather than normalizing reconnects.
 
 ---
+
+
+### One bounded repository inspection
+
+`reach_repo_info({ node_id, cwd })` retains its existing `root`, `branch`, `remote`, `status` and `log` fields. Add `inspection` to collect known read-heavy evidence in one routed call, without shell commands or new public tools:
+
+```json
+{
+  "node_id": "explicit-node-from-discovery",
+  "cwd": "/absolute/repository",
+  "inspection": {
+    "operations": [
+      { "kind": "tree", "path": "/absolute/repository/src", "depth": 2, "maxEntries": 100 },
+      { "kind": "search", "paths": ["/absolute/repository/src"], "patterns": ["requireNode", "checkAccess"], "maxMatches": 20, "contextLines": 1 },
+      { "kind": "read", "path": "/absolute/repository/src/router.ts", "startLine": 1, "maxLines": 80, "maxBytes": 8192 },
+      { "kind": "read", "path": "/absolute/repository/src/access.ts", "startLine": 20, "maxLines": 40, "maxBytes": 8192 }
+    ],
+    "maxResultBytes": 16384,
+    "timeoutMs": 5000
+  }
+}
+```
+
+Every path must be absolute and canonically inside both the repository and node allowed roots; DEX private state stays excluded. Search patterns are case-sensitive literal strings, not regular expressions or commands. The node validates the same schema as MCP. READ-ONLY permits the bundle. Where grants are required, it requires both `inspect` and `file.read`, and every explicit path stays grant-scoped. The operation retains its `dex.repoInfo` classification. Operation budgets charge metadata plus each tree/read, and two units per search path/pattern to account conservatively for the existing start/retrieval workflow. One authoritative audit/receipt describes the entire exact request/result; search strings are omitted from audit diagnostics and remain bound by the receipt request hash. Bundles execute on the persistent node rather than the legacy worker's smaller frame/private-state context; ordinary repo-info worker behavior is unchanged.
+
+| Bound | Maximum (default where applicable) |
+| --- | --- |
+| Inspection operations / total requested paths | 8 / 16 |
+| Search paths / literal patterns per search | 4 / 4; each pattern 128 characters |
+| Tree depth / entries | 4 / 200 (2 / 100) |
+| Search recursion depth / matches / context lines | 4 / 100 / 2 (50 matches, 0 context) |
+| Prefix bytes scanned per file | 32,768 (8,192) |
+| Read start line / returned lines | 10,000 / 200 (1 / 100) |
+| Output characters per evidence line | 1,024; `textTruncated` marks shortening |
+| Visited directory entries / scanned files / scanned bytes per request | 1,024 / 64 / 262,144 |
+| Aggregate result UTF-8 JSON / execution deadline | 16,384 bytes / 5,000 ms |
+
+Requests exceeding ceilings fail. Tree/search count caps stop output with `truncated`; search `scopeDepth` and `prefixFiles` describe its depth and prefix coverage. Reads report `bytesRead`, `startLine`, numbered `lines`, `binary` and `truncated`; scanning begins at file start within `maxBytes`, so later ranges require enough bounded prefix coverage. Incomplete trailing prefix lines are omitted. Binary files are not dumped. Symlinks are not traversed; explicit paths still undergo canonical scope checks. Default traversal excludes `.git`, `node_modules`, `vendor`, `dist`, `build`, `coverage`, `.next`, `__pycache__` and `.dex-reach`; direct access to those, common environment/credential files and private-key containers is refused. Known environment credentials and credential assignments are redacted from evidence. No generic credential detector or new filesystem authority is implied.
+
+The additive `inspection.context` contains the exact `node_id`, repository root, observed branch and wall-clock observation time, with explicit advisory/non-atomic flags. It is task-scoped evidence, never an implicit target selection, freshness guarantee or replacement for required trust reports and fresh plan/commit fingerprints. Clients still select and send the exact node ID and use their own elapsed time for the existing selection-reuse rules. Automatic ChatGPT/Claude adoption is not claimed.
+
+The matched isolated benchmark reduced this complete inspection intent from nine serial MCP calls to one; response bytes increased because structured evidence replaces adapter text. [Phase 2 evidence](docs/PERFORMANCE_PHASE2.md) records the measurements and reproduction command. Installed-client performance remains unverified.
 
 ## Verification
 

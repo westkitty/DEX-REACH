@@ -1,3 +1,4 @@
+import { inspectionOperationCost } from './repo-inspection.js';
 import type { ReachCapability } from './capabilities.js';
 
 /**
@@ -450,7 +451,9 @@ export function requestedAuthorityCost(
       return costFrom(toolDesc.mutation, toolDesc.risk, args);
     }
   }
-  return costFrom(descriptor.mutation, descriptor.risk, args);
+  const cost = costFrom(descriptor.mutation, descriptor.risk, args);
+  if (operation === 'dex.repoInfo' && args.inspection !== undefined) cost.operations = inspectionOperationCost(args.inspection);
+  return cost;
 }
 
 export function addAuthorityCost(a: AuthorityCost, b: AuthorityCost): AuthorityCost {

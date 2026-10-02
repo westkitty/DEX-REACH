@@ -27,7 +27,7 @@ export function summarizeContent(value: unknown): unknown {
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [
       k,
-      CONTENT_KEYS.test(k) && typeof v === 'string' ? `[${Buffer.byteLength(v)} bytes omitted]` : summarizeContent(v)
+      k === 'patterns' && Array.isArray(v) ? `[${v.length} search patterns omitted]` : CONTENT_KEYS.test(k) && typeof v === 'string' ? `[${Buffer.byteLength(v)} bytes omitted]` : summarizeContent(v)
     ]));
   }
   return value;

@@ -60,6 +60,7 @@ export function requiredCapabilities(operation: string, args: Record<string, unk
   const base = operationCapability(operation);
   const descriptor = describeOperation(operation);
   const required: ReachCapability[] = [base];
+  if (operation === 'dex.repoInfo' && args.inspection !== undefined) required.push('file.read');
   if (descriptor?.workspaceSafeResolvedPerTool) {
     const tool = typeof args.tool === 'string' ? args.tool : '';
     const known = describeCompatibilityTool(tool);
