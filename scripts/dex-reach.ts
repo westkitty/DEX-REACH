@@ -152,10 +152,16 @@ async function status(): Promise<void> {
   const nodeId = await pickNodeId(); const env = await readEnvFile(nodeEnvFile(nodeId)); const state = await loadAccessState(nodeId);
   const effective = resolveMode(state); const runtime = await readRuntimeStatus(nodeId); const recent = (await new AuditLog().tail(200)).filter(e => e.nodeId === nodeId && isNodeSide(e)).slice(-5);
   const grantLines = state.grants.length ? state.grants.map(g => `  ${g.client.padEnd(8)} ${g.capabilities.join(',')} roots=${g.roots.join(',')} uses=${g.uses}${g.maxUses === null ? '' : '/' + g.maxUses} until=${g.until}`) : ['  (none)'];
+  const socketConnected = runtime ? (runtime.socketConnected ?? runtime.connected) : false;
+  const registration = runtime
+    ? (runtime.gatewayRegistered === undefined ? 'unknown (legacy runtime status)' : runtime.gatewayRegistered ? 'registered' : socketConnected ? 'pending' : 'not registered')
+    : 'not registered';
   console.log([
     'DEX//REACH', `Node:            ${nodeId}`, `Machine:         ${os.hostname()} (${process.platform}/${process.arch}, user ${os.userInfo().username})`,
     `Node process:    ${runtime ? `running (pid ${runtime.pid})` : 'not running'}`,
-    `Gateway:         ${runtime ? (runtime.connected ? `connected to ${runtime.gateway}` : `disconnected from ${runtime.gateway}`) : (env.DEX_REACH_GATEWAY_WS ? `configured ${new URL(env.DEX_REACH_GATEWAY_WS).origin}` : 'not configured')}`,
+    `Gateway socket:  ${runtime ? (socketConnected ? `connected to ${runtime.gateway}` : `disconnected from ${runtime.gateway}`) : (env.DEX_REACH_GATEWAY_WS ? `configured ${new URL(env.DEX_REACH_GATEWAY_WS).origin}` : 'not configured')}`,
+    `Registration:    ${registration}`,
+    `Compatibility:   ${runtime ? (runtime.compatibilityReady === undefined ? 'unknown (legacy runtime status)' : runtime.compatibilityReady ? 'ready' : 'recovering') : 'unknown'}`,
     `AI access:       ${describeMode(effective)}${state.until && effective === state.mode ? remaining(state.until) + ` then ${state.revertTo ?? 'off'}` : ''}`,
     `Profile:         ${env.DEX_REACH_PROFILE || 'development'}`, 'Allowed roots:', ...(env.DEX_REACH_ALLOWED_ROOTS || os.homedir()).split(path.delimiter).map(r => `  ${r}`),
     'AI clients:', ...CLIENT_KINDS.map(kind => { const mode = modeForActor(state, { kind, clientId: '', clientName: '' }); const ceiling = state.clients[kind] ? ` (limit: ${state.clients[kind]})` : ''; const grants = state.grantRequired[kind] ? ' [GRANTS REQUIRED]' : ''; return `  ${CLIENT_LABEL[kind].padEnd(18)} ${mode === 'off' ? 'blocked' : mode}${ceiling}${grants}`; }),

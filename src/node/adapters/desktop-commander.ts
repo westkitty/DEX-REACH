@@ -104,14 +104,26 @@ export class DesktopCommanderAdapter {
   private transport: StdioClientTransport | null = null;
   private tools: ToolDescriptor[] = [];
   private admission: AdapterAdmission | null = null;
+  private source: ResolvedAdapterSource | null = null;
 
   constructor(private readonly registry: AdapterRegistry) {}
 
-  async start(allowedRoots: string[]): Promise<void> {
+  /**
+   * Establish the fail-closed adapter contract without starting the third-party backend process.
+   * This gives the node a stable, DEX-approved remote surface even while the backend is recovering.
+   */
+  async prepare(): Promise<void> {
+    if (this.admission && this.source) return;
     const source = await resolveDesktopCommanderSource();
-    // Install before the process starts. A manifest DEX cannot corroborate must stop the node from
-    // coming up at all, rather than leaving a running adapter whose surface nobody agreed on.
     this.admission = this.registry.install(loadDesktopCommanderManifest(source));
+    this.source = source;
+    this.tools = this.registry.remoteToolSurface().map(name => ({ name }));
+  }
+
+  async start(allowedRoots: string[]): Promise<void> {
+    await this.prepare();
+    const source = this.source;
+    if (!source) throw new Error('Desktop Commander adapter source was not prepared');
 
     const isolatedHome = path.join(stateDir(), 'compat-home');
     await fs.mkdir(isolatedHome, { recursive: true, mode: 0o700 });

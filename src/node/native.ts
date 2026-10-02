@@ -15,6 +15,8 @@ import { describeOperation } from '../shared/operations.js';
 import { finishProcessActivity, startProcessActivity } from '../shared/activity.js';
 
 const execFileAsync = promisify(execFile);
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const SENSITIVE_ENV_KEY = /(^DEX_REACH_(?:NODE_TOKEN|OWNER_PASSWORD|ENV_FILE)$|TOKEN|PASSWORD|PASSWD|SECRET|AUTHORIZATION|COOKIE|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)/i;
 
 export function safeChildEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -47,19 +49,28 @@ export async function repoInfo(cwd: string, signal?: AbortSignal, maxBuffer = 4 
   return { root, branch: branch.trim(), remote: remote.trim(), status: status.trimEnd(), log: log.trimEnd() };
 }
 
-export async function adbDevices(): Promise<Record<string, unknown>> {
-  try {
-    const output = await run('adb', ['devices', '-l']);
-    const devices = output.split('\n').slice(1).map(line => line.trim()).filter(Boolean);
-    let mdnsServices: string[] = [];
+type NativeCommandRunner = (command: string, args: string[]) => Promise<string>;
+
+export async function adbDevices(
+  runner: NativeCommandRunner = (command, args) => run(command, args)
+): Promise<Record<string, unknown>> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      const mdns = await run('adb', ['mdns', 'services']);
-      mdnsServices = mdns.split('\n').slice(1).map(line => line.trim()).filter(Boolean);
-    } catch {}
-    return { available: true, devices, mdnsServices };
-  } catch (error) {
-    return { available: false, error: error instanceof Error ? error.message : String(error), devices: [] };
+      const output = await runner('adb', ['devices', '-l']);
+      const devices = output.split('\n').slice(1).map(line => line.trim()).filter(Boolean);
+      let mdnsServices: string[] = [];
+      try {
+        const mdns = await runner('adb', ['mdns', 'services']);
+        mdnsServices = mdns.split('\n').slice(1).map(line => line.trim()).filter(Boolean);
+      } catch {}
+      return { available: true, devices, mdnsServices };
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await sleep(250 * (attempt + 1));
+    }
   }
+  return { available: false, error: lastError instanceof Error ? lastError.message : String(lastError), devices: [] };
 }
 
 export async function createCheckpoint(cwd: string): Promise<Record<string, unknown>> {

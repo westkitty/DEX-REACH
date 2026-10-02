@@ -101,14 +101,26 @@ export type NodeHello = {
   profile: ReachProfile;
   fingerprint: ExecutionFingerprint;
   tools: ToolDescriptor[];
+  /** False means the DEX control plane is online while its optional compatibility adapter recovers. */
+  compatibilityReady?: boolean;
   allowedRoots: string[];
   agentVersion: string;
   access?: AccessSnapshot;
   scheduler?: SchedulerSnapshot;
 };
 
+/** Sent by the gateway only after the hello has been validated and installed in NodeRegistry. */
+export type NodeRegistered = { type: 'registered'; nodeId: string; protocolVersion: number };
+
 /** Pushed by a node whenever its local access policy changes. */
-export type NodeStatus = { type: 'status'; access: AccessSnapshot; scheduler?: SchedulerSnapshot };
+export type NodeStatus = {
+  type: 'status';
+  access: AccessSnapshot;
+  scheduler?: SchedulerSnapshot;
+  /** Current compatibility surface; may be empty while the adapter recovers. */
+  tools?: ToolDescriptor[];
+  compatibilityReady?: boolean;
+};
 
 export type GatewayRequest = {
   type: 'request';
@@ -132,4 +144,4 @@ export type GatewayResponse = {
 };
 
 export type Heartbeat = { type: 'heartbeat'; at: number };
-export type WireMessage = NodeHello | NodeStatus | GatewayRequest | GatewayResponse | Heartbeat;
+export type WireMessage = NodeHello | NodeRegistered | NodeStatus | GatewayRequest | GatewayResponse | Heartbeat;

@@ -7,7 +7,12 @@ import type { AccessSnapshot } from '../shared/protocol.js';
 /** Written by the running node every few seconds so the local CLI can report state without the gateway. */
 export type RuntimeStatus = {
   pid: number;
+  /** Legacy field retained for backwards compatibility. */
   connected: boolean;
+  socketConnected?: boolean;
+  gatewayRegistered?: boolean;
+  compatibilityReady?: boolean;
+  startedAt?: string;
   gateway: string;
   access: AccessSnapshot;
   updatedAt: string;
@@ -23,11 +28,31 @@ export async function writeRuntimeStatus(nodeId: string, status: RuntimeStatus, 
   await atomicWriteFile(file, JSON.stringify(status) + '\n', 0o600);
 }
 
-/** Returns null when no node process has reported recently (stale after `maxAgeMs`). */
-export async function readRuntimeStatus(nodeId: string, dir = stateDir(), maxAgeMs = 15_000): Promise<RuntimeStatus | null> {
+export function processAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * Returns null when no node process has reported recently or when the recorded PID is no longer
+ * alive. Fresh bytes alone are not proof of a running daemon.
+ */
+export async function readRuntimeStatus(
+  nodeId: string,
+  dir = stateDir(),
+  maxAgeMs = 15_000,
+  isAlive: (pid: number) => boolean = processAlive
+): Promise<RuntimeStatus | null> {
   try {
     const parsed = JSON.parse(await fs.readFile(runtimeFile(nodeId, dir), 'utf8')) as RuntimeStatus;
-    if (Date.now() - Date.parse(parsed.updatedAt) > maxAgeMs) return null;
+    const updatedAt = Date.parse(parsed.updatedAt);
+    if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > maxAgeMs) return null;
+    if (!isAlive(parsed.pid)) return null;
     return parsed;
   } catch {
     return null;

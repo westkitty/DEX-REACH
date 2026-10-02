@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { loadLocalSecrets, loadOwnerSecrets, machineStateDir, stateDir } from '../src/shared/local-env.js';
+import { loadLocalSecrets, loadOwnerSecrets, machineStateDir, ownerSecretsFile, stateDir } from '../src/shared/local-env.js';
 
 test('owner tools load gateway secrets even when invoked beneath a node environment', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-env-'));
@@ -37,6 +37,12 @@ test('owner tools load gateway secrets even when invoked beneath a node environm
   }
 });
 
+test('OAuth runtime health diagnostic reads machine state rather than virtual HOME state', async () => {
+  const source = await fs.readFile(path.resolve('scripts/oauth-health-check.ts'), 'utf8');
+  assert.match(source, /readOAuthRuntimeHealth\(machineStateDir\(\)\)/);
+  assert.doesNotMatch(source, /readOAuthRuntimeHealth\(stateDir\(\)\)/);
+});
+
 test('machine evidence ignores virtual HOME without exposing authority state', () => {
   const previousHome = process.env.HOME;
   const previousState = process.env.DEX_REACH_STATE_DIR;
@@ -48,10 +54,12 @@ test('machine evidence ignores virtual HOME without exposing authority state', (
 
     assert.equal(stateDir(), path.join(virtualHome, '.dex-reach'));
     assert.equal(machineStateDir(), path.join(os.userInfo().homedir, '.dex-reach'));
+    assert.equal(ownerSecretsFile(), path.join(os.userInfo().homedir, '.dex-reach', 'secrets.env'));
 
     process.env.DEX_REACH_STATE_DIR = explicit;
     assert.equal(stateDir(), explicit);
     assert.equal(machineStateDir(), explicit);
+    assert.equal(ownerSecretsFile(), path.join(explicit, 'secrets.env'));
   } finally {
     if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
     if (previousState === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previousState;

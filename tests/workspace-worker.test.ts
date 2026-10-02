@@ -15,12 +15,23 @@ import {
 } from '../src/shared/workspace-worker.js';
 import { requireOperation } from '../src/shared/operations.js';
 
-async function waitForSocket(socketPath: string, stderr: () => string): Promise<void> {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+const socketTmpRoot = process.platform === 'darwin' ? '/tmp' : os.tmpdir();
+
+async function waitForSocket(
+  socketPath: string,
+  child: ReturnType<typeof spawn>,
+  stderr: () => string,
+  timeoutMs = 10_000
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     try { if ((await fs.lstat(socketPath)).isSocket()) return; } catch {}
-    await new Promise(resolve => setTimeout(resolve, 20));
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`workspace worker exited before its socket appeared (exit=${child.exitCode}, signal=${child.signalCode}): ${stderr()}`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 25));
   }
-  throw new Error(`workspace worker socket did not appear: ${stderr()}`);
+  throw new Error(`workspace worker socket did not appear within ${timeoutMs}ms: ${stderr()}`);
 }
 
 async function rawCall(socketPath: string, request: unknown): Promise<{ ok: boolean; error?: string; code?: string }> {
@@ -34,6 +45,68 @@ async function rawCall(socketPath: string, request: unknown): Promise<{ ok: bool
     socket.once('connect', () => socket.write(JSON.stringify(request) + '\n'));
   });
 }
+
+test('workspace worker transport failure falls back while unsafe socket metadata still fails visibly', async () => {
+  const temp = await fs.mkdtemp(path.join(socketTmpRoot, 'dex-ww-transport-'));
+  const workerDir = path.join(temp, 'worker');
+  await fs.mkdir(workerDir, { recursive: true, mode: 0o700 });
+  await fs.chmod(workerDir, 0o700);
+  const previous = process.env.DEX_WORKSPACE_WORKER_DIR;
+  process.env.DEX_WORKSPACE_WORKER_DIR = workerDir;
+  const socketPath = workspaceWorkerSocketPath();
+
+  const accepted = new Set<net.Socket>();
+  const server = net.createServer(socket => {
+    accepted.add(socket);
+    socket.once('close', () => accepted.delete(socket));
+    // Intentionally accept without responding so the client exercises its transport timeout path.
+  });
+  const closeServer = async () => {
+    for (const socket of accepted) socket.destroy();
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.close(error => error ? reject(error) : resolve());
+      });
+    }
+  };
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(socketPath, resolve);
+    });
+    await fs.chmod(socketPath, 0o600);
+
+    const unavailable = await workspaceWorkerExecute(
+      'worker-test-node',
+      'dex.file.read',
+      { path: path.join(temp, 'unused.txt') },
+      '0'.repeat(64),
+      50
+    );
+    assert.equal(unavailable, null, 'transport unavailability must degrade to normal node execution');
+
+    await closeServer();
+    await fs.rm(socketPath, { force: true });
+    await fs.writeFile(socketPath, 'not a socket', { mode: 0o600 });
+
+    await assert.rejects(
+      workspaceWorkerExecute(
+        'worker-test-node',
+        'dex.file.read',
+        { path: path.join(temp, 'unused.txt') },
+        '0'.repeat(64),
+        50
+      ),
+      /not a socket/
+    );
+  } finally {
+    if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
+    if (previous === undefined) delete process.env.DEX_WORKSPACE_WORKER_DIR;
+    else process.env.DEX_WORKSPACE_WORKER_DIR = previous;
+    await fs.rm(temp, { recursive: true, force: true });
+  }
+});
 
 test('workspace worker environment is credential-free by construction', () => {
   const clean = scrubWorkspaceWorkerEnvironment({
@@ -58,7 +131,7 @@ test('workspace worker environment is credential-free by construction', () => {
 });
 
 test('workspace worker serves only bounded read operations, falls back on root mismatch, and recovers its socket after restart', async () => {
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-workspace-worker-test-'));
+  const temp = await fs.mkdtemp(path.join(socketTmpRoot, 'dex-ww-test-'));
   const work = path.join(temp, 'workspace');
   const workerDir = path.join(temp, 'worker');
   await fs.mkdir(work, { recursive: true });
@@ -92,7 +165,7 @@ test('workspace worker serves only bounded read operations, falls back on root m
   child.stderr?.on('data', chunk => { stderr += chunk; });
 
   try {
-    await waitForSocket(workspaceWorkerSocketPath(), () => stderr);
+    await waitForSocket(workspaceWorkerSocketPath(), child, () => stderr);
     const stat = await fs.lstat(workspaceWorkerSocketPath());
     assert.equal(stat.mode & 0o777, 0o600);
 
@@ -133,7 +206,7 @@ test('workspace worker serves only bounded read operations, falls back on root m
     });
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', chunk => { stderr += chunk; });
-    await waitForSocket(workspaceWorkerSocketPath(), () => stderr);
+    await waitForSocket(workspaceWorkerSocketPath(), child, () => stderr);
     const afterRestart = await workspaceWorkerExecute('worker-test-node', 'dex.file.read', { path: file }, rootsHash) as { text?: string };
     assert.equal(afterRestart.text, 'hello worker\n');
   } finally {

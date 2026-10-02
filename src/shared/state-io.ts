@@ -20,6 +20,8 @@ function sleep(ms: number): Promise<void> {
 type LockOwner = { pid: number; createdAt: number; token: string };
 type HeldLock = { handle: fs.FileHandle; token: string; dev: number; ino: number };
 
+export const DEFAULT_STATE_LOCK_TIMEOUT_MS = 15_000;
+
 async function exists(file: string): Promise<boolean> {
   try { await fs.access(file); return true; } catch { return false; }
 }
@@ -128,7 +130,7 @@ export async function withFileLock<T>(
   fn: () => Promise<T>,
   options: { timeoutMs?: number; staleMs?: number } = {}
 ): Promise<T> {
-  const timeoutMs = options.timeoutMs ?? 5000;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_STATE_LOCK_TIMEOUT_MS;
   const staleMs = options.staleMs ?? 60_000;
   const started = Date.now();
   const recoveryFile = `${file}.recovery`;
