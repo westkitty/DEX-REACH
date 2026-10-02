@@ -1,5 +1,41 @@
 # Public gateway versus hosted-client contract — 2026-10-02
 
+## Current independent evidence
+
+Source started at synchronized canonical `main` / `origin/main` `b236cc6791b8c35d155b43afe15a8772eb1fdfba`. Source registration is `src/gateway/mcp.ts`, instantiated by the authenticated `/mcp` path in `src/gateway/main.ts`. Exactly 16 public tools are registered; node compatibility discovery is separate and retains 22 safe tools (26 raw local tools). No legacy public registration path was found. Existing exact-name/order regression and live smoke reject extra public tools.
+
+Current Codex tool inventory independently contains 12 `DEX__REACH` and 16 `DEX__REACH_Refresh` entries. Fresh public OAuth discovery returns exactly the intended 16 names in order and optional inspection. Both connector namespaces reach the selected physical node; the refreshed connector executes the six-operation inspection. The installed old gateway registration and inspection modules were byte-identical to the validated main build. Thus the 12+16 duplication is in hosted integration advertisement downstream of the gateway. Separate app registrations/snapshots are the supported explanation; hosted admin records and endpoint mappings are not available to establish their precise history. No API renaming or compatibility retirement is justified.
+
+The old runtime release was tied to `d5a06e2` and dirty status. The runtime ID implementation includes untracked files, and the preserved Python cache explains a current canonical-checkout dirty ID. This is correct provenance, not a string to suppress. The supported installer ran from a clean Git worktree using existing dependencies and installed `0.3.2-b236cc6791b8-1b94c7ca6c94`. Receipt completed `2026-10-02T14:28:43.955Z`; four services ran, OAuth canary exited 0, health was `ok:true` with exactly one online node. All 126 compiled JavaScript files matched main. Policy, enrollment settings and secrets matched pre-install hashes. This documentation-only publication is followed by final installation from its containing main commit; active exact revision is recorded in LaunchAgent runtime paths, not a self-referential hash in this document.
+
+Real refreshed-connector invocation wall time: **2,048 ms**. Fresh public OAuth-client operation time before deployment: **164.263 ms**; the post-install public call passed in **620.361 ms**. Each returned metadata, one tree, two literal searches and three ranged reads, **7,547 UTF-8 text bytes** under the requested 12,000-byte limit. Context matched explicit node/root/main and `advisory:true`, `selectionRequired:true`, `snapshotAtomic:false`. These measure distinct client paths, not model latency or a benchmark distribution. Existing read-only contract tests cover routing, optional schema, malformed operations and bounded inspection failures.
+
+| Required command | Current result |
+| --- | --- |
+| Focused MCP/inspection/runtime tests | Exit 0; 22/22 |
+| `npm run typecheck` | Exit 0 |
+| `npm test` | Exit 0; 288/288 |
+| `npm run build` | Exit 0 |
+| `npm audit --omit=dev --audit-level=high` | Exit 0; 0 vulnerabilities |
+| `npm run probe:backend` | Exit 0; 26 raw tools |
+| `npm run smoke` | Exit 0; 16 public / 22 safe compatibility tools |
+| `npm run invariants -- --check` | Exit 0; 42 invariants |
+| `npm run smoke -- --contract-only --node macbook-air.local --cwd /Users/andrew/DEX-REACH` | Exit 0; exact schema/list, legacy compatibility and bundle |
+
+## External retirement action
+
+**BLOCKED/EXTERNAL for removal of the legacy namespace.** This session has no hosted connector administration or registration refresh capability. The namespace remains present; no client-side fix is claimed.
+
+An authorized workspace admin must inspect the two existing app registrations, retain the intended `DEX__REACH_Refresh` app and retire/unpublish the obsolete `DEX__REACH` app (or disable its selection for this user). Refreshing only the old snapshot could yield duplicate 16-tool surfaces rather than one surface. Preserve the retained app's existing access/action controls; do not rotate credentials or alter node enrollment/policy.
+
+If retained-app metadata needs an update, OpenAI currently documents Enterprise/Edu **Workspace settings → Apps → Action control → Refresh**, followed by review of new actions and schema changes; new actions default disabled. Published Business apps require recreation and republication. This is a hosting-layer operation, not a DEX deployment fix. [Official OpenAI documentation](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt), retrieved 2026-10-02.
+
+After the applicable admin action, a genuinely fresh ChatGPT conversation must independently observe only the intended 16-tool namespace, optional inspection and a successful bounded call. A Codex connector inventory proves this session's advertised surface; it is not an observation of a fresh ChatGPT UI. If admin records show a different endpoint for the legacy app, correct or retire that registration rather than assuming a shared cache.
+
+## Prior verification record (historical; superseded above)
+
+# Public gateway versus hosted-client contract — 2026-10-02
+
 **NOT COMPLETE for fresh ChatGPT exposure or full-suite validation.** Focused source contract tests, installed inspection execution and fresh public-gateway discovery are verified. The hosted app's advertisement has not been updated or observed in a genuinely fresh ChatGPT session from this repair. Full-suite failures remain visible below.
 
 ## Located mismatch

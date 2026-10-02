@@ -672,7 +672,7 @@ This mode verifies the exact 16 tool names/order, advertised optional `inspectio
 
 ChatGPT workspace apps can retain an approved tool/input snapshot across new conversations. Server updates alone do not update that snapshot. OpenAI documents Enterprise/Edu **Workspace settings → Apps → Action control → Refresh** (new actions initially disabled), while published Business apps currently require recreation and republication to update their tools/metadata. An admin must review the intended actions and preserve the existing access controls. See [OpenAI's app update documentation](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt). After the applicable admin update, a genuinely fresh ChatGPT conversation must observe the 16 tools and optional `inspection` before consumer acceptance is complete. Do not reinstall DEX merely to refresh hosted app metadata.
 
-[Client contract evidence](docs/CLIENT_CONTRACT_EVIDENCE.md) separates source, installed-runtime, public-gateway and hosted-client proof.
+[Client contract evidence](docs/CLIENT_CONTRACT_EVIDENCE.md) separates source, installed-runtime, public-gateway and hosted-client proof. When both an obsolete 12-tool app and a refreshed 16-tool app are selected, refresh alone does not remove the duplicate registration. An authorized admin must retire the obsolete app or disable its selection, retain the intended refreshed app, and verify one 16-tool surface in a fresh conversation.
 
 ## Verification
 
