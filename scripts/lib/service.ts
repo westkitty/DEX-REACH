@@ -1,5 +1,15 @@
 import os from 'node:os';
 import path from 'node:path';
+import fs from 'node:fs/promises';
+
+/** Homebrew upgrades remove versioned Cellar paths; retain a stable alias for the same Node. */
+export async function serviceNodeBinary(nodeBin = process.execPath, candidates = ['/opt/homebrew/bin/node', '/usr/local/bin/node']): Promise<string> {
+  const current = await fs.realpath(nodeBin);
+  for (const candidate of candidates) {
+    try { if (await fs.realpath(candidate) === current) return candidate; } catch {}
+  }
+  return nodeBin;
+}
 
 /** Escapes text for a launchd plist. */
 export function xml(value: string): string {

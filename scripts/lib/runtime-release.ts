@@ -33,28 +33,30 @@ async function exists(file: string): Promise<boolean> {
 
 export async function runtimeReleaseId(sourceRoot: string, version: string): Promise<string> {
   let commit = 'nogit';
-  let dirty = false;
   try {
-    const [{ stdout: head }, { stdout: status }] = await Promise.all([
-      execFileAsync('/usr/bin/git', ['-C', sourceRoot, 'rev-parse', '--verify', 'HEAD']),
-      execFileAsync('/usr/bin/git', ['-C', sourceRoot, 'status', '--porcelain'])
-    ]);
+    const { stdout: head } = await execFileAsync('/usr/bin/git', ['-C', sourceRoot, 'rev-parse', '--verify', 'HEAD']);
     commit = head.trim().slice(0, 12) || 'nogit';
-    dirty = Boolean(status.trim());
-  } catch {
-    dirty = true;
-  }
-
-  let lockHash = 'nolock';
-  try {
-    lockHash = crypto.createHash('sha256')
-      .update(await fs.readFile(path.join(sourceRoot, 'package-lock.json')))
-      .digest('hex')
-      .slice(0, 12);
   } catch {}
-
-  const suffix = dirty ? `-dirty-${Date.now()}` : '';
-  return safeId(`${version}-${commit}-${lockHash}${suffix}`);
+  // Hash the compiler's inputs, including untracked TS files. Unrelated owner files and ordinary
+  // checkout dist rebuilds must not allocate another private release on every reinstall.
+  const files = ['package.json', 'package-lock.json', 'tsconfig.json'];
+  for (const dir of ['src', 'scripts', 'tests']) {
+    const entries = await fs.readdir(path.join(sourceRoot, dir), { recursive: true }).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [] as string[];
+      throw error;
+    });
+    files.push(...entries.filter(file => file.endsWith('.ts')).map(file => path.join(dir, file)));
+  }
+  const hash = crypto.createHash('sha256');
+  for (const file of files.sort()) {
+    hash.update(file).update('\0');
+    const contents = await fs.readFile(path.join(sourceRoot, file)).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.from('<missing>');
+      throw error;
+    });
+    hash.update(contents).update('\0');
+  }
+  return safeId(`${version}-${commit}-${hash.digest('hex').slice(0, 16)}`);
 }
 
 export function runtimeReleasesDir(stateDir: string): string {
@@ -80,10 +82,19 @@ async function createRuntimeRelease(
   await fs.chmod(path.dirname(releases), 0o700).catch(() => undefined);
   await fs.chmod(releases, 0o700).catch(() => undefined);
 
-  const target = path.join(releases, safeId(releaseId));
-  if (await exists(target)) {
-    await verifyRuntimeRelease(target);
-    return target;
+  const baseTarget = path.join(releases, safeId(releaseId));
+  let target = baseTarget;
+  let repair = 0;
+  while (await exists(target)) {
+    try {
+      await verifyRuntimeRelease(target);
+      return target;
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith('runtime release is incomplete:')) throw error;
+      // A process may still use the damaged release. Preserve it and publish a verified sibling;
+      // subsequent installs reuse that sibling instead of modifying/removing a live release.
+      target = `${baseTarget}-repair-${++repair}`;
+    }
   }
 
   const staging = path.join(releases, `.${path.basename(target)}.staging-${process.pid}-${crypto.randomUUID()}`);

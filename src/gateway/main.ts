@@ -6,7 +6,7 @@ import { createGatewayExpressApp } from './http-app.js';
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import { createOAuthRouter, oauthProtectedResourceMetadataUrl } from './oauth-server.js';
 import { requireBearerAuth } from '@modelcontextprotocol/express';
-import { loadLocalSecrets } from '../shared/local-env.js';
+import { loadServiceConfig } from '../shared/local-env.js';
 import { AuditLog } from '../shared/audit.js';
 import { loadGatewayConfig } from './config.js';
 import { ReachOAuthProvider } from './auth.js';
@@ -18,8 +18,7 @@ import type { RequestActor } from '../shared/protocol.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
 import { OAuthHealthRecorder } from '../shared/oauth-diagnostics.js';
 
-loadLocalSecrets();
-const config = loadGatewayConfig();
+const config = loadServiceConfig(loadGatewayConfig);
 const issuerUrl = new URL('/', config.publicBaseUrl);
 const resourceUrl = new URL('/mcp', config.publicBaseUrl);
 const audit = new AuditLog();

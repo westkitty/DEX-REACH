@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { stateDir } from '../shared/local-env.js';
 import { atomicWriteFile } from '../shared/state-io.js';
-import type { AccessSnapshot } from '../shared/protocol.js';
+import type { AccessSnapshot, ReachProfile } from '../shared/protocol.js';
 
 /** Written by the running node every few seconds so the local CLI can report state without the gateway. */
 export type RuntimeStatus = {
@@ -10,6 +10,7 @@ export type RuntimeStatus = {
   connected: boolean;
   gateway: string;
   access: AccessSnapshot;
+  profile?: ReachProfile;
   updatedAt: string;
 };
 

@@ -204,6 +204,14 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
     DEX_REACH_NODE_TOKEN: '',
     DEX_REACH_ENV_FILE: path.join(stateDir, 'secrets.env')
   };
+  // Production now rejects an explicitly selected missing file. Keep this isolated fixture on
+  // the same canonical owner-file startup path, rather than relying on a nonexistent env file.
+  await fs.writeFile(path.join(stateDir, 'secrets.env'), [
+    `DEX_REACH_OWNER_USER=${ownerUser}`,
+    `DEX_REACH_OWNER_PASSWORD=${ownerPassword}`,
+    `DEX_REACH_PUBLIC_BASE_URL=${baseUrl}`,
+    `DEX_REACH_GATEWAY_PORT=${port}`
+  ].join('\n') + '\n', { mode: 0o600 });
 
   const children: ChildProcess[] = [];
   async function spawnLogged(name: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ child: ChildProcess; logFile: string }> {

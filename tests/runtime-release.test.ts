@@ -3,13 +3,40 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { stageRuntimeRelease, verifyRuntimeRelease } from '../scripts/lib/runtime-release.js';
+import { runtimeReleaseId, stageRuntimeRelease, verifyRuntimeRelease } from '../scripts/lib/runtime-release.js';
 import { servicePath } from '../scripts/lib/service.js';
 
 async function write(file: string, text: string): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, text);
 }
+
+test('release identity is stable for identical build inputs, including dirty sources', async () => {
+  const source = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-id-'));
+  try {
+    await write(path.join(source, 'src/main.ts'), 'export const value = 1;');
+    await write(path.join(source, 'package-lock.json'), '{}');
+    const first = await runtimeReleaseId(source, '0.3.2');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    await write(path.join(source, 'unrelated/cache.pyc'), 'owner work');
+    assert.equal(await runtimeReleaseId(source, '0.3.2'), first);
+    await write(path.join(source, 'src/main.ts'), 'export const value = 2;');
+    assert.notEqual(await runtimeReleaseId(source, '0.3.2'), first);
+  } finally {
+    await fs.rm(source, { recursive: true, force: true });
+  }
+});
+
+test('incomplete runtime is rejected before it can be launched', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-incomplete-'));
+  try {
+    await write(path.join(root, 'dist/src/coordinator/main.js'), '');
+    await write(path.join(root, 'dist/src/worker/main.js'), '');
+    await assert.rejects(verifyRuntimeRelease(root), /missing dist\/src\/gateway\/main.js/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 test('immutable runtime release survives source dist and node_modules replacement', async () => {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-release-'));
@@ -59,6 +86,26 @@ test('service PATH prefers immutable runtime binaries over mutable checkout bina
   const entries = value.split(':');
   assert.equal(entries[1], `${runtime}/node_modules/.bin`);
   assert.ok(entries.includes('/custom/bin'));
+});
+
+test('reinstall rebuilds a damaged private release without replacing its files', async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-repair-'));
+  const source = path.join(base, 'checkout');
+  const state = path.join(base, 'state');
+  try {
+    for (const entry of ['dist/src/coordinator/main.js', 'dist/src/worker/main.js',
+      'dist/src/gateway/main.js', 'dist/src/node/main.js', 'dist/scripts/oauth-canary.js',
+      'dist/scripts/reload-launchagents.js', 'node_modules/@modelcontextprotocol/client/package.json']) {
+      await write(path.join(source, entry), 'fixture-v1');
+    }
+    const damaged = await stageRuntimeRelease(source, state, 'repair-test');
+    await fs.rename(path.join(damaged, 'dist/src/gateway/main.js'), path.join(damaged, 'dist/src/gateway/main.js.saved'));
+    const repaired = await stageRuntimeRelease(source, state, 'repair-test');
+    assert.notEqual(repaired, damaged);
+    await verifyRuntimeRelease(repaired);
+    assert.equal(await fs.readFile(path.join(damaged, 'dist/src/gateway/main.js.saved'), 'utf8'), 'fixture-v1');
+    assert.equal(await stageRuntimeRelease(source, state, 'repair-test'), repaired);
+  } finally { await fs.rm(base, { recursive: true, force: true }); }
 });
 
 
