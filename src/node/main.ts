@@ -340,8 +340,6 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
 
 async function publishStatus(): Promise<void> {
   const access = await currentAccess();
-  const scheduler = redactWorkStatusForShare(await coordinatedStatus()) as SchedulerSnapshot;
-  const json = JSON.stringify({ access, scheduler });
   const connected = activeSocket?.readyState === WebSocket.OPEN;
   await writeRuntimeStatus(config.nodeId, {
     pid: process.pid,
@@ -351,6 +349,11 @@ async function publishStatus(): Promise<void> {
     profile: config.profile,
     updatedAt: new Date().toISOString()
   });
+  // Optional scheduler telemetry must not suppress the local liveness/authority heartbeat.
+  const scheduler = await coordinatedStatus()
+    .then(status => redactWorkStatusForShare(status) as SchedulerSnapshot)
+    .catch(() => undefined);
+  const json = JSON.stringify({ access, scheduler });
   if (json !== lastStatusJson && connected && activeSocket) {
     const status: NodeStatus = { type: 'status', access, scheduler };
     activeSocket.send(JSON.stringify(status));
@@ -399,9 +402,10 @@ async function connect(): Promise<void> {
       tools: backend.listTools(),
       allowedRoots: config.allowedRoots,
       agentVersion: DEX_REACH_VERSION,
-      access: await currentAccess(),
-      scheduler: redactWorkStatusForShare(await coordinatedStatus()) as SchedulerSnapshot
+      access: await currentAccess()
     };
+    // Scheduler is already optional in the protocol and follows in a status update. Waiting for
+    // it here made a coordinator timeout/error prevent hello (or reject this async open handler).
     ws.send(JSON.stringify(hello));
     void publishStatus().catch(() => undefined);
     console.log(`DEX//REACH node connected to ${url.origin} using its ${credential}`);

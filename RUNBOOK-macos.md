@@ -27,6 +27,8 @@ an active earlier reload. Installation compiles directly into private staging an
 entry before replacing services; ordinary checkout `dist/` rebuilds do not affect live services.
 Node launches after gateway readiness. Agents use the stable Homebrew Node alias when it selects
 the current executable, avoiding a removed versioned Cellar binary after Homebrew upgrades.
+Node hello, local heartbeat, and access-state reporting do not depend on optional coordinator
+telemetry. Work admission still uses the coordinator; unavailable telemetry grants no work slots.
 
 Canonical configuration: `~/.dex-reach/secrets.env` for gateway owner settings and
 `~/.dex-reach/nodes/<node-id>.env` for enrollment. `DEX_REACH_STATE_DIR` selects isolated state;
