@@ -103,7 +103,7 @@ async function verifyPersistent(service: Service): Promise<void> {
 
 async function verifyCanary(service: Service): Promise<void> {
   let last = '';
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     last = await launchdPrint(service.label);
     if (/\blast exit code = 0\b/.test(last) && !/\bstate = running\b/.test(last)) {
       const result = results.find(item => item.label === service.label);

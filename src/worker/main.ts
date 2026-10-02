@@ -82,6 +82,8 @@ function drain(): void {
 const config = await loadConfig();
 await prepareSocket();
 const server = net.createServer(socket => {
+  // A caller may time out or disconnect while a bounded read is still completing.
+  socket.on('error', () => socket.destroy());
   socket.setEncoding('utf8');
   let input = '';
   let handled = false;
@@ -130,7 +132,7 @@ const server = net.createServer(socket => {
       } catch (error) {
         response = { ok: false, code: 'invalid', error: safeError(error) };
       }
-      socket.end(JSON.stringify(response) + '\n');
+      if (!socket.destroyed) socket.end(JSON.stringify(response) + '\n');
     } };
 
     if (queue.length + inflight >= MAX_QUEUE + MAX_INFLIGHT) {

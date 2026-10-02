@@ -42,7 +42,9 @@ Health waits **120 seconds**, requiring five seconds of unchanged process IDs/ru
 installed entries, live matching processes, fresh connected node status, `ok:true`, **onlineNodes:1**,
 AI **ON**, and runtime **full-local**. Exit 78 since service reload prevents green; old error-log
 text alone does not. Helper completion also requires the public OAuth refresh canary to exit 0
-(30-second limit). `--wait-install` allows 420 seconds for the bounded helper phases, then the local
+(60-second limit). Its two fingerprint requests retain the gateway's 60-second request deadline;
+the worker RPC allows 30 seconds, covering fingerprint's four sequential four-second captures.
+`--wait-install` allows 420 seconds for the bounded helper phases, then the local
 settle check. Measured cold initialization on this Mac took 81.9 seconds after helper start; a
 60-second settle limit rejected a node that then became healthy without intervention.
 Health never changes owner policy. Public HTTPS ingress failures remain separate failures.

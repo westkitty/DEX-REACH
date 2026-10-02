@@ -15,6 +15,38 @@ import {
 } from '../src/shared/workspace-worker.js';
 import { requireOperation } from '../src/shared/operations.js';
 
+test('worker fingerprint RPC covers the sequential capture budget on a slow host', { timeout: 30_000 }, async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-worker-slow-'));
+  const workerDir = path.join(temp, 'worker');
+  const bin = path.join(temp, 'bin');
+  await fs.mkdir(workerDir, { mode: 0o700 });
+  await fs.mkdir(bin);
+  // Four real subprocesses take two seconds each, below capture's individual four-second limit.
+  await fs.writeFile(path.join(bin, 'git'), `#!/bin/sh\n/bin/sleep 2\ncase "$1" in\n rev-parse) echo '${temp}' ;;\n branch) echo fixture ;;\n remote) echo fixture-remote ;;\nesac\n`, { mode: 0o700 });
+  await fs.writeFile(path.join(bin, 'python3'), '#!/bin/sh\n/bin/sleep 2\necho Python-fixture\n', { mode: 0o700 });
+  const previous = process.env.DEX_WORKSPACE_WORKER_DIR;
+  process.env.DEX_WORKSPACE_WORKER_DIR = workerDir;
+  const rootsHash = workspaceWorkerRootsHash([temp]);
+  await fs.writeFile(workspaceWorkerConfigFile(), JSON.stringify({ version: 1, nodeId: 'slow-node', allowedRoots: [temp], rootsHash }), { mode: 0o600 });
+  const child = spawn(process.execPath, ['--import', 'tsx', 'src/worker/main.ts'], {
+    cwd: process.cwd(), env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` }, stdio: ['ignore', 'ignore', 'pipe']
+  });
+  let stderr = '';
+  child.stderr?.on('data', chunk => { stderr += chunk; });
+  try {
+    await waitForSocket(workspaceWorkerSocketPath(), () => stderr);
+    const result = await workspaceWorkerExecute('slow-node', 'dex.fingerprint', { cwd: temp }, rootsHash) as { nodeId: string; branch: string; pythonVersion: string };
+    assert.equal(result.nodeId, 'slow-node');
+    assert.equal(result.branch, 'fixture');
+    assert.equal(result.pythonVersion, 'Python-fixture');
+  } finally {
+    child.kill('SIGTERM');
+    await new Promise<void>(resolve => child.once('exit', () => resolve()));
+    if (previous === undefined) delete process.env.DEX_WORKSPACE_WORKER_DIR; else process.env.DEX_WORKSPACE_WORKER_DIR = previous;
+    await fs.rm(temp, { recursive: true, force: true });
+  }
+});
+
 async function waitForSocket(socketPath: string, stderr: () => string): Promise<void> {
   for (let attempt = 0; attempt < 120; attempt += 1) {
     try { if ((await fs.lstat(socketPath)).isSocket()) return; } catch {}
