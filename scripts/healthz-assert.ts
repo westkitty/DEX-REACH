@@ -5,7 +5,7 @@ import { arg } from './lib/node-files.js';
 
 try {
   if (process.platform !== 'darwin') throw new Error('healthz:assert requires macOS launchd');
-  const timeoutMs = Number(arg('--timeout-ms') || 60_000);
+  const timeoutMs = Number(arg('--timeout-ms') || 120_000);
   if (!Number.isInteger(timeoutMs) || timeoutMs < 6000 || timeoutMs > 300_000) throw new Error('--timeout-ms must be 6000..300000');
   const dir = stateDir();
   if (process.argv.includes('--wait-install')) await waitInstallStatus(dir);

@@ -98,7 +98,7 @@ export async function waitGatewayReady(url: string, timeoutMs = 60_000): Promise
 }
 
 /** Require unchanged PIDs/run counts for five seconds, rather than a transient connected sample. */
-export async function waitMacHealth(expected: HealthExpectation, timeoutMs = 60_000): Promise<MacHealth> {
+export async function waitMacHealth(expected: HealthExpectation, timeoutMs = 120_000): Promise<MacHealth> {
   const deadline = Date.now() + timeoutMs;
   let stableSince = 0;
   let identity = '';
@@ -117,7 +117,7 @@ export async function waitMacHealth(expected: HealthExpectation, timeoutMs = 60_
   throw new Error(`DEX health timed out after ${timeoutMs}ms: ${last?.reason ?? 'no observation'}; last unhealthy=${lastUnhealthy}; stable for ${stableSince ? Date.now() - stableSince : 0}ms; gateway pid=${last?.gateway.pid ?? 'none'}, node pid=${last?.node.pid ?? 'none'}, onlineNodes=${last?.onlineNodes ?? 'unknown'}`);
 }
 
-export async function waitInstallStatus(dir: string, timeoutMs = 180_000): Promise<void> {
+export async function waitInstallStatus(dir: string, timeoutMs = 420_000): Promise<void> {
   const file = path.join(dir, 'install-macos.status.json');
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

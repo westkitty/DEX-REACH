@@ -163,4 +163,4 @@ console.log(`DEX service reload delegated to one-shot helper ${helperLabel}.`);
 console.log(`Reload status: ${installStatus}`);
 console.log('The helper waits briefly so a DEX-hosted install can return before replacing its own transport.');
 console.log('Install is scheduled, not yet healthy. Run npm run healthz:assert -- --wait-install from a local terminal.');
-}, { timeoutMs: 240_000 });
+}, { timeoutMs: 480_000 });

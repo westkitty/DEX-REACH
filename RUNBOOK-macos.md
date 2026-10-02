@@ -38,11 +38,13 @@ The owner password needs 16+ characters; node token needs 24+, matching identity
 After intentional rotation, reconcile the correct file and gateway enrollment record, then reinstall.
 Further password/token rotation requires owner approval. Missing/invalid keys fail before reload.
 
-Health waits **60 seconds**, requiring five seconds of unchanged process IDs/run counts, complete
+Health waits **120 seconds**, requiring five seconds of unchanged process IDs/run counts, complete
 installed entries, live matching processes, fresh connected node status, `ok:true`, **onlineNodes:1**,
 AI **ON**, and runtime **full-local**. Exit 78 since service reload prevents green; old error-log
 text alone does not. Helper completion also requires the public OAuth refresh canary to exit 0
-(30-second limit). `--wait-install` allows 180 seconds for the helper, then the local settle check.
+(30-second limit). `--wait-install` allows 420 seconds for the bounded helper phases, then the local
+settle check. Measured cold initialization on this Mac took 81.9 seconds after helper start; a
+60-second settle limit rejected a node that then became healthy without intervention.
 Health never changes owner policy. Public HTTPS ingress failures remain separate failures.
 
 | Failure | Fix |
