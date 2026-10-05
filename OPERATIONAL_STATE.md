@@ -473,7 +473,7 @@ services, and public connector were not modified. No C4 semantics have been star
 
 ## 19. DEX Control System — Phase C4 Task Identity and Recovery Correlation — 2026-10-05
 
-**C4 IMPLEMENTATION CANDIDATE — LOCAL GATES PASS; PUBLICATION CLOSURE PENDING.** The isolated
+**C4 PASS — TASK IDENTITY AND RECOVERY CORRELATION VERIFIED.** The isolated
 campaign worktree binds durable `taskId` and `attempt` through coordinator leases, queue tickets,
 events, process activity, native execution, compatibility execution, and the credential-free
 workspace worker. Coordinator admission now preserves FIFO queue position, repository/exclusive
@@ -490,9 +490,16 @@ classification distinguishes quiet-but-alive, waiting-external, CPU-active, tran
 process-gone, and no-progress. Owner activity output exposes task correlation while its share-safe
 projection continues to omit local process identity and paths.
 
-Local validation passes: typecheck, 42 invariants, 305/305 tests, build, production dependency
-audit with 0 vulnerabilities, 26-tool backend probe, focused coordinator/activity/recovery tests,
-and `git diff --check`. The physical-install, device, second-machine, hosted-CI, publication, and
-runtime acceptance layers remain unverified for this candidate. The protected primary checkouts,
-installed runtime, credentials, services, and public connector were not modified. C5 has not
-started.
+Implementation commits `6d6efb62e6f844dfd734a1ccdce7cd9b8a8faa46` and
+`66ee4af176b3ef924f6f7d6b7b38e54fc3f89362` are published on `origin/campaign/c2-c6` with exact
+local/remote parity. Local validation passes: typecheck, 42 invariants, 305/305 tests, build,
+production dependency audit with 0 vulnerabilities, 26-tool backend probe, focused
+coordinator/activity/recovery tests, `git diff --check`, live proof at 19 proven, 0 failed, 3
+hardware-dependent unverified, and clean-build reproduction of 133 artifacts byte-for-byte.
+Hosted DEX validation run `37280344544` passed validate, runtime-proof, and reproducible-build;
+CodeQL run `111667038391` and analysis run `37280344541` passed. The runtime proof initially
+exposed an impossible heavy-bundle admission on 4-CPU hosts; the bounded-medium correction was
+published as the second commit and then passed locally and hosted. The physical-install, device,
+second-machine, installed-runtime, and human-acceptance layers remain unverified. The protected
+primary checkouts, installed runtime, credentials, services, and public connector were not
+modified. C5 has not started.
