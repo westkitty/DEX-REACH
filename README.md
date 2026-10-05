@@ -489,12 +489,19 @@ npm run smoke
 Persistent gateway/primary-node installation on macOS:
 
 ```bash
-npm run install:macos
+npm run install:macos:wait
 ```
+
+From a local terminal, `npm run update:macos` runs fast-forward pull, `npm ci`, install, and a
+blocking health assertion. A DEX-hosted caller must use the asynchronous `install:macos` and
+check completion from a separate local terminal. See [the Mac runbook](RUNBOOK-macos.md).
+Green requires exactly one online node, fresh matching gateway/node processes, and AI ON/full-local
+for five seconds. Install preflight validates the canonical owner and node env files without
+rotating secrets; repeated installs reuse identical build inputs and serialize service reloads.
 
 The installer compiles TypeScript **directly into a private staging release** under `~/.dex-reach/runtime/releases/`, then copies the resolved `node_modules/` into that release. It does not run the checkout `prebuild` or delete checkout `dist/` during macOS installation. Every persistent LaunchAgent, the OAuth canary, and the one-shot reload helper then execute from the verified immutable release rather than from the mutable Git checkout. This makes migration from an older checkout-backed installation safe and keeps later `npm ci`, `npm run build`, branch switches, and `verify:golden` from deleting or replacing files underneath a running gateway/node.
 
-After staging and syntax-checking the LaunchAgents, `install:macos` returns and a separate one-shot launchd helper replaces the services. The helper does not call the install complete merely because `kickstart` returned 0: it verifies each persistent DEX service remains running, loopback `/healthz` reports at least one online node, and the OAuth canary exits 0. Only then does `~/.dex-reach/install-macos.status.json` become `complete`. The canary runs at load and every six hours, traverses the configured public HTTPS endpoint with its own persisted OAuth client/refresh credential, and performs read-only node discovery and fingerprinting. After that baseline succeeds, it revokes only its disposable canary access token, keeps the refresh credential intact, and immediately performs another real fingerprint call. Green status therefore requires the MCP client to receive the invalid-token response, refresh through the public `/token` endpoint, save a different access token, retry the MCP request, and complete it successfully. This exercises the same refresh-recovery branch used after access-token expiry without shortening production token lifetimes or touching another client's credentials. Its credentials and status stay under `~/.dex-reach/`; `doctor --share` exposes only proof booleans/status classes, never token material, client identifiers, or the public endpoint.
+After staging and syntax-checking the LaunchAgents, `install:macos` returns and a separate one-shot launchd helper replaces the services. The helper does not call the install complete merely because `kickstart` returned 0: it verifies each persistent DEX service remains running, loopback `/healthz` reports exactly one online node, fresh node status matches live gateway/node processes and the intended AI mode/profile for five seconds, and the OAuth canary exits 0. Only then does `~/.dex-reach/install-macos.status.json` become `complete`. The canary runs at load and every six hours, traverses the configured public HTTPS endpoint with its own persisted OAuth client/refresh credential, and performs read-only node discovery and fingerprinting. After that baseline succeeds, it revokes only its disposable canary access token, keeps the refresh credential intact, and immediately performs another real fingerprint call. Green status therefore requires the MCP client to receive the invalid-token response, refresh through the public `/token` endpoint, save a different access token, retry the MCP request, and complete it successfully. This exercises the same refresh-recovery branch used after access-token expiry without shortening production token lifetimes or touching another client's credentials. Its credentials and status stay under `~/.dex-reach/`; `doctor --share` exposes only proof booleans/status classes, never token material, client identifiers, or the public endpoint.
 
 ### macOS Dock launcher
 

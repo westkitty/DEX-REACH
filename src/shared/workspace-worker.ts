@@ -71,7 +71,9 @@ async function callWorker(payload: Record<string, unknown>): Promise<WorkerRespo
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ path: workspaceWorkerSocketPath() });
     let received = '';
-    const timer = setTimeout(() => socket.destroy(new WorkspaceWorkerUnavailableError('workspace worker did not respond in time')), 5_000);
+    // Fingerprint has four sequential 4s captures; the RPC must cover the operation's budget.
+    // Keep it below the gateway's 60s request deadline and allow bounded queue/IPC overhead.
+    const timer = setTimeout(() => socket.destroy(new WorkspaceWorkerUnavailableError('workspace worker did not respond in time')), 30_000);
     socket.setEncoding('utf8');
     socket.once('error', error => reject(new WorkspaceWorkerUnavailableError(`workspace worker unavailable: ${error.message}`)));
     socket.on('data', chunk => {

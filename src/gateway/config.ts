@@ -1,4 +1,5 @@
 import os from 'node:os';
+import path from 'node:path';
 import { stateDir } from '../shared/local-env.js';
 
 export type GatewayConfig = {
@@ -12,14 +13,17 @@ export type GatewayConfig = {
   stateDir: string;
 };
 
-export function loadGatewayConfig(): GatewayConfig {
-  const host = process.env.DEX_REACH_GATEWAY_HOST || '127.0.0.1';
-  const port = Number(process.env.DEX_REACH_GATEWAY_PORT || 8787);
-  const publicBaseUrl = new URL(process.env.DEX_REACH_PUBLIC_BASE_URL || `http://${host}:${port}`);
-  const legacyNodeToken = process.env.DEX_REACH_NODE_TOKEN?.trim();
-  const legacyNodeId = process.env.DEX_REACH_NODE_ID?.trim();
-  const ownerUser = process.env.DEX_REACH_OWNER_USER?.trim() || os.userInfo().username;
-  const ownerPassword = process.env.DEX_REACH_OWNER_PASSWORD?.trim();
+export function loadGatewayConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig {
+  const host = env.DEX_REACH_GATEWAY_HOST || '127.0.0.1';
+  const port = Number(env.DEX_REACH_GATEWAY_PORT || 8787);
+  let publicBaseUrl: URL;
+  try { publicBaseUrl = new URL(env.DEX_REACH_PUBLIC_BASE_URL || `http://${host}:${port}`); }
+  catch { throw new Error('DEX_REACH_PUBLIC_BASE_URL must be a valid HTTP(S) URL'); }
+  if (!['http:', 'https:'].includes(publicBaseUrl.protocol)) throw new Error('DEX_REACH_PUBLIC_BASE_URL must use http:// or https://');
+  const legacyNodeToken = env.DEX_REACH_NODE_TOKEN?.trim();
+  const legacyNodeId = env.DEX_REACH_NODE_ID?.trim();
+  const ownerUser = env.DEX_REACH_OWNER_USER?.trim() || os.userInfo().username;
+  const ownerPassword = env.DEX_REACH_OWNER_PASSWORD?.trim();
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('invalid DEX_REACH_GATEWAY_PORT');
   if (legacyNodeToken && legacyNodeToken.length < 24) throw new Error('legacy DEX_REACH_NODE_TOKEN must contain at least 24 characters');
   if (!ownerPassword || ownerPassword.length < 16) throw new Error('DEX_REACH_OWNER_PASSWORD must contain at least 16 characters');
@@ -36,6 +40,6 @@ export function loadGatewayConfig(): GatewayConfig {
     legacyNodeId,
     ownerUser,
     ownerPassword,
-    stateDir: stateDir()
+    stateDir: env.DEX_REACH_STATE_DIR ? path.resolve(env.DEX_REACH_STATE_DIR) : stateDir()
   };
 }

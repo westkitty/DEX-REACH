@@ -29,6 +29,7 @@ jobs:
       - run: npm run invariants -- --check
       - run: npm test
       - run: npm run build
+      - run: npm run verify:runtime-entry
       - name: Production dependency audit
         # The gate is unchanged: `npm audit --omit=dev --audit-level=high`, failing the job on any
         # high or critical advisory in the production tree. The loop retries only to ride out a
