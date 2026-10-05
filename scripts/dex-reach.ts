@@ -47,6 +47,8 @@ import { addPolicyAssertion, clearPolicyAssertion, listPolicyHistory, loadPolicy
 import { collectDoctorReport, formatDoctorReport } from '../src/shared/doctor.js';
 import { listProcessActivities, shareSafeActivity, type ProcessActivity } from '../src/shared/activity.js';
 import { NodeTaskStore, TASK_STATES, type ReachTaskRecord, type TaskQuery, type TaskState } from '../src/node/task-store.js';
+import { ResultStore } from '../src/node/result-store.js';
+import { buildTaskLog, cancelTask, continuationExport, needsAndrew, reconcileTask, requestPause, resetTask, resumeTask, taskEvents, ownerControlAuthority } from '../src/node/task-control.js';
 
 const execFileAsync = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -93,7 +95,10 @@ function usage(): never {
   doctor [--json] [--deep] [--share]  read-only diagnostics; --share redacts local paths
   activity [--watch] [--history] [--json] [--share]  what DEX is running, coordinating, or waiting on
   tasks [--state STATE] [--archived] [--limit N] [--json]  list durable local tasks
-  task <id> [--json]               inspect one durable local task
+  task <id> [events|log|result|cancel|retry|reconcile|reset|pause|resume|continuation] [options]
+                                  inspect or control one durable local task
+  task <id> control <restart|rollback|kill> --preview [--confirm TOKEN]
+                                  preview consequential controls; campaign never executes them
   uninstall [--purge-state --yes-delete-state]
 
 Shared-machine work coordination (resource admission only; grants no execution authority):
@@ -1043,23 +1048,88 @@ async function tasksCommand(): Promise<void> {
 
 async function taskCommand(): Promise<void> {
   const taskId = argv[1];
-  if (!taskId) throw new Error('usage: task <id> [--json]');
-  const task = await new NodeTaskStore().read(taskId);
+  const sub = argv[2];
+  if (!taskId) throw new Error('usage: task <id> [events|log|result|cancel|retry|reconcile|reset|pause|resume|continuation] [--json]');
+  const store = new NodeTaskStore();
+  const task = await store.read(taskId);
   if (!task) throw new Error(`task not found: ${taskId}`);
-  if (flag('--json', argv)) { console.log(JSON.stringify(task, null, 2)); return; }
-  console.log(`Task ${task.taskId}`);
-  console.log(`  state: ${task.state}`);
-  console.log(`  operation: ${task.operation}`);
-  console.log(`  actor: ${task.actorId}`);
-  console.log(`  node: ${task.nodeId}`);
-  console.log(`  root: ${task.rootTaskId}`);
-  console.log(`  parent: ${task.parentTaskId ?? 'none'}`);
-  console.log(`  idempotency: ${task.idempotencyKey}`);
-  console.log(`  payload sha256: ${task.payloadSha256}`);
-  console.log(`  created: ${task.createdAtUtc}`);
-  console.log(`  updated: ${task.updatedAtUtc}`);
-  console.log(`  status: ${task.summary.status}`);
-  if (task.archivedAtUtc) console.log(`  archived: ${task.archivedAtUtc}`);
+  if (!sub || sub.startsWith('--')) {
+    const detail = { ...task, needsAndrew: needsAndrew(task) };
+    if (flag('--json', argv)) { console.log(JSON.stringify(detail, null, 2)); return; }
+    console.log(`Task ${task.taskId}`);
+    console.log(`  state: ${task.state}`);
+    console.log(`  operation: ${task.operation}`);
+    console.log(`  actor: ${task.actorId}`);
+    console.log(`  node: ${task.nodeId}`);
+    console.log(`  root: ${task.rootTaskId}`);
+    console.log(`  parent: ${task.parentTaskId ?? 'none'}`);
+    console.log(`  idempotency: ${task.idempotencyKey}`);
+    console.log(`  payload sha256: ${task.payloadSha256}`);
+    console.log(`  created: ${task.createdAtUtc}`);
+    console.log(`  updated: ${task.updatedAtUtc}`);
+    console.log(`  status: ${task.summary.status}`);
+    if (task.traceId) console.log(`  trace: ${task.traceId}`);
+    if (task.archivedAtUtc) console.log(`  archived: ${task.archivedAtUtc}`);
+    if (detail.needsAndrew) console.log(`  NEEDS ANDREW: ${detail.needsAndrew.decision}`);
+    return;
+  }
+  if (sub === 'events') {
+    const events = await taskEvents(taskId);
+    if (flag('--json', argv)) { console.log(JSON.stringify(events, null, 2)); return; }
+    for (const event of events) console.log(`${event.at}  ${event.kind.padEnd(10)} ${event.state ?? ''} ${event.summary ?? event.control ?? ''}`.trim());
+    return;
+  }
+  if (sub === 'log') {
+    const log = await buildTaskLog(task);
+    if (flag('--json', argv)) { console.log(JSON.stringify(log, null, 2)); return; }
+    console.log(`DEX//LOG ${task.taskId}`);
+    console.log(`  state ${task.state}; ${log.events.length} lifecycle event(s); ${log.activities.length} phase/activity record(s)`);
+    console.log(`  audit candidates ${log.audit.length}; receipt candidates ${log.receipts.length}; trace ${log.trace.status}`);
+    console.log(`  policy revision ${log.authority.revision}; effective mode ${log.authority.effectiveMode}`);
+    if (needsAndrew(task)) console.log(`  NEEDS ANDREW: ${needsAndrew(task)!.decision}`);
+    return;
+  }
+  if (sub === 'result') {
+    if (!task.resultRef) throw new Error(`task ${taskId} has no result reference`);
+    const value = await new ResultStore().readValue(task.resultRef);
+    console.log(JSON.stringify({ taskId: task.taskId, resultRef: task.resultRef, resultHash: task.resultHash, result: value }, null, 2));
+    return;
+  }
+  if (sub === 'continuation') {
+    const exported = JSON.stringify(await continuationExport(task), null, 2) + '\n';
+    const out = arg('--out', argv);
+    if (out) await fs.writeFile(path.resolve(out), exported, { encoding: 'utf8', mode: 0o600 });
+    process.stdout.write(exported);
+    return;
+  }
+  if (sub === 'cancel') { console.log(JSON.stringify(await cancelTask(store, taskId), null, 2)); return; }
+  if (sub === 'retry') { console.log(JSON.stringify(await resetTask(store, taskId, 'retry'), null, 2)); return; }
+  if (sub === 'reset') { console.log(JSON.stringify(await resetTask(store, taskId, 'reset'), null, 2)); return; }
+  if (sub === 'reconcile') {
+    const evidenceRef = arg('--evidence-ref', argv);
+    if (!evidenceRef) throw new Error('usage: task <id> reconcile --evidence-ref REF');
+    console.log(JSON.stringify(await reconcileTask(store, taskId, evidenceRef), null, 2)); return;
+  }
+  if (sub === 'pause') {
+    const phase = arg('--after-phase', argv);
+    if (!phase) throw new Error('usage: task <id> pause --after-phase PHASE');
+    console.log(JSON.stringify(await requestPause(store, taskId, phase), null, 2)); return;
+  }
+  if (sub === 'resume') { console.log(JSON.stringify(await resumeTask(store, taskId), null, 2)); return; }
+  if (sub === 'archive') {
+    await ownerControlAuthority(task.nodeId);
+    console.log(JSON.stringify(await store.archive(taskId), null, 2)); return;
+  }
+  if (sub === 'control') {
+    const control = argv[3];
+    if (!control || !['restart', 'rollback', 'kill'].includes(control)) throw new Error('usage: task <id> control <restart|rollback|kill> --preview [--confirm TOKEN]');
+    if (!flag('--preview', argv)) throw new Error('consequential control requires --preview; no action was taken');
+    const preview = { taskId, control, impact: `Would affect task ${taskId}, node ${task.nodeId}, and possibly external state.`, confirmationRequired: true, executed: false, fixtureOnly: true };
+    if (flag('--json', argv)) console.log(JSON.stringify(preview, null, 2)); else console.log(JSON.stringify(preview, null, 2));
+    if (flag('--confirm', argv)) throw new Error('consequential controls are fixture-only in C6; confirmation was not executed');
+    return;
+  }
+  throw new Error(`unknown task subcommand: ${sub}`);
 }
 
 

@@ -534,3 +534,14 @@ SDK exposes experimental task APIs, but the current ChatGPT connector has no nat
 this campaign. No connector refresh, installation, deployment, or runtime control was performed.
 Primary checkouts and installed state remain untouched. C5 is closed at source/CI level; C6 may
 begin.
+
+## 21. DEX Control System — Phase C6 Owner Controls, DEX//LOG, DEX//TRACE, and Continuation — 2026-10-05
+
+**C6 SOURCE IMPLEMENTATION — PENDING FINAL VALIDATION/PUBLICATION.** The isolated campaign worktree
+extends the existing owner `tasks` / `task <id>` CLI with an append-only task lifecycle ledger,
+DEX//LOG aggregation, task-linked trace identifiers, result inspection, policy-rechecked cancel,
+pause-after-phase and resume intents, evidence-gated reconciliation, classifier-gated retry,
+terminal RESET lineage, impact-preview-only consequential controls, `NEEDS ANDREW` decisions, and
+content-free continuation export. Missing Git, CI, deployment, installation, and unlinked trace
+evidence remain explicit `UNKNOWN` values. No installed runtime, connector, deployment, or primary
+checkout was changed.

@@ -35,6 +35,7 @@ export type TraceSpan = {
   stage: TraceStage;
   at: string;
   operation?: string;
+  taskId?: string;
   nodeId?: string;
   /** Client kind only. Never a token, never a client secret. */
   actorKind?: string;
@@ -136,7 +137,7 @@ const FORBIDDEN_SPAN_KEYS = /^(args|arguments|text|content|input|body|data|stdou
 
 const SPAN_FIELDS: readonly (keyof TraceSpan)[] = [
   'traceId', 'spanId', 'parentSpanId', 'stage', 'at', 'operation', 'nodeId', 'actorKind',
-  'ok', 'durationMs', 'requestHash', 'policyHash', 'planId', 'checkpointId', 'receiptId', 'outcome'
+  'taskId', 'ok', 'durationMs', 'requestHash', 'policyHash', 'planId', 'checkpointId', 'receiptId', 'outcome'
 ];
 
 export const TRACE_SPAN_LIMIT = 500;
@@ -341,6 +342,7 @@ export function describeTrace(spans: readonly TraceSpan[]): string[] {
   for (const span of ordered) {
     const detail = [
       span.operation,
+      span.taskId ? `task ${span.taskId}` : '',
       span.nodeId ? `node ${span.nodeId}` : '',
       span.actorKind ? `actor ${span.actorKind}` : '',
       span.planId ? `plan ${span.planId.slice(0, 8)}…` : '',

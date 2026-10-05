@@ -52,6 +52,7 @@ export type ReachTaskRecord = {
   idempotencyKey: string;
   payloadSha256: string;
   policyHash?: string;
+  traceId?: string;
   resultRef?: string;
   resultHash?: string;
   failureClass?: string;
@@ -69,6 +70,7 @@ export type TaskCreateInput = {
   idempotencyKey: string;
   payloadSha256: string;
   policyHash?: string;
+  traceId?: string;
   parentTaskId?: string | null;
   rootTaskId?: string;
   taskDepth?: number;
@@ -208,6 +210,7 @@ function validateRecord(value: unknown, location: string): ReachTaskRecord {
   }
   if (record.resultRef !== undefined) assertSafe(record.resultRef, `${location}.resultRef`);
   if (record.failureClass !== undefined) assertSafe(record.failureClass, `${location}.failureClass`);
+  if (record.traceId !== undefined && !/^[0-9a-f]{32}$/i.test(record.traceId)) throw new TaskStoreCorruptError(`${location}.traceId is invalid`);
   assertTimestamp(record.createdAtUtc!, `${location}.createdAtUtc`);
   assertTimestamp(record.updatedAtUtc!, `${location}.updatedAtUtc`);
   if (!record.summary || record.summary.isShareSafe !== true || typeof record.summary.status !== 'string' || record.summary.status.length > 240) {
@@ -302,6 +305,13 @@ function legalTransition(from: TaskState, to: TaskState): boolean {
 export class NodeTaskStore implements TaskStore {
   constructor(private readonly dir = stateDir(), private readonly compatibilityMode = false) {}
 
+  get rootDir(): string { return this.dir; }
+
+  private async event(input: import('../shared/task-events.js').TaskEventInput): Promise<void> {
+    const { TaskEventLog } = await import('../shared/task-events.js');
+    await new TaskEventLog(this.dir).append(input);
+  }
+
   private async readDocument(): Promise<TaskStoreDocument> {
     let raw: string;
     try { raw = await fs.readFile(taskStoreFile(this.dir), 'utf8'); }
@@ -341,7 +351,7 @@ export class NodeTaskStore implements TaskStore {
     const parentTaskId = input.parentTaskId ?? null;
     if (parentTaskId) assertTaskId(parentTaskId);
     const now = new Date().toISOString();
-    return this.mutate(document => {
+    const created = await this.mutate(document => {
       const existing = document.records[taskId] ?? document.archived[taskId];
       if (existing) {
         const sameBinding = existing.actorId === input.actorId
@@ -371,12 +381,15 @@ export class NodeTaskStore implements TaskStore {
         createdAtUtc: now, updatedAtUtc: now, idempotencyKey: input.idempotencyKey,
         payloadSha256: input.payloadSha256, ...(input.repoContext ? { repoContext: clone(input.repoContext) } : {}),
         ...(input.policyHash ? { policyHash: input.policyHash } : {}),
+        ...(input.traceId ? { traceId: input.traceId } : {}),
         summary: { status: 'Task accepted and durably persisted on node storage.', isShareSafe: true }
       };
       validateRecord(record, `records.${taskId}`);
       document.records[taskId] = record;
       return record;
     });
+    await this.event({ taskId: created.taskId, kind: 'accepted', state: created.state, actorId: created.actorId, nodeId: created.nodeId, operation: created.operation, attempt: created.attemptNumber, summary: created.summary.status, ...(created.traceId ? { traceId: created.traceId } : {}) });
+    return created;
   }
 
   async read(taskId: string): Promise<ReachTaskRecord | null> {
@@ -389,7 +402,7 @@ export class NodeTaskStore implements TaskStore {
     assertTaskId(taskId);
     if (update.status === undefined && update.resultRef === undefined && update.resultHash === undefined && update.failureClass === undefined) throw new Error('task update requires state, status, or outcome metadata');
     if (update.status !== undefined && update.status.length > 240) throw new Error('task status is too long');
-    return this.mutate(document => {
+    const updated = await this.mutate(document => {
       const record = document.records[taskId];
       if (!record) {
         if (document.archived[taskId]) throw new Error(`task is archived and immutable: ${taskId}`);
@@ -417,12 +430,14 @@ export class NodeTaskStore implements TaskStore {
       record.updatedAtUtc = new Date().toISOString();
       return record;
     });
+    await this.event({ taskId: updated.taskId, kind: update.state ? 'transition' : 'updated', state: updated.state, ...(update.state ? { toState: updated.state } : {}), actorId: updated.actorId, nodeId: updated.nodeId, operation: updated.operation, attempt: updated.attemptNumber, summary: updated.summary.status, ...(updated.traceId ? { traceId: updated.traceId } : {}) });
+    return updated;
   }
 
   async transition(taskId: string, state: TaskState, status?: string): Promise<ReachTaskRecord> {
     assertTaskId(taskId);
     if (!TASK_STATES.includes(state)) throw new Error(`invalid task state: ${state}`);
-    return this.mutate(document => {
+    const transitioned = await this.mutate(document => {
       const record = document.records[taskId];
       if (!record) {
         if (document.archived[taskId]) throw new Error(`task is archived and immutable: ${taskId}`);
@@ -434,6 +449,8 @@ export class NodeTaskStore implements TaskStore {
       record.summary = { status: shareSafeStatus(status || `Task ${state.toLowerCase()}.`), isShareSafe: true };
       return record;
     });
+    await this.event({ taskId: transitioned.taskId, kind: 'transition', state: transitioned.state, toState: state, actorId: transitioned.actorId, nodeId: transitioned.nodeId, operation: transitioned.operation, attempt: transitioned.attemptNumber, summary: transitioned.summary.status, ...(transitioned.traceId ? { traceId: transitioned.traceId } : {}) });
+    return transitioned;
   }
 
   async list(query: TaskQuery = {}): Promise<ReachTaskRecord[]> {
@@ -471,7 +488,7 @@ export class NodeTaskStore implements TaskStore {
 
   async archive(taskId: string): Promise<ReachTaskRecord> {
     assertTaskId(taskId);
-    return this.mutate(document => {
+    const archived = await this.mutate(document => {
       const record = document.records[taskId];
       if (!record) throw new Error(`task not found or already archived: ${taskId}`);
       if (!isTerminal(record.state)) throw new Error('only terminal tasks can be archived');
@@ -480,6 +497,8 @@ export class NodeTaskStore implements TaskStore {
       delete document.records[taskId];
       return archived;
     });
+    await this.event({ taskId: archived.taskId, kind: 'archived', state: archived.state, actorId: archived.actorId, nodeId: archived.nodeId, operation: archived.operation, attempt: archived.attemptNumber, summary: archived.summary.status, ...(archived.traceId ? { traceId: archived.traceId } : {}) });
+    return archived;
   }
 
   async sweep(options: { now?: Date; terminalRetentionMs?: number; archiveRetentionMs?: number } = {}): Promise<{ archived: number; deleted: number }> {

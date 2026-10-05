@@ -372,6 +372,7 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
       traceId: executeSpan.traceId, spanId: executeSpan.spanId, parentSpanId: executeSpan.parentSpanId,
       stage: request.operation === 'dex.plan' ? 'plan' : request.operation === 'dex.commitPlan' ? 'commit' : 'execute',
       at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId,
+      taskId: task.taskId,
       actorKind: actor?.kind, ok: true, durationMs,
       requestHash: hashValue({ operation: request.operation, args: request.args }),
       ...(receiptCheckpoint ? { checkpointId: receiptCheckpoint } : {})
@@ -379,7 +380,7 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
     await audit.append({ at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor, operation: request.operation, ok: true, durationMs, args: request.args });
     const receipt = await appendReceipt({ nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: true, result: value, durationMs, policy: state.policy, checkpointId: receiptCheckpoint });
     const receiptSpan = childSpan(executeSpan);
-    enqueueSpan({ traceId: receiptSpan.traceId, spanId: receiptSpan.spanId, parentSpanId: receiptSpan.parentSpanId, stage: 'receipt', at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId, actorKind: actor?.kind, ok: true, receiptId: receipt.receiptId });
+    enqueueSpan({ traceId: receiptSpan.traceId, spanId: receiptSpan.spanId, parentSpanId: receiptSpan.parentSpanId, stage: 'receipt', at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId, taskId: task.taskId, actorKind: actor?.kind, ok: true, receiptId: receipt.receiptId });
     return { type: 'response', id: request.id, ok: true, result: value, traceId: trace.traceId };
   } catch (error) {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -395,10 +396,10 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
     const message = error instanceof Error ? error.message : String(error);
     const durationMs = Date.now() - started;
     const failSpan = childSpan(trace);
-    enqueueSpan({ traceId: failSpan.traceId, spanId: failSpan.spanId, parentSpanId: failSpan.parentSpanId, stage: 'execute', at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId, actorKind: actor?.kind, ok: false, durationMs, outcome: 'refused' });
+    enqueueSpan({ traceId: failSpan.traceId, spanId: failSpan.spanId, parentSpanId: failSpan.parentSpanId, stage: 'execute', at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId, taskId: task.taskId, actorKind: actor?.kind, ok: false, durationMs, outcome: 'refused' });
     await audit.append({ at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor, operation: request.operation, ok: false, durationMs, args: request.args, error: message });
     const receipt = await appendReceipt({ nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: false, error: message, durationMs, policy: state.policy }).catch(() => null);
-    if (receipt) enqueueSpan({ traceId: failSpan.traceId, spanId: childSpan(failSpan).spanId, parentSpanId: failSpan.spanId, stage: 'receipt', at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId, actorKind: actor?.kind, ok: false, receiptId: receipt.receiptId });
+    if (receipt) enqueueSpan({ traceId: failSpan.traceId, spanId: childSpan(failSpan).spanId, parentSpanId: failSpan.spanId, stage: 'receipt', at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId, taskId: task.taskId, actorKind: actor?.kind, ok: false, receiptId: receipt.receiptId });
     return { type: 'response', id: request.id, ok: false, error: message, traceId: trace.traceId };
   } finally {
     await releaseBudgetConcurrency(config.nodeId, state.budgetReservationId).catch(() => undefined);
@@ -486,7 +487,8 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
       idempotencyKey: idempotency.key, payloadSha256: idempotency.payloadHash,
       policyHash: hashValue(reservation.policy), attemptBudget: defaultAttemptBudget(taskSafety),
       safetyClass: taskSafety,
-      mutationLevel: taskSafety === 'PURE_READ_IDEMPOTENT' ? 'NONE' : 'STATE_MUTATION'
+      mutationLevel: taskSafety === 'PURE_READ_IDEMPOTENT' ? 'NONE' : 'STATE_MUTATION',
+      traceId: trace.traceId
     });
     taskId = task.taskId;
     await taskStore.transition(taskId, 'PREPARING', 'Task admitted on the selected node.');
