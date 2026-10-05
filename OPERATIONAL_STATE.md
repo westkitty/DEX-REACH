@@ -418,4 +418,23 @@ Governing Source: `DEX_Control_System_Master_Plan.docx` (Planning baseline 2026-
 - Invariant & Authority Freeze:
   - All 42 protected capabilities (`DEX-INV-001` through `DEX-INV-042`) remain locked and unviolated.
   - Zero runtime code, dependencies, or deployed services were modified.
-  - Phase C1 is complete and verified. C2 has not been started.
+  - Phase C1 is complete and verified. The C2 implementation candidate is recorded in the next section; its PASS gate is still open.
+
+## 17. DEX Control System — Phase C2 Node-Owned Durable TaskStore — 2026-10-05
+
+**IMPLEMENTATION CANDIDATE — C2 PASS NOT YET CLAIMED.** The isolated campaign worktree
+`/Users/andrew/dex-reach-c2-c6` is based on the live `origin/main` C1 head and adds a
+node-owned, schema-versioned durable task store under the node state directory. The store
+uses one atomically replaced snapshot guarded by the existing cross-process state lock, with
+durable task identity, actor/node/operation/input binding, legal C1 lifecycle transitions,
+lineage, indexed queries, archive/retention foundations, fail-closed corruption/version
+handling, and explicit read-only owner CLI `tasks` / `task <id>` inspection. Node boot validates
+and loads active task records before compatibility backend readiness. Existing 16-tool MCP
+behavior and C3 retry/reconciliation semantics are unchanged.
+
+Focused C2 validation currently passes: typecheck, six TaskStore tests covering persistence,
+transition refusal, conflicting identity binding, concurrent writers, indexed queries,
+corruption/version behavior, retention, and CLI inspection. The protected primary checkout,
+installed runtime, credentials, services, and public connector were not modified. Commit,
+remote parity, hosted CI, and broader repository gates remain pending; C2 must not be treated as
+verified until those states are independently read back.

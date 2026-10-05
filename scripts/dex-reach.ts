@@ -46,6 +46,7 @@ import {
 import { addPolicyAssertion, clearPolicyAssertion, listPolicyHistory, loadPolicyAssertions } from '../src/shared/policy-assertions.js';
 import { collectDoctorReport, formatDoctorReport } from '../src/shared/doctor.js';
 import { listProcessActivities, shareSafeActivity, type ProcessActivity } from '../src/shared/activity.js';
+import { NodeTaskStore, TASK_STATES, type ReachTaskRecord, type TaskQuery, type TaskState } from '../src/node/task-store.js';
 
 const execFileAsync = promisify(execFile);
 const argv = process.argv.slice(2);
@@ -91,6 +92,8 @@ function usage(): never {
   policy-restore <revision>       restore an old policy as a NEW revision
   doctor [--json] [--deep] [--share]  read-only diagnostics; --share redacts local paths
   activity [--watch] [--history] [--json] [--share]  what DEX is running, coordinating, or waiting on
+  tasks [--state STATE] [--archived] [--limit N] [--json]  list durable local tasks
+  task <id> [--json]               inspect one durable local task
   uninstall [--purge-state --yes-delete-state]
 
 Shared-machine work coordination (resource admission only; grants no execution authority):
@@ -1015,6 +1018,47 @@ async function tracesCommand(): Promise<void> {
   console.log('\nInspect one with: npm run dex -- trace <trace-id>');
 }
 
+function taskLine(task: ReachTaskRecord): string {
+  return `${task.taskId}  ${task.state.padEnd(14)} ${task.operation.padEnd(28)} node=${task.nodeId} updated=${task.updatedAtUtc}`;
+}
+
+async function tasksCommand(): Promise<void> {
+  const stateValue = arg('--state', argv);
+  if (stateValue && !TASK_STATES.includes(stateValue as TaskState)) throw new Error(`--state must be one of: ${TASK_STATES.join(', ')}`);
+  const limitValue = Number(arg('--limit', argv) || 50);
+  const store = new NodeTaskStore();
+  const query: TaskQuery = {
+    ...(stateValue ? { state: stateValue as TaskState } : {}),
+    ...(flag('--archived', argv) ? { includeArchived: true } : {})
+  };
+  const tasks = (await store.list(query)).slice(0, Number.isFinite(limitValue) && limitValue > 0 ? Math.min(limitValue, 200) : 50);
+  if (flag('--json', argv)) { console.log(JSON.stringify(tasks, null, 2)); return; }
+  if (!tasks.length) { console.log('No durable tasks recorded.'); return; }
+  console.log(`Durable tasks (${tasks.length}):`);
+  for (const task of tasks) console.log(`  ${taskLine(task)}`);
+}
+
+async function taskCommand(): Promise<void> {
+  const taskId = argv[1];
+  if (!taskId) throw new Error('usage: task <id> [--json]');
+  const task = await new NodeTaskStore().read(taskId);
+  if (!task) throw new Error(`task not found: ${taskId}`);
+  if (flag('--json', argv)) { console.log(JSON.stringify(task, null, 2)); return; }
+  console.log(`Task ${task.taskId}`);
+  console.log(`  state: ${task.state}`);
+  console.log(`  operation: ${task.operation}`);
+  console.log(`  actor: ${task.actorId}`);
+  console.log(`  node: ${task.nodeId}`);
+  console.log(`  root: ${task.rootTaskId}`);
+  console.log(`  parent: ${task.parentTaskId ?? 'none'}`);
+  console.log(`  idempotency: ${task.idempotencyKey}`);
+  console.log(`  payload sha256: ${task.payloadSha256}`);
+  console.log(`  created: ${task.createdAtUtc}`);
+  console.log(`  updated: ${task.updatedAtUtc}`);
+  console.log(`  status: ${task.summary.status}`);
+  if (task.archivedAtUtc) console.log(`  archived: ${task.archivedAtUtc}`);
+}
+
 
 try {
   switch (command) {
@@ -1075,6 +1119,8 @@ try {
     case 'evidence': await evidenceCommand(); break;
     case 'trace': await traceCommand(); break;
     case 'traces': await tracesCommand(); break;
+    case 'tasks': await tasksCommand(); break;
+    case 'task': await taskCommand(); break;
     case 'modes': console.log(ACCESS_MODES.join('\n')); break;
     default: usage();
   }

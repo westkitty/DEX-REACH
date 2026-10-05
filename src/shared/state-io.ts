@@ -7,7 +7,26 @@ export async function atomicWriteFile(file: string, data: string | Buffer, mode 
   const temp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
     await fs.writeFile(temp, data, { mode });
+    const fileHandle = await fs.open(temp, 'r');
+    try {
+      await fileHandle.sync();
+    } finally {
+      await fileHandle.close();
+    }
     await fs.rename(temp, file);
+    // The rename is the commit point. Sync the containing directory where the platform supports
+    // it so a power loss cannot acknowledge a committed state while losing the directory entry.
+    try {
+      const directoryHandle = await fs.open(path.dirname(file), 'r');
+      try {
+        await directoryHandle.sync();
+      } finally {
+        await directoryHandle.close();
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!['EINVAL', 'ENOTSUP', 'EBADF'].includes(code || '')) throw error;
+    }
   } finally {
     await fs.rm(temp, { force: true }).catch(() => undefined);
   }

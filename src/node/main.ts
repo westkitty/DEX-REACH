@@ -40,12 +40,14 @@ import { coordinatedStatus } from '../coordinator/client.js';
 import { redactWorkStatusForShare } from '../shared/work-coordinator.js';
 import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 import { workspaceWorkerEligible, workspaceWorkerExecute, workspaceWorkerRootsHash } from '../shared/workspace-worker.js';
+import { NodeTaskStore } from './task-store.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
 const adapters = new AdapterRegistry();
 const backend = new DesktopCommanderAdapter(adapters);
 const results = new ResultStore();
+const taskStore = new NodeTaskStore();
 const audit = new AuditLog();
 let stopped = false;
 let reconnectMs = 1000;
@@ -65,9 +67,12 @@ let activeSocket: WebSocket | null = null;
 let preferBearerCredential = false;
 let lastStatusJson = '';
 
+// Durable task state must be readable before the node advertises execution readiness. C2 only
+// loads and validates the records; worker recovery/reconciliation belongs to C4.
+const activeTasks = await taskStore.loadActiveTasks();
 await backend.start(config.allowedRoots);
 await sweepExpiredPlans();
-console.log(`DEX//REACH node ${config.nodeId} started with ${backend.listTools().length} compatibility tools (state dir ${stateDir()})`);
+console.log(`DEX//REACH node ${config.nodeId} started with ${backend.listTools().length} compatibility tools and ${activeTasks.length} durable active task(s) (state dir ${stateDir()})`);
 
 async function currentAccess(): Promise<AccessSnapshot> {
   return snapshot(await loadAccessState(config.nodeId));
