@@ -418,11 +418,11 @@ Governing Source: `DEX_Control_System_Master_Plan.docx` (Planning baseline 2026-
 - Invariant & Authority Freeze:
   - All 42 protected capabilities (`DEX-INV-001` through `DEX-INV-042`) remain locked and unviolated.
   - Zero runtime code, dependencies, or deployed services were modified.
-  - Phase C1 is complete and verified. The C2 implementation candidate is recorded in the next section; its PASS gate is still open.
+  - Phase C1 is complete and verified. Phase C2 is verified in the next section; C3 has not started.
 
 ## 17. DEX Control System — Phase C2 Node-Owned Durable TaskStore — 2026-10-05
 
-**IMPLEMENTATION CANDIDATE — C2 PASS NOT YET CLAIMED.** The isolated campaign worktree
+**C2 PASS — NODE-OWNED DURABLE TASKSTORE VERIFIED.** The isolated campaign worktree
 `/Users/andrew/dex-reach-c2-c6` is based on the live `origin/main` C1 head and adds a
 node-owned, schema-versioned durable task store under the node state directory. The store
 uses one atomically replaced snapshot guarded by the existing cross-process state lock, with
@@ -432,9 +432,14 @@ handling, and explicit read-only owner CLI `tasks` / `task <id>` inspection. Nod
 and loads active task records before compatibility backend readiness. Existing 16-tool MCP
 behavior and C3 retry/reconciliation semantics are unchanged.
 
-Focused C2 validation currently passes: typecheck, six TaskStore tests covering persistence,
+Validation at implementation commit `f6c1e3e7d3d2f32658aaf684a1cc12d614f46155` passed: typecheck,
+42 invariants, 294/294 tests, build, production dependency audit with 0 vulnerabilities, and
+the 26-tool backend probe. The six focused TaskStore tests cover persistence,
 transition refusal, conflicting identity binding, concurrent writers, indexed queries,
-corruption/version behavior, retention, and CLI inspection. The protected primary checkout,
-installed runtime, credentials, services, and public connector were not modified. Commit,
-remote parity, hosted CI, and broader repository gates remain pending; C2 must not be treated as
-verified until those states are independently read back.
+corruption/version behavior, retention, and CLI inspection. The committed tree reproduced 128
+artifacts byte-for-byte through `verify:clean-build`. Hosted GitHub Actions for the exact SHA
+also passed: DEX validation run `37274543809` (runtime-proof, reproducible-build, validate) and
+CodeQL run `37274543859`. The local proof run recorded 19 proven, 0 failed and 3 unverified
+hardware-dependent items; those unverified physical-install/device proofs are outside this source
+phase and are not promoted here. The protected primary checkout, installed runtime, credentials,
+services, and public connector were not modified. C3 has not started.
