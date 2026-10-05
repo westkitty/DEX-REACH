@@ -442,4 +442,26 @@ also passed: DEX validation run `37274543809` (runtime-proof, reproducible-build
 CodeQL run `37274543859`. The local proof run recorded 19 proven, 0 failed and 3 unverified
 hardware-dependent items; those unverified physical-install/device proofs are outside this source
 phase and are not promoted here. The protected primary checkout, installed runtime, credentials,
-services, and public connector were not modified. C3 has not started.
+services, and public connector were not modified. C3 is the active phase; C4 has not started.
+
+## 18. DEX Control System — Phase C3 Durable Results and Safe Reconciliation — 2026-10-05
+
+**C3 CANDIDATE — LOCAL GATES PASS; PUBLICATION PENDING.** The isolated campaign worktree
+`/Users/andrew/dex-reach-c2-c6` extends the C2 TaskStore with persistent result
+manifests and result blobs, task-bound result references and hashes, atomic terminal
+outcome metadata, operation safety classes, deterministic idempotency bindings, bounded
+retry classification, and evidence-based reconciliation decisions. Node boot marks
+non-read tasks interrupted in `RUNNING` as `AMBIGUOUS`; duplicate submissions recover
+completed results, attach/report existing active work, reject payload or policy
+collisions, and refuse blind replay after ambiguity. Result reads verify the persisted
+blob hash and malformed manifests fail closed.
+
+Validation currently passes: typecheck, 42 invariants, 301/301 tests, build, production
+dependency audit with 0 vulnerabilities, the 26-tool backend probe, 14/14 focused
+durable-execution/result/task tests, `git diff --check`, and the live proof matrix at
+19 proven, 0 failed, 3 hardware-dependent unverified. The tests cover dropped-response
+recovery without
+re-execution, explicit-key payload mismatch, timeout uncertainty, bounded retry,
+reconciliation evidence, atomic outcome metadata, result restart/continuation, hash
+mismatch, absent-index lookup, and manifest corruption. Clean-build reproduction,
+publication, and hosted CI for C3 remain pending. No C4 semantics have been started.

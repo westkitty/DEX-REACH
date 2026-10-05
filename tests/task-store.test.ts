@@ -57,6 +57,28 @@ test('TaskStore creates, reads, updates, persists, and rejects illegal transitio
   }
 });
 
+test('TaskStore commits terminal state and outcome metadata atomically', async () => {
+  const root = await tempStore();
+  try {
+    const store = new NodeTaskStore(root);
+    const task = await store.create(input());
+    await store.transition(task.taskId, 'PREPARING');
+    await store.transition(task.taskId, 'RUNNING');
+    const completed = await store.update(task.taskId, {
+      state: 'COMPLETED',
+      status: 'Completed with stored evidence.',
+      resultRef: 'result-ref-1',
+      resultHash: hash,
+    });
+    assert.equal(completed.state, 'COMPLETED');
+    assert.equal(completed.resultRef, 'result-ref-1');
+    assert.equal(completed.resultHash, hash);
+    assert.equal((await new NodeTaskStore(root).read(task.taskId))?.resultRef, 'result-ref-1');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('TaskStore binds lineage and indexed query fields without exposing input payloads', async () => {
   const root = await tempStore();
   try {
@@ -69,6 +91,8 @@ test('TaskStore binds lineage and indexed query fields without exposing input pa
     assert.equal((await store.list({ nodeId: 'node_local' })).length, 2);
     assert.equal((await store.list({ actorId: 'actor_andrew_admin' })).length, 2);
     assert.equal((await store.list({ idempotencyKey: 'idem_child' }))[0]?.taskId, child.taskId);
+    assert.equal((await store.list({ idempotencyKey: 'idem_missing' })).length, 0);
+    assert.equal((await store.list({ nodeId: 'node_missing' })).length, 0);
     assert.equal((await store.list({ updatedAfter: new Date(0).toISOString() })).length, 2);
     assert.equal('arguments' in child, false);
     await assert.rejects(() => store.read('../escape'), /invalid task id/);

@@ -51,6 +51,10 @@ export type ReachTaskRecord = {
   updatedAtUtc: string;
   idempotencyKey: string;
   payloadSha256: string;
+  policyHash?: string;
+  resultRef?: string;
+  resultHash?: string;
+  failureClass?: string;
   repoContext?: TaskRepoContext;
   summary: TaskSummary;
   archivedAtUtc?: string;
@@ -64,6 +68,7 @@ export type TaskCreateInput = {
   operation: string;
   idempotencyKey: string;
   payloadSha256: string;
+  policyHash?: string;
   parentTaskId?: string | null;
   rootTaskId?: string;
   taskDepth?: number;
@@ -76,6 +81,9 @@ export type TaskCreateInput = {
 export type TaskUpdate = {
   state?: TaskState;
   status?: string;
+  resultRef?: string | null;
+  resultHash?: string | null;
+  failureClass?: string | null;
 };
 
 export type TaskQuery = {
@@ -195,6 +203,11 @@ function validateRecord(value: unknown, location: string): ReachTaskRecord {
   if (typeof record.idempotencyKey !== 'string') throw new TaskStoreCorruptError(`${location}.idempotencyKey is missing`);
   assertSafe(record.idempotencyKey, `${location}.idempotencyKey`);
   if (typeof record.payloadSha256 !== 'string' || !HASH_PATTERN.test(record.payloadSha256)) throw new TaskStoreCorruptError(`${location}.payloadSha256 is invalid`);
+  for (const [value, label] of [[record.policyHash, 'policyHash'], [record.resultHash, 'resultHash']] as const) {
+    if (value !== undefined && (typeof value !== 'string' || !HASH_PATTERN.test(value))) throw new TaskStoreCorruptError(`${location}.${label} is invalid`);
+  }
+  if (record.resultRef !== undefined) assertSafe(record.resultRef, `${location}.resultRef`);
+  if (record.failureClass !== undefined) assertSafe(record.failureClass, `${location}.failureClass`);
   assertTimestamp(record.createdAtUtc!, `${location}.createdAtUtc`);
   assertTimestamp(record.updatedAtUtc!, `${location}.updatedAtUtc`);
   if (!record.summary || record.summary.isShareSafe !== true || typeof record.summary.status !== 'string' || record.summary.status.length > 240) {
@@ -357,6 +370,7 @@ export class NodeTaskStore implements TaskStore {
         state: 'ACCEPTED', attemptNumber: 1, attemptBudget: input.attemptBudget ?? 1,
         createdAtUtc: now, updatedAtUtc: now, idempotencyKey: input.idempotencyKey,
         payloadSha256: input.payloadSha256, ...(input.repoContext ? { repoContext: clone(input.repoContext) } : {}),
+        ...(input.policyHash ? { policyHash: input.policyHash } : {}),
         summary: { status: 'Task accepted and durably persisted on node storage.', isShareSafe: true }
       };
       validateRecord(record, `records.${taskId}`);
@@ -373,13 +387,33 @@ export class NodeTaskStore implements TaskStore {
 
   async update(taskId: string, update: TaskUpdate): Promise<ReachTaskRecord> {
     assertTaskId(taskId);
-    if (update.state) return this.transition(taskId, update.state, update.status);
-    if (update.status === undefined) throw new Error('task update requires state or status');
-    if (update.status.length > 240) throw new Error('task status is too long');
+    if (update.status === undefined && update.resultRef === undefined && update.resultHash === undefined && update.failureClass === undefined) throw new Error('task update requires state, status, or outcome metadata');
+    if (update.status !== undefined && update.status.length > 240) throw new Error('task status is too long');
     return this.mutate(document => {
       const record = document.records[taskId];
-      if (!record) throw new Error(`task is not active: ${taskId}`);
-      record.summary = { status: shareSafeStatus(update.status!), isShareSafe: true };
+      if (!record) {
+        if (document.archived[taskId]) throw new Error(`task is archived and immutable: ${taskId}`);
+        throw new Error(`task not found: ${taskId}`);
+      }
+      if (update.state !== undefined) {
+        if (!legalTransition(record.state, update.state)) throw new Error(`illegal task transition ${record.state} -> ${update.state}`);
+        record.state = update.state;
+        record.summary = { status: shareSafeStatus(update.status || `Task ${update.state.toLowerCase()}.`), isShareSafe: true };
+      } else if (update.status !== undefined) {
+        record.summary = { status: shareSafeStatus(update.status), isShareSafe: true };
+      }
+      if (update.resultRef !== undefined) {
+        if (update.resultRef !== null) assertSafe(update.resultRef, 'resultRef');
+        if (update.resultRef === null) delete record.resultRef; else record.resultRef = update.resultRef;
+      }
+      if (update.resultHash !== undefined) {
+        if (update.resultHash !== null && !HASH_PATTERN.test(update.resultHash)) throw new Error('resultHash must be a SHA-256 hash');
+        if (update.resultHash === null) delete record.resultHash; else record.resultHash = update.resultHash;
+      }
+      if (update.failureClass !== undefined) {
+        if (update.failureClass !== null) assertSafe(update.failureClass, 'failureClass');
+        if (update.failureClass === null) delete record.failureClass; else record.failureClass = update.failureClass;
+      }
       record.updatedAtUtc = new Date().toISOString();
       return record;
     });
@@ -411,7 +445,11 @@ export class NodeTaskStore implements TaskStore {
     if (query.updatedAfter && !Number.isFinite(Date.parse(query.updatedAfter))) throw new Error('updatedAfter must be an ISO timestamp');
     const document = await this.readDocument();
     const candidates = new Set<string>(query.taskId ? [query.taskId] : document.index.byUpdatedAt.map(entry => entry.taskId));
-    const applyIndex = (ids: readonly string[] | undefined) => { if (!ids) return; const allowed = new Set(ids); for (const id of candidates) if (!allowed.has(id)) candidates.delete(id); };
+    const applyIndex = (ids: readonly string[] | undefined) => {
+      if (!ids) { candidates.clear(); return; }
+      const allowed = new Set(ids);
+      for (const id of candidates) if (!allowed.has(id)) candidates.delete(id);
+    };
     if (query.rootTaskId) applyIndex(document.index.byRootTaskId[query.rootTaskId]);
     if (query.state) applyIndex(document.index.byState[query.state]);
     if (query.nodeId) applyIndex(document.index.byNodeId[query.nodeId]);

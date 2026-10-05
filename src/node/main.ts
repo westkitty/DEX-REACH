@@ -41,6 +41,7 @@ import { redactWorkStatusForShare } from '../shared/work-coordinator.js';
 import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 import { workspaceWorkerEligible, workspaceWorkerExecute, workspaceWorkerRootsHash } from '../shared/workspace-worker.js';
 import { NodeTaskStore } from './task-store.js';
+import { classifyFailure, classifyOperationSafety, defaultAttemptBudget, deriveIdempotencyKey, type SafetyClass } from '../shared/durable-execution.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -70,6 +71,12 @@ let lastStatusJson = '';
 // Durable task state must be readable before the node advertises execution readiness. C2 only
 // loads and validates the records; worker recovery/reconciliation belongs to C4.
 const activeTasks = await taskStore.loadActiveTasks();
+for (const task of activeTasks) {
+  const safety = classifyOperationSafety(task.operation);
+  if (task.state === 'RUNNING' && safety !== 'PURE_READ_IDEMPOTENT') {
+    await taskStore.transition(task.taskId, 'AMBIGUOUS', 'Node restarted while a side-effecting task had no terminal evidence.');
+  }
+}
 await backend.start(config.allowedRoots);
 await sweepExpiredPlans();
 console.log(`DEX//REACH node ${config.nodeId} started with ${backend.listTools().length} compatibility tools and ${activeTasks.length} durable active task(s) (state dir ${stateDir()})`);
@@ -251,6 +258,8 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
   let policy: unknown = null;
   let receiptCheckpoint: string | null = null;
   let budgetReservationId: string | undefined;
+  let taskId: string | null = null;
+  let taskSafety: SafetyClass | null = null;
   // Continue the caller's trace when it supplied a valid W3C context, otherwise start one here.
   // A malformed inbound header never fails the request and never propagates.
   const trace: ReachTraceContext = traceContextFrom({
@@ -276,6 +285,43 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       nodeId: config.nodeId, actorKind: actor?.kind, ok: true,
       policyHash: hashValue(reservation.policy)
     });
+    const actorId = `actor_${hashValue(actor ? { kind: actor.kind, clientId: actor.clientId } : { kind: 'unknown' }).slice(0, 24)}`;
+    taskSafety = classifyOperationSafety(request.operation);
+    const idempotency = deriveIdempotencyKey({
+      actorId, nodeId: config.nodeId, operation: request.operation, args: request.args,
+      policyHash: hashValue(reservation.policy),
+      requestedKey: typeof request.args.idempotencyKey === 'string' ? request.args.idempotencyKey : undefined,
+      requestId: request.id
+    });
+    const existing = (await taskStore.list({ idempotencyKey: idempotency.key })).find(task =>
+      task.actorId === actorId && task.nodeId === config.nodeId && task.operation === request.operation
+    );
+    if (existing) {
+      if (existing.payloadSha256 !== idempotency.payloadHash || (existing.policyHash && existing.policyHash !== hashValue(reservation.policy))) {
+        throw new Error('IDEMPOTENCY_KEY_COLLISION_MISMATCH: existing task binding differs; refusing execution');
+      }
+      if (existing.state === 'COMPLETED' && existing.resultRef) {
+        const recovered = await results.readValue(existing.resultRef);
+        return { type: 'response', id: request.id, ok: true, result: recovered, traceId: trace.traceId };
+      }
+      if (existing.state === 'AMBIGUOUS') {
+        return { type: 'response', id: request.id, ok: false, error: `task ${existing.taskId} is AMBIGUOUS; reconciliation is required and replay is forbidden`, traceId: trace.traceId };
+      }
+      if (existing.state === 'FAILED' || existing.state === 'CANCELLED') {
+        return { type: 'response', id: request.id, ok: false, error: `task ${existing.taskId} already ended as ${existing.state}: ${existing.summary.status}`, traceId: trace.traceId };
+      }
+      return { type: 'response', id: request.id, ok: false, error: `task ${existing.taskId} is already ${existing.state}; attach to the existing task`, traceId: trace.traceId };
+    }
+    const task = await taskStore.create({
+      actorId, nodeId: config.nodeId, operation: request.operation,
+      idempotencyKey: idempotency.key, payloadSha256: idempotency.payloadHash,
+      policyHash: hashValue(reservation.policy), attemptBudget: defaultAttemptBudget(taskSafety),
+      safetyClass: taskSafety,
+      mutationLevel: taskSafety === 'PURE_READ_IDEMPOTENT' ? 'NONE' : 'STATE_MUTATION'
+    });
+    taskId = task.taskId;
+    await taskStore.transition(taskId, 'PREPARING', 'Task admitted on the selected node.');
+    await taskStore.transition(taskId, 'RUNNING', 'Task execution started on the selected node.');
     let value: unknown;
     if (request.operation === 'dex.plan') {
       value = await buildPlan(actor, request.args);
@@ -286,7 +332,10 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     } else {
       value = await executeOperation(request.operation, request.args, actor, reservation.decision.effectiveProfile);
     }
-    const result = results.bound(value);
+    const stored = await results.boundWithReference(value, taskId);
+    await taskStore.update(taskId, { resultRef: stored.metadata.handle, resultHash: stored.metadata.resultHash });
+    await taskStore.transition(taskId, 'COMPLETED', 'Task completed with a persisted result reference.');
+    const result = stored.publicValue;
     const durationMs = Date.now() - started;
     const executeSpan = childSpan(authorizeSpan);
     enqueueSpan({
@@ -314,6 +363,15 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     return { type: 'response', id: request.id, ok: true, result, traceId: trace.traceId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (taskId && taskSafety) {
+      const failureClass = classifyFailure({ error, safety: taskSafety });
+      await taskStore.update(taskId, { failureClass, status: `Task stopped: ${failureClass}.` }).catch(() => undefined);
+      const current = await taskStore.read(taskId).catch(() => null);
+      if (current?.state === 'RUNNING') {
+        const next = failureClass === 'AMBIGUOUS_EFFECT' ? 'AMBIGUOUS' : 'FAILED';
+        await taskStore.transition(taskId, next, `Task stopped: ${failureClass}.`).catch(() => undefined);
+      }
+    }
     const durationMs = Date.now() - started;
     const failSpan = childSpan(trace);
     enqueueSpan({
