@@ -503,3 +503,27 @@ published as the second commit and then passed locally and hosted. The physical-
 second-machine, installed-runtime, and human-acceptance layers remain unverified. The protected
 primary checkouts, installed runtime, credentials, services, and public connector were not
 modified. C5 has not started.
+
+## 20. DEX Control System — Phase C5 MCP Durable-Task Surface and Compatibility — 2026-10-05
+
+**C5 SOURCE PASS — DURABLE BACKEND AND EXPLICIT FALLBACK VERIFIED.** The isolated campaign
+worktree preserves the original 16 public MCP tools and adds one `reach_task` lifecycle
+multiplexer, for a declared source contract of 17 tools. Existing direct tools remain
+synchronous. `reach_list_nodes` now reports optional `durable_tasks` capability metadata; current
+nodes advertise it and legacy v1 nodes omit it.
+
+`reach_task` supports only the implemented `start`, `get`, `result`, and `cancel` actions. Durable
+start requires capability presence and returns only after the node TaskStore record is persisted.
+Get, result, and cancel route to the exact selected node and are checked there against the original
+actor identity and current node policy. Internal states map to public `working`, `input_required`,
+`completed`, `failed`, and `cancelled` statuses while retaining the richer local `reachState`.
+Capability-absent `mode: durable` returns explicit `CAPABILITY_UNSUPPORTED_ON_NODE`; `mode: auto`
+returns a labelled synchronous fallback and never fabricates a handle.
+
+Local focused MCP contract validation passes 11/11, including capability-present routing, exact
+node and lifecycle arguments, public state projection, capability-absent fallback, and durable-only
+refusal. Typecheck, build, invariant manifest, and `git diff --check` pass. Native MCP Tasks are
+not claimed as externally accepted: the installed SDK exposes experimental task APIs, but the
+current ChatGPT connector has no native task proof in this campaign. No connector refresh,
+installation, deployment, or runtime control was performed. Primary checkouts and installed
+state remain untouched. Hosted CI and publication are still required before C5 closes.
