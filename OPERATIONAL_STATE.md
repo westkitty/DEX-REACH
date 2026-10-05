@@ -556,5 +556,9 @@ cancel, pause/resume intent, explicit `NEEDS ANDREW`, evidence-gated reconciliat
 refusal, RESET lineage, and consequential-control preview/refusal. Hosted DEX validation run
 `37286079325` passed reproducible-build, validate, and runtime-proof jobs
 `111685188153`, `111685188486`, and `111685188495`; CodeQL run `37286079332` passed analysis job
-`111685188837`. The closure commit and its hosted checks are recorded separately below after the
-documentation-only closure update.
+`111685188837`. Documentation closure commit `12b811ea98132256f696db864a961eae6a72e505` is also
+pushed on `origin/campaign/c2-c6`; its hosted DEX validation run `37286339559` passed jobs
+`111686020107`, `111686020409`, and `111686020424`, and its CodeQL run `37286339533` passed job
+`111686020098`. C6 is closed at source and hosted-CI level. The physical-install, device,
+second-machine, installed-runtime, connector-refresh, deployment, and human-acceptance layers
+remain outside this campaign and are not promoted here.
