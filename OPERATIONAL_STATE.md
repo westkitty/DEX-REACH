@@ -537,7 +537,7 @@ begin.
 
 ## 21. DEX Control System — Phase C6 Owner Controls, DEX//LOG, DEX//TRACE, and Continuation — 2026-10-05
 
-**C6 SOURCE IMPLEMENTATION — PENDING FINAL VALIDATION/PUBLICATION.** The isolated campaign worktree
+**C6 PASS — OWNER CONTROLS AND CONTINUATION EVIDENCE VERIFIED.** The isolated campaign worktree
 extends the existing owner `tasks` / `task <id>` CLI with an append-only task lifecycle ledger,
 DEX//LOG aggregation, task-linked trace identifiers, result inspection, policy-rechecked cancel,
 pause-after-phase and resume intents, evidence-gated reconciliation, classifier-gated retry,
@@ -545,3 +545,16 @@ terminal RESET lineage, impact-preview-only consequential controls, `NEEDS ANDRE
 content-free continuation export. Missing Git, CI, deployment, installation, and unlinked trace
 evidence remain explicit `UNKNOWN` values. No installed runtime, connector, deployment, or primary
 checkout was changed.
+
+Implementation commit `1d444f8dfe956e3f62740b762cbd266ac76fe168` is pushed on
+`origin/campaign/c2-c6`. Local validation passes: typecheck, 42 invariants, 312/312 tests, build,
+production dependency audit with 0 vulnerabilities, 26-tool backend probe, `git diff --check`, and
+reproducible clean-build verification of 136/136 artifacts. The live proof run records 19 proven,
+0 failed, and 3 hardware-dependent unverified items; it did not install or control a runtime.
+Focused C6 coverage proves lifecycle events, content-free continuation, owner policy re-check,
+cancel, pause/resume intent, explicit `NEEDS ANDREW`, evidence-gated reconciliation, unsafe retry
+refusal, RESET lineage, and consequential-control preview/refusal. Hosted DEX validation run
+`37286079325` passed reproducible-build, validate, and runtime-proof jobs
+`111685188153`, `111685188486`, and `111685188495`; CodeQL run `37286079332` passed analysis job
+`111685188837`. The closure commit and its hosted checks are recorded separately below after the
+documentation-only closure update.
