@@ -418,7 +418,7 @@ Governing Source: `DEX_Control_System_Master_Plan.docx` (Planning baseline 2026-
 - Invariant & Authority Freeze:
   - All 42 protected capabilities (`DEX-INV-001` through `DEX-INV-042`) remain locked and unviolated.
   - Zero runtime code, dependencies, or deployed services were modified.
-  - Phase C1 is complete and verified. Phase C2 is verified in the next section; C3 has not started.
+  - Phase C1 is complete and verified. Phase C2 is verified in the next section; C3 is recorded in section 18.
 
 ## 17. DEX Control System — Phase C2 Node-Owned Durable TaskStore — 2026-10-05
 
@@ -446,7 +446,7 @@ services, and public connector were not modified. C3 is the active phase; C4 has
 
 ## 18. DEX Control System — Phase C3 Durable Results and Safe Reconciliation — 2026-10-05
 
-**C3 CANDIDATE — LOCAL GATES PASS; PUBLICATION PENDING.** The isolated campaign worktree
+**C3 PASS — DURABLE RESULTS AND SAFE RECONCILIATION VERIFIED.** The isolated campaign worktree
 `/Users/andrew/dex-reach-c2-c6` extends the C2 TaskStore with persistent result
 manifests and result blobs, task-bound result references and hashes, atomic terminal
 outcome metadata, operation safety classes, deterministic idempotency bindings, bounded
@@ -456,7 +456,8 @@ completed results, attach/report existing active work, reject payload or policy
 collisions, and refuse blind replay after ambiguity. Result reads verify the persisted
 blob hash and malformed manifests fail closed.
 
-Validation currently passes: typecheck, 42 invariants, 301/301 tests, build, production
+Implementation commit `fd74d51942836f0e1b610782e6cffb40aef91567` is published to canonical
+`origin/main` with exact local/remote parity. Validation passes: typecheck, 42 invariants, 301/301 tests, build, production
 dependency audit with 0 vulnerabilities, the 26-tool backend probe, 14/14 focused
 durable-execution/result/task tests, `git diff --check`, and the live proof matrix at
 19 proven, 0 failed, 3 hardware-dependent unverified. The tests cover dropped-response
@@ -464,4 +465,8 @@ recovery without
 re-execution, explicit-key payload mismatch, timeout uncertainty, bounded retry,
 reconciliation evidence, atomic outcome metadata, result restart/continuation, hash
 mismatch, absent-index lookup, and manifest corruption. Clean-build reproduction,
-publication, and hosted CI for C3 remain pending. No C4 semantics have been started.
+publication, and hosted CI passed. Hosted DEX validation run `37277579388` passed all
+three jobs, including runtime proof and reproducible build; CodeQL run `37277579397`
+passed. The unverified physical-install/device proofs remain outside this source phase
+and are not promoted. The protected primary checkout, installed runtime, credentials,
+services, and public connector were not modified. No C4 semantics have been started.
