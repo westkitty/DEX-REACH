@@ -393,3 +393,29 @@ Receipt chain-head and parsed signing-key caching were evaluated and deferred. T
 
 
 **HISTORICAL INSTALLED CHATGPT ACCEPTANCE — 2026-10-02 (superseded by the current baseline above).** Canonical `main` at `d5a06e2` was installed through the immutable macOS runtime path. Live `reach_list_nodes` from this ChatGPT conversation reported one healthy `macbook-air.local` node running release path `0.3.2-d5a06e2bc259-1b94c7ca6c94-dirty-1790940355904`, compact scheduler history (`events: []`, `eventsOmitted: true`) and a live observation-cache hit rate of about 0.51; the `dirty` release marker reflects the preserved untracked DEX//MAINT Python cache in the source worktree, which remained untouched. A real installed `reach_repo_info` call carrying the new additive `inspection` payload returned `main` metadata plus one tree, two literal searches and three ranged reads in a single routed result, with the advisory context capsule present. The same evidence intent through the legacy nine-call compatibility path took 19.368 s in this connector versus 1.510 s for the bundled call, a 92.2% wall-time reduction in this measured ChatGPT tool path; this comparison excludes model reasoning and is therefore not a model-latency claim. IMPORTANT CLIENT LIMIT: this already-open ChatGPT conversation still advertises the stale pre-refresh MCP schema (12 DEX tools, and `reach_repo_info` metadata omits the `inspection` field), even though the runtime accepts and executes the additive field when supplied. Therefore installed runtime behavior is VERIFIED, current-session automatic discovery/adoption is PARTIALLY VERIFIED/STale, and fresh-session/tool-schema refresh remains pending. Claude installed-client acceptance also remains UNVERIFIED.
+
+
+## 16. DEX Control System — Phase C1 Architecture Contracts and ADRs Freeze — 2026-10-05
+
+Program target: `DEX// 1.0 — CONTROL SYSTEM + DEX//REACH 0.4 — DURABLE EXECUTION`
+Governing Source: `DEX_Control_System_Master_Plan.docx` (Planning baseline 2026-10-04)
+
+- Canonical Baseline: `westkitty/DEX-REACH` remote main at `c1ec76aa05a94dced7263dfe07bc1f9b9d7f2dc9` ("Stabilize OAuth CI and dependency audit").
+- Installed REACH Runtime: `0.3.2-c4ac53b4a585-1b94c7ca6c94` under LaunchAgent supervision remains active and strictly separated from source development.
+- Worktree Isolation: Clean isolated worktree `/Users/andrew/dex-reach-c1-contracts` on branch `c1-architecture-contracts` used for C1 execution. Unrelated user work in `/Users/andrew/DEX-REACH` (`docs/PERFORMANCE_PHASE2.md`, untracked `AGENTS.md`, `docs/control-plane/`, `skills/dexreach-mac-maintenance/scripts/__pycache__/`) remains completely preserved and untouched.
+- Authoritative Decisions Established in this Repository:
+  - `docs/architecture/decisions/0001-durable-task-execution-and-identity.md`: ADR-0001 freezes node task authority, globally safe ID format (`rtsk_...`), parent/child lineage, actor/node binding, lifecycle state machine (`ACCEPTED`, `PREPARING`, `RUNNING`, `INPUT_REQUIRED`, `AMBIGUOUS`, `COMPLETED`, `FAILED`, `CANCELLED`, `RECONCILED`), disk persistence ordering, `INPUT_REQUIRED` and `AMBIGUOUS` semantics, cooperative cancellation, and transport independence. Universal rule: client/network timeout does not prove execution stopped.
+  - `docs/architecture/decisions/0002-operation-safety-retry-and-reconciliation.md`: ADR-0002 freezes five operation safety classes (`PURE_READ_IDEMPOTENT`, `SIDE_EFFECTING_IDEMPOTENT`, `PLAN_COMMIT`, `PROCESS_UNKNOWN_EFFECT`, `DESTRUCTIVE`), idempotency keys, duplicate submission handling, attempt budgets, uncertainty rules, and mandatory reconciliation protocols. Blind replay is strictly prohibited.
+  - `docs/architecture/decisions/0003-reach-protocol-capability-negotiation.md`: ADR-0003 freezes Protocol v1 vs v2 negotiation, capability handshake (`durable_tasks`), mixed gateway/node handling, 6-month compatibility window, and the universal prohibition against silent downgrades for requested durable semantics.
+  - `docs/architecture/decisions/README.md`: Architecture decision index and cross-repository references to companion DEX decisions (ADR-0013 through ADR-0017).
+- Contract Schema Fixtures Established in `docs/architecture/fixtures/`:
+  - `reach-task-record.positive.json`: Compliant durable task record.
+  - `reach-task-record.negative.missing-node-id.json`: Proves rejection of floating tasks missing `nodeId` (`DEX-INV-001`).
+  - `reach-task-record.negative.unsupported-transition.json`: Proves rejection of transitions out of terminal states.
+  - `reach-task-record.negative.uncertain-completed.json`: Proves rejection of uncertain outcomes falsely marked `COMPLETED` instead of `AMBIGUOUS`.
+  - `protocol.negative.silent-downgrade.json`: Proves rejection of silent capability downgrade.
+  - `retry.negative.destructive.json`: Proves rejection of automatic retry on destructive or process operations.
+- Invariant & Authority Freeze:
+  - All 42 protected capabilities (`DEX-INV-001` through `DEX-INV-042`) remain locked and unviolated.
+  - Zero runtime code, dependencies, or deployed services were modified.
+  - Phase C1 is complete and verified. C2 has not been started.

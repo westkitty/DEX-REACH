@@ -1,0 +1,16 @@
+{
+  "$schema": "https://dex.local/schemas/control-system/reach-task-record.v1.json",
+  "comment": "FORBIDDEN FIXTURE: Terminal states are immutable; COMPLETED cannot transition to RUNNING",
+  "taskId": "rtsk_01925b6a7c8d_3f8a9e2b1c4d5e6f",
+  "initialState": "COMPLETED",
+  "attemptedTransition": {
+    "targetState": "RUNNING",
+    "trigger": "operator_retry_request",
+    "requestedBy": "actor_andrew_admin"
+  },
+  "expectedRejection": {
+    "rule": "REQ-C1-001 / ADR-0001",
+    "errorCode": "ILLEGAL_STATE_TRANSITION",
+    "message": "Task is in terminal state 'COMPLETED'; transitions out of terminal states are strictly forbidden."
+  }
+}

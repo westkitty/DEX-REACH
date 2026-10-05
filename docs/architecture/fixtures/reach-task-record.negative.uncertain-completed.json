@@ -1,0 +1,20 @@
+{
+  "$schema": "https://dex.local/schemas/control-system/reach-task-record.v1.json",
+  "comment": "FORBIDDEN FIXTURE: Execution outcome is uncertain (pipe broke/timed out); cannot be marked COMPLETED without verified receipt",
+  "taskId": "rtsk_01925b6a7c8d_3f8a9e2b1c4d5e6f",
+  "nodeId": "node_m3_max_studio_local",
+  "operation": "reach_execute_plan",
+  "safetyClass": "PROCESS_UNKNOWN_EFFECT",
+  "executionFacts": {
+    "transportDisconnected": true,
+    "childPid": 48192,
+    "exitCode": null,
+    "verifiedReceiptSha256": null
+  },
+  "attemptedReportedState": "COMPLETED",
+  "expectedRejection": {
+    "rule": "REQ-C1-002 / ADR-0002",
+    "errorCode": "UNCERTAIN_OUTCOME_MUST_BE_AMBIGUOUS",
+    "message": "A client/network timeout or disconnected child process without verified receipt cannot be marked COMPLETED; state MUST transition to AMBIGUOUS."
+  }
+}

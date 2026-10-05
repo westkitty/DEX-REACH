@@ -1,0 +1,24 @@
+{
+  "$schema": "https://dex.local/schemas/control-system/reach-task-record.v1.json",
+  "comment": "FORBIDDEN FIXTURE: missing nodeId violates DEX-INV-001 (floating tasks are prohibited)",
+  "taskId": "rtsk_01925b6a7c8d_3f8a9e2b1c4d5e6f",
+  "rootTaskId": "rtsk_01925b6a7c8d_3f8a9e2b1c4d5e6f",
+  "parentTaskId": null,
+  "taskDepth": 0,
+  "lineageIndex": 0,
+  "actorId": "actor_andrew_admin",
+  "nodeId": null,
+  "operation": "reach_execute_plan",
+  "safetyClass": "PLAN_COMMIT",
+  "mutationLevel": "STAGED_MUTATION",
+  "state": "ACCEPTED",
+  "attemptNumber": 1,
+  "attemptBudget": 1,
+  "createdAtUtc": "2026-10-05T01:45:00.000Z",
+  "updatedAtUtc": "2026-10-05T01:45:00.000Z",
+  "expectedRejection": {
+    "rule": "DEX-INV-001 / REQ-C1-001",
+    "errorCode": "NODE_ID_REQUIRED",
+    "message": "Task record cannot be accepted without an exact bound nodeId."
+  }
+}

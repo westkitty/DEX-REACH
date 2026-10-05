@@ -1,0 +1,22 @@
+{
+  "$schema": "https://dex.local/schemas/control-system/reach-retry-attempt.v1.json",
+  "comment": "FORBIDDEN FIXTURE: Automatic blind retry is forbidden for DESTRUCTIVE or PROCESS_UNKNOWN_EFFECT operations",
+  "taskId": "rtsk_01925b6a7c8d_3f8a9e2b1c4d5e6f",
+  "operation": "wipe_scratch_worktree",
+  "safetyClass": "DESTRUCTIVE",
+  "mutationLevel": "PERMANENT_DELETION",
+  "priorAttemptOutcome": {
+    "attemptNumber": 1,
+    "state": "AMBIGUOUS",
+    "failureReason": "TRANSPORT_TIMEOUT_DURING_EXECUTION"
+  },
+  "attemptedAction": {
+    "trigger": "automatic_worker_retry",
+    "targetAttempt": 2
+  },
+  "expectedRejection": {
+    "rule": "REQ-C1-002 / ADR-0002",
+    "errorCode": "AUTOMATIC_RETRY_FORBIDDEN_FOR_DESTRUCTIVE",
+    "message": "Operations classified as DESTRUCTIVE or PROCESS_UNKNOWN_EFFECT cannot be automatically retried; reconciliation and explicit owner authorization are required."
+  }
+}

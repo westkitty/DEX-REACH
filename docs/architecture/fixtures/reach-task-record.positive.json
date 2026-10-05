@@ -1,0 +1,31 @@
+{
+  "$schema": "https://dex.local/schemas/control-system/reach-task-record.v1.json",
+  "taskId": "rtsk_01925b6a7c8d_3f8a9e2b1c4d5e6f",
+  "rootTaskId": "rtsk_01925b6a7c8d_3f8a9e2b1c4d5e6f",
+  "parentTaskId": null,
+  "taskDepth": 0,
+  "lineageIndex": 0,
+  "actorId": "actor_andrew_admin",
+  "nodeId": "node_m3_max_studio_local",
+  "operation": "reach_execute_plan",
+  "safetyClass": "PLAN_COMMIT",
+  "mutationLevel": "STAGED_MUTATION",
+  "state": "ACCEPTED",
+  "attemptNumber": 1,
+  "attemptBudget": 1,
+  "createdAtUtc": "2026-10-05T01:45:00.000Z",
+  "updatedAtUtc": "2026-10-05T01:45:00.000Z",
+  "idempotencyKey": "idem_8f7b3a1c9e2d4f5a6b7c8d9e0f1a2b3c",
+  "payloadSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "repoContext": {
+    "canonicalRepo": "westkitty/DEX",
+    "repoPath": "/Users/andrew/dex",
+    "worktreeBranch": "c1-architecture-contracts",
+    "baseSha": "2736ef0c942c66f561da555ebeb05b941ef0876d",
+    "leaseId": "lease_repo_exclusive_01925b6a"
+  },
+  "summary": {
+    "status": "Task accepted and durably persisted on node storage.",
+    "isShareSafe": true
+  }
+}
