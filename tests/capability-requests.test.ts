@@ -243,8 +243,8 @@ test('retried approval does not mint a second grant', async () => {
   }
 });
 
-test('capability-request repair does not expand the public MCP surface', async () => {
+test('capability-request repair leaves the declared 17-tool public MCP surface unchanged', async () => {
   const source = await fs.readFile('src/gateway/mcp.ts', 'utf8');
   const registered = [...source.matchAll(/server\.registerTool\('([a-z_]+)'/g)].map(match => match[1]!);
-  assert.equal(registered.length, 16);
+  assert.equal(registered.length, 17);
 });

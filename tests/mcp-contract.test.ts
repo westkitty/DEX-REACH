@@ -36,6 +36,7 @@ const EXPECTED_TOOLS = [
   'reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_trust_report',
   'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write',
   'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'
+  , 'reach_task'
 ];
 
 function clientPreferredOutput(result: { content?: unknown; structuredContent?: unknown }): unknown {
@@ -51,12 +52,12 @@ function clientPreferredOutput(result: { content?: unknown; structuredContent?: 
   return JSON.parse(text.text);
 }
 
-test('the served MCP surface is exactly the 16 expected actions, in a deterministic order', async () => {
+test('the served MCP surface preserves the 16 existing actions and adds one durable-task multiplexer', async () => {
   const { client, close } = await connectedClient();
   try {
     const first = await client.listTools();
     assert.deepEqual(first.tools.map(tool => tool.name), EXPECTED_TOOLS);
-    assert.equal(first.tools.length, 16);
+    assert.equal(first.tools.length, 17);
 
     // A second server instance must advertise the same surface in the same order: registration is
     // deterministic and free of order-dependent side effects.
@@ -175,6 +176,61 @@ test('the server reports the DEX version it was built from', async () => {
     assert.equal(info?.version, DEX_REACH_VERSION);
   } finally {
     await close();
+  }
+});
+
+test('durable task negotiation is explicit and never fabricates a legacy-node handle', async () => {
+  const calls: unknown[][] = [];
+  const registry = {
+    requestWithTrace: async (...args: unknown[]) => { calls.push(args); return { result: { ok: true, mode: 'sync-result' } }; },
+    supportsDurableTasks: () => false,
+    listNodes: () => []
+  } as unknown as NodeRegistry;
+  const audit = { append: async () => undefined } as unknown as AuditLog;
+  const server = createReachMcpServer(registry, audit, 'legacy-test', { kind: 'smoke', clientId: 'legacy-test', clientName: 'legacy task test' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'legacy-task-test', version: DEX_REACH_VERSION });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const fallback = await client.callTool({ name: 'reach_task', arguments: { node_id: 'legacy-node', action: 'start', operation: 'dex.fingerprint', mode: 'auto' } });
+    assert.equal((fallback as { isError?: boolean }).isError, undefined);
+    assert.match(String((fallback.content as Array<{ text: string }>)[0]?.text), /synchronous-fallback/);
+    const refused = await client.callTool({ name: 'reach_task', arguments: { node_id: 'legacy-node', action: 'start', operation: 'dex.fingerprint', mode: 'durable' } });
+    assert.equal(refused.isError, true);
+    assert.match(String((refused.content as Array<{ text: string }>)[0]?.text), /CAPABILITY_UNSUPPORTED_ON_NODE/);
+    assert.equal(calls.length, 1, 'durable refusal must not send a task request to a legacy node');
+  } finally {
+    await client.close().catch(() => undefined);
+    await server.close().catch(() => undefined);
+    await flushTraces();
+  }
+});
+
+test('capability-present task routing carries the exact node and lifecycle action', async () => {
+  const calls: unknown[][] = [];
+  const registry = {
+    requestWithTrace: async (...args: unknown[]) => { calls.push(args); return { result: { taskId: 'rtsk_19999999999_0123456789abcdef', state: 'RUNNING', durable: true } }; },
+    supportsDurableTasks: () => true,
+    listNodes: () => []
+  } as unknown as NodeRegistry;
+  const audit = { append: async () => undefined } as unknown as AuditLog;
+  const server = createReachMcpServer(registry, audit, 'durable-test', { kind: 'smoke', clientId: 'durable-test', clientName: 'durable task test' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'durable-task-test', version: DEX_REACH_VERSION });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const started = await client.callTool({ name: 'reach_task', arguments: { node_id: 'exact-node', action: 'start', operation: 'dex.process.run', arguments: { command: 'printf ok' }, mode: 'durable' } });
+    assert.match(String((started.content as Array<{ text: string }>)[0]?.text), /"status": "working"/);
+    assert.match(String((started.content as Array<{ text: string }>)[0]?.text), /"reachState": "RUNNING"/);
+    await client.callTool({ name: 'reach_task', arguments: { node_id: 'exact-node', action: 'get', task_id: 'rtsk_19999999999_0123456789abcdef' } });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0]?.[0], 'exact-node');
+    assert.deepEqual((calls[0]?.[6] as { action: string; operation: string; args: Record<string, unknown> }), { action: 'start', operation: 'dex.process.run', args: { command: 'printf ok' } });
+    assert.deepEqual((calls[1]?.[6] as { action: string; taskId: string }), { action: 'get', taskId: 'rtsk_19999999999_0123456789abcdef' });
+  } finally {
+    await client.close().catch(() => undefined);
+    await server.close().catch(() => undefined);
+    await flushTraces();
   }
 });
 

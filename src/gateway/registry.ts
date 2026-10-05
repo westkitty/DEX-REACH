@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Server } from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
 import { parseNodeAuthorization, type NodeAuthStore } from './node-auth.js';
-import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor, type SchedulerSnapshot } from '../shared/protocol.js';
+import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type DurableTaskRequest, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor, type SchedulerSnapshot } from '../shared/protocol.js';
 import { addRevokedNode, loadRevokedNodes } from '../shared/revoked-nodes.js';
 
 export type NodeRecord = {
@@ -99,6 +99,7 @@ export class NodeRegistry {
       allowedRoots: record.hello.allowedRoots,
       aiAccess: record.access ? { mode: record.access.effectiveMode, until: record.access.until, clients: record.access.clients } : 'unknown',
       scheduler: record.scheduler,
+      capabilities: record.hello.capabilities ?? {},
       toolCount: record.hello.tools.length,
       agentVersion: record.hello.agentVersion,
       connectedAt: new Date(record.connectedAt).toISOString(),
@@ -125,7 +126,8 @@ export class NodeRegistry {
     args: Record<string, unknown>,
     actor?: RequestActor,
     trace?: { traceparent?: string; tracestate?: string },
-    timeoutMs = 60000
+    timeoutMs = 60000,
+    task?: DurableTaskRequest
   ): Promise<NodeRequestResult> {
     const record = this.requireNode(nodeId);
     const id = crypto.randomUUID();
@@ -136,7 +138,8 @@ export class NodeRegistry {
       args,
       ...(actor ? { actor } : {}),
       ...(trace?.traceparent ? { traceparent: trace.traceparent } : {}),
-      ...(trace?.tracestate ? { tracestate: trace.tracestate } : {})
+      ...(trace?.tracestate ? { tracestate: trace.tracestate } : {}),
+      ...(task ? { task } : {})
     };
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -152,6 +155,11 @@ export class NodeRegistry {
         reject(error);
       });
     });
+  }
+
+  supportsDurableTasks(nodeId: string): boolean {
+    const record = this.requireNode(nodeId);
+    return record.hello.capabilities?.durable_tasks === true;
   }
 
   async revoke(nodeId: string): Promise<boolean> {

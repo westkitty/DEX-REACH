@@ -93,13 +93,13 @@ let identityFixture = '';
 try {
   await connect();
   const tools = await client.listTools();
-  const required = ['reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_trust_report', 'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write', 'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'];
+  const required = ['reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_trust_report', 'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write', 'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node', 'reach_task'];
   for (const name of required) {
     const tool = tools.tools.find(candidate => candidate.name === name);
     if (!tool) throw new Error(`missing MCP tool: ${name}`);
     if (!tool.title || !tool.description || typeof tool.annotations?.readOnlyHint !== 'boolean') throw new Error(`MCP tool ${name} is missing title, description, or readOnlyHint annotation`);
   }
-  if (JSON.stringify(tools.tools.map(tool => tool.name)) !== JSON.stringify(required)) throw new Error('public MCP tool names/order differ from the intended 16-action contract');
+  if (JSON.stringify(tools.tools.map(tool => tool.name)) !== JSON.stringify(required)) throw new Error('public MCP tool names/order differ from the intended 16-action contract plus reach_task');
   const repoTool = tools.tools.find(tool => tool.name === 'reach_repo_info')!;
   if (!repoTool.inputSchema.properties?.inspection || repoTool.inputSchema.required?.includes('inspection')) throw new Error('reach_repo_info must advertise optional inspection');
   if (repoTool.annotations?.readOnlyHint !== true) throw new Error('reach_repo_info must remain annotated read-only');

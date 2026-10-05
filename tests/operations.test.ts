@@ -194,15 +194,16 @@ test('checkpoint strategy matches the operations that previously took one', () =
 
 // --- Surface counts are unchanged -------------------------------------------
 
-test('the public MCP action surface is still exactly 16 tools in the same order', async () => {
+test('the public MCP action surface preserves the 16 existing tools and adds one durable-task multiplexer', async () => {
   const source = await fs.readFile('src/gateway/mcp.ts', 'utf8');
   const registered = [...source.matchAll(/server\.registerTool\('([a-z_]+)'/g)].map(match => match[1]!);
   assert.deepEqual(registered, [
     'reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_trust_report',
     'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write',
     'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'
+    , 'reach_task'
   ]);
-  assert.equal(registered.length, 16);
+  assert.equal(registered.length, 17);
 });
 
 test('the compatibility surface is still 26 local tools with exactly 4 withheld remotely', () => {

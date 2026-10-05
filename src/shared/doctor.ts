@@ -149,7 +149,7 @@ export async function collectDoctorReport(options: DoctorOptions = {}): Promise<
       note: 'counts and status classes only; no client ids, token values, hashes, owner credentials, or redirect URIs are exposed'
     },
     mcp: {
-      publicActions: 16,
+      publicActions: 17,
       note: 'configuration presence is not runtime proof; DEX-INV-005/009/017/021 remain PROOF STALE on this branch until golden smoke'
     },
     limitations: [
@@ -203,7 +203,7 @@ export function formatDoctorReport(report: Record<string, unknown>): string[] {
     `Policy:     ${policy?.mode ?? 'n/a'} valid=${policy?.valid ?? false} grants=${policy?.grants ?? 0}`,
     `Coordinator: leases=${typeof coordinator.activeLeases === 'number' ? coordinator.activeLeases : 0} queue=${typeof coordinator.queueDepth === 'number' ? coordinator.queueDepth : 0}`,
     `OAuth:      state=${(report.oauth as any)?.state?.valid ? 'valid' : 'unverified'} refresh=${(report.oauth as any)?.state?.activeRefreshTokens ?? 0} token5xx=${(report.oauth as any)?.tokenEndpoint?.token5xx ?? 0}`,
-    `MCP:        16 public actions; live client/golden smoke is a separate proof`,
+    `MCP:        17 public actions (16 existing + durable-task multiplexer); live client/golden smoke is a separate proof`,
     ...((report.limitations as string[]).map(item => `Note:       ${item}`))
   ];
   return lines;

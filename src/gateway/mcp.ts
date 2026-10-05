@@ -3,7 +3,7 @@ import * as z from 'zod/v4';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { NodeRegistry } from './registry.js';
 import type { AuditLog } from '../shared/audit.js';
-import type { RequestActor } from '../shared/protocol.js';
+import { REACH_DURABLE_TASK_CAPABILITY, type DurableTaskRequest, type RequestActor } from '../shared/protocol.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
 import { PLAN_TARGET_OPERATIONS } from '../shared/operations.js';
 import { childSpan, enqueueSpan, traceContextFrom } from '../shared/trace.js';
@@ -36,6 +36,24 @@ function text(value: unknown, traceId?: string) {
   // stages and returned the trace metadata without the fingerprint. `_meta` is out-of-band metadata
   // and does not displace the result, which is why the caller-visible id belongs there.
   return { ...result, _meta: { 'dex-reach/trace-id': traceId } };
+}
+
+function publicTaskStatus(state: unknown): 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled' {
+  if (state === 'INPUT_REQUIRED') return 'input_required';
+  if (state === 'COMPLETED') return 'completed';
+  if (state === 'CANCELLED') return 'cancelled';
+  if (state === 'FAILED' || state === 'AMBIGUOUS' || state === 'RECONCILED') return 'failed';
+  return 'working';
+}
+
+function mapTaskResult(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const record = value as Record<string, unknown>;
+  if (record.task && typeof record.task === 'object') {
+    return { ...record, task: mapTaskResult(record.task) };
+  }
+  if (typeof record.taskId !== 'string' || typeof record.state !== 'string') return value;
+  return { ...record, status: publicTaskStatus(record.state), reachState: record.state };
 }
 
 export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, clientId = 'unknown', actor?: RequestActor): McpServer {
@@ -75,6 +93,16 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
       await audit.append({ at: new Date().toISOString(), source: 'gateway', nodeId, client: clientId, actor, operation, ok: false, durationMs: Date.now() - started, args, error: message });
       throw error;
     }
+  };
+
+  const routedTask = async (nodeId: string, task: DurableTaskRequest) => {
+    if (!registry.supportsDurableTasks(nodeId)) throw new Error(`CAPABILITY_UNSUPPORTED_ON_NODE: node ${nodeId} does not advertise ${REACH_DURABLE_TASK_CAPABILITY}; no durable-task handle was created`);
+    const trace = traceContextFrom();
+    const gatewayTrace = childSpan(trace);
+    const response = await registry.requestWithTrace(nodeId, 'dex.task', {}, actor, gatewayTrace, 60000, task);
+    if (response.traceId && response.traceId !== trace.traceId) throw new Error('node returned a trace id that does not match the gateway trace');
+    await audit.append({ at: new Date().toISOString(), source: 'gateway', nodeId, client: clientId, actor, operation: 'dex.task', ok: true, durationMs: 0, args: { task } });
+    return text(mapTaskResult(response.result), trace.traceId);
   };
 
   server.registerTool('reach_list_nodes', {
@@ -227,6 +255,32 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
     const wasOnline = await registry.revoke(node_id);
     await audit.append({ at: new Date().toISOString(), source: 'gateway', nodeId: node_id, client: clientId, actor, operation: 'dex.revokeNode', ok: true, args: { nodeId: node_id } });
     return text({ revoked: true, wasOnline });
+  });
+
+  server.registerTool('reach_task', {
+    title: 'Control Durable Task',
+    description: 'Start, inspect, read the result of, or cancel one durable task on the explicitly selected node. Start names an exact DEX operation and its native arguments. Nodes without the durable_tasks capability use an explicit synchronous fallback only when mode is auto; mode durable refuses with CAPABILITY_UNSUPPORTED_ON_NODE and never fabricates a handle. Task ownership, exact node identity and current node policy are rechecked on every lifecycle request.',
+    inputSchema: {
+      node_id: z.string().min(1).describe(NODE_ID_HINT),
+      action: z.enum(['start', 'get', 'result', 'cancel']),
+      task_id: z.string().optional().describe('Required for get, result and cancel; use the taskId returned by start.'),
+      operation: z.enum(['dex.fingerprint', 'dex.trustReport', 'dex.repoInfo', 'dex.adbDevices', 'dex.file.read', 'dex.result.read', 'dex.receipts.list', 'dex.file.write', 'dex.checkpoint', 'dex.process.run', 'dc.call', 'dex.plan', 'dex.commitPlan']).optional().describe('Required for start; exact native DEX operation.'),
+      arguments: z.record(z.string(), z.unknown()).default({}).describe('Native arguments for operation when action is start.'),
+      mode: z.enum(['auto', 'durable']).default('auto').describe('auto permits an explicit synchronous legacy-node fallback; durable refuses if the node lacks durable_tasks.')
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
+  }, async ({ node_id, action, task_id, operation, arguments: taskArgs, mode }) => {
+    if (action === 'start') {
+      if (!operation) throw new Error('operation is required for task start');
+      if (!registry.supportsDurableTasks(node_id)) {
+        if (mode === 'durable') throw new Error(`CAPABILITY_UNSUPPORTED_ON_NODE: node ${node_id} does not advertise ${REACH_DURABLE_TASK_CAPABILITY}`);
+        const fallback = await routed(node_id, operation, taskArgs);
+        return text({ mode: 'synchronous-fallback', capability: REACH_DURABLE_TASK_CAPABILITY, supported: false, result: JSON.parse(fallback.content[0]!.text), reason: 'selected node is a legacy v1 node; no durable handle was advertised or created' });
+      }
+      return routedTask(node_id, { action: 'start', operation, args: taskArgs });
+    }
+    if (!task_id) throw new Error(`task_id is required for ${action}`);
+    return routedTask(node_id, { action, taskId: task_id });
   });
 
   return server;

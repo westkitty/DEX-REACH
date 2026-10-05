@@ -1,4 +1,5 @@
 export const REACH_PROTOCOL_VERSION = 1;
+export const REACH_DURABLE_TASK_CAPABILITY = 'durable_tasks' as const;
 
 export type ReachProfile =
   | 'read-only'
@@ -103,6 +104,11 @@ export type NodeHello = {
   tools: ToolDescriptor[];
   allowedRoots: string[];
   agentVersion: string;
+  /** Optional feature metadata. Omitted by legacy v1 nodes, never inferred by the gateway. */
+  capabilities?: {
+    durable_tasks?: boolean;
+    task_event_stream?: boolean;
+  };
   access?: AccessSnapshot;
   scheduler?: SchedulerSnapshot;
 };
@@ -119,7 +125,13 @@ export type GatewayRequest = {
   /** W3C trace context, validated by the node. An invalid value is ignored, never repaired. */
   traceparent?: string;
   tracestate?: string;
+  /** Internal lifecycle control. It is not part of the compatibility-adapter tool surface. */
+  task?: DurableTaskRequest;
 };
+
+export type DurableTaskRequest =
+  | { action: 'start'; operation: string; args: Record<string, unknown>; ttlMs?: number }
+  | { action: 'get' | 'result' | 'cancel'; taskId: string };
 
 export type GatewayResponse = {
   type: 'response';

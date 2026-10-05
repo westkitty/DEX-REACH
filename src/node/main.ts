@@ -82,6 +82,28 @@ async function currentAccess(): Promise<AccessSnapshot> {
   return snapshot(await loadAccessState(config.nodeId));
 }
 
+function actorIdFor(actor: RequestActor | undefined): string {
+  return `actor_${hashValue(actor ? { kind: actor.kind, clientId: actor.clientId } : { kind: 'unknown' }).slice(0, 24)}`;
+}
+
+async function handleTaskControl(request: GatewayRequest): Promise<GatewayResponse> {
+  const control = request.task;
+  if (!control || control.action === 'start') throw new Error('invalid task control');
+  const access = await currentAccess();
+  if (access.effectiveMode === 'off') throw new Error('NODE OWNER has disabled remote AI task controls; request refused locally');
+  const task = await taskStore.read(control.taskId);
+  if (!task) throw new Error(`task not found: ${control.taskId}`);
+  if (task.actorId !== actorIdFor(request.actor)) throw new Error('task ownership mismatch; the original actor must control this task');
+  if (control.action === 'get') return { type: 'response', id: request.id, ok: true, result: task };
+  if (control.action === 'result') {
+    if (task.state !== 'COMPLETED' || !task.resultRef) throw new Error(`task ${task.taskId} has no completed result (${task.state})`);
+    return { type: 'response', id: request.id, ok: true, result: { task, result: await results.readValue(task.resultRef) } };
+  }
+  if (['COMPLETED', 'FAILED', 'CANCELLED', 'RECONCILED'].includes(task.state)) return { type: 'response', id: request.id, ok: true, result: task };
+  const cancelled = await taskStore.transition(task.taskId, 'CANCELLED', 'Task cancellation requested by its owning actor.');
+  return { type: 'response', id: request.id, ok: true, result: cancelled };
+}
+
 async function executeOperation(operation: string, args: Record<string, unknown>, actor: RequestActor | undefined, profile: ReachProfile, context: ProcessExecutionContext = {}): Promise<unknown> {
   // The node's configured profile is a standing constraint, evaluated here rather than through the
   // effective profile an authorization decision produced. READ-ONLY replaces that effective profile,
@@ -299,7 +321,98 @@ function startTaskHeartbeat(taskId: string, leaseId: string): NodeJS.Timeout {
   return timer;
 }
 
-async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> {
+type AdmittedTaskExecution = {
+  request: GatewayRequest;
+  actor: RequestActor | undefined;
+  trace: ReachTraceContext;
+  started: number;
+  policy: unknown;
+  budgetReservationId: string | undefined;
+  task: Awaited<ReturnType<typeof taskStore.create>>;
+  taskSafety: SafetyClass;
+  leaseId: string;
+  heartbeatTimer: NodeJS.Timeout;
+  effectiveProfile: ReachProfile;
+  authorizeSpan: ReachTraceContext;
+};
+
+async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<GatewayResponse> {
+  const { request, actor, trace, started, task, taskSafety, effectiveProfile, authorizeSpan } = state;
+  let leaseId: string | null = state.leaseId;
+  let heartbeatTimer: NodeJS.Timeout | null = state.heartbeatTimer;
+  let receiptCheckpoint: string | null = null;
+  try {
+    let value: unknown;
+    try {
+      const executionContext: ProcessExecutionContext = { taskId: task.taskId, attempt: task.attemptNumber, phase: request.operation };
+      if (request.operation === 'dex.plan') {
+        value = await buildPlan(actor, request.args);
+        receiptCheckpoint = (value as { checkpointId?: string | null }).checkpointId ?? null;
+      } else if (request.operation === 'dex.commitPlan') {
+        value = await commitPlan(actor, request.args, executionContext);
+        receiptCheckpoint = (value as { checkpointId?: string | null }).checkpointId ?? null;
+      } else {
+        value = await executeOperation(request.operation, request.args, actor, effectiveProfile, executionContext);
+      }
+    } finally {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+      const released = await coordinatedRelease(leaseId).catch(() => ({ released: false, reason: 'coordinator release failed' }));
+      if (!released.released) await taskStore.update(task.taskId, { status: `DEGRADED: coordinator lease release was not confirmed (${released.reason || 'unknown reason'}).` }).catch(() => undefined);
+      leaseId = null;
+    }
+    const current = await taskStore.read(task.taskId);
+    if (current?.state === 'CANCELLED') throw new Error(`task ${task.taskId} was cancelled before completion`);
+    const stored = await results.boundWithReference(value, task.taskId);
+    await taskStore.update(task.taskId, { resultRef: stored.metadata.handle, resultHash: stored.metadata.resultHash });
+    await taskStore.transition(task.taskId, 'COMPLETED', 'Task completed with a persisted result reference.');
+    const durationMs = Date.now() - started;
+    const executeSpan = childSpan(authorizeSpan);
+    enqueueSpan({
+      traceId: executeSpan.traceId, spanId: executeSpan.spanId, parentSpanId: executeSpan.parentSpanId,
+      stage: request.operation === 'dex.plan' ? 'plan' : request.operation === 'dex.commitPlan' ? 'commit' : 'execute',
+      at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId,
+      actorKind: actor?.kind, ok: true, durationMs,
+      requestHash: hashValue({ operation: request.operation, args: request.args }),
+      ...(receiptCheckpoint ? { checkpointId: receiptCheckpoint } : {})
+    });
+    await audit.append({ at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor, operation: request.operation, ok: true, durationMs, args: request.args });
+    const receipt = await appendReceipt({ nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: true, result: value, durationMs, policy: state.policy, checkpointId: receiptCheckpoint });
+    const receiptSpan = childSpan(executeSpan);
+    enqueueSpan({ traceId: receiptSpan.traceId, spanId: receiptSpan.spanId, parentSpanId: receiptSpan.parentSpanId, stage: 'receipt', at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId, actorKind: actor?.kind, ok: true, receiptId: receipt.receiptId });
+    return { type: 'response', id: request.id, ok: true, result: value, traceId: trace.traceId };
+  } catch (error) {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+    if (leaseId) await coordinatedRelease(leaseId).catch(() => undefined);
+    const failureClass = classifyFailure({ error, safety: taskSafety });
+    await taskStore.update(task.taskId, { failureClass, status: `Task stopped: ${failureClass}.` }).catch(() => undefined);
+    const current = await taskStore.read(task.taskId).catch(() => null);
+    if (current?.state === 'RUNNING' || current?.state === 'PREPARING') {
+      const next = failureClass === 'AMBIGUOUS_EFFECT' ? 'AMBIGUOUS' : 'FAILED';
+      await taskStore.transition(task.taskId, next, `Task stopped: ${failureClass}.`).catch(() => undefined);
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    const durationMs = Date.now() - started;
+    const failSpan = childSpan(trace);
+    enqueueSpan({ traceId: failSpan.traceId, spanId: failSpan.spanId, parentSpanId: failSpan.parentSpanId, stage: 'execute', at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId, actorKind: actor?.kind, ok: false, durationMs, outcome: 'refused' });
+    await audit.append({ at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor, operation: request.operation, ok: false, durationMs, args: request.args, error: message });
+    const receipt = await appendReceipt({ nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: false, error: message, durationMs, policy: state.policy }).catch(() => null);
+    if (receipt) enqueueSpan({ traceId: failSpan.traceId, spanId: childSpan(failSpan).spanId, parentSpanId: failSpan.spanId, stage: 'receipt', at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId, actorKind: actor?.kind, ok: false, receiptId: receipt.receiptId });
+    return { type: 'response', id: request.id, ok: false, error: message, traceId: trace.traceId };
+  } finally {
+    await releaseBudgetConcurrency(config.nodeId, state.budgetReservationId).catch(() => undefined);
+  }
+}
+
+async function handleRequest(request: GatewayRequest, options: { defer?: boolean } = {}): Promise<GatewayResponse> {
+  if (request.task?.action === 'get' || request.task?.action === 'result' || request.task?.action === 'cancel') {
+    try { return await handleTaskControl(request); }
+    catch (error) { return { type: 'response', id: request.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
+  }
+  if (request.task?.action === 'start') {
+    return handleRequest({ ...request, operation: request.task.operation, args: request.task.args, task: undefined }, { defer: true });
+  }
   const started = Date.now();
   const actor = request.actor;
   let policy: unknown = null;
@@ -309,6 +422,8 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
   let taskSafety: SafetyClass | null = null;
   let leaseId: string | null = null;
   let heartbeatTimer: NodeJS.Timeout | null = null;
+  let executionStarted = false;
+  let reservation: Awaited<ReturnType<typeof reserveOperation>> | undefined;
   // Continue the caller's trace when it supplied a valid W3C context, otherwise start one here.
   // A malformed inbound header never fails the request and never propagates.
   const trace: ReachTraceContext = traceContextFrom({
@@ -325,7 +440,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     // lets a duplicate idempotent request attach to its existing task without charging a new slot.
     if (request.operation === 'dex.repoInfo' && request.args.inspection !== undefined) parseRepoInspection(request.args.inspection);
     const preauthorization = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args, { reserveBudget: false, consumeGrant: false });
-    const actorId = `actor_${hashValue(actor ? { kind: actor.kind, clientId: actor.clientId } : { kind: 'unknown' }).slice(0, 24)}`;
+    const actorId = actorIdFor(actor);
     taskSafety = classifyOperationSafety(request.operation);
     const policyHash = hashValue(preauthorization.policy);
     const idempotency = deriveIdempotencyKey({
@@ -356,7 +471,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
 
     // The final authorization reservation happens immediately before execution and is serialized with
     // owner policy updates. OFF therefore wins over stale remote state instead of being overwritten.
-    const reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args, { expectedPolicyHash: policyHash });
+    reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args, { expectedPolicyHash: policyHash });
     budgetReservationId = reservation.budgetReservationId;
     policy = reservation.policy;
     const authorizeSpan = childSpan(trace);
@@ -378,54 +493,16 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     leaseId = await acquireTaskLease(taskId, task.attemptNumber, request.operation, taskSafety);
     await taskStore.transition(taskId, 'RUNNING', `Task execution started with coordinator lease ${leaseId}.`);
     heartbeatTimer = startTaskHeartbeat(taskId, leaseId);
-    const executionContext: ProcessExecutionContext = { taskId, attempt: task.attemptNumber, phase: request.operation };
-    let value: unknown;
-    try {
-      if (request.operation === 'dex.plan') {
-        value = await buildPlan(actor, request.args);
-        receiptCheckpoint = (value as { checkpointId?: string | null }).checkpointId ?? null;
-      } else if (request.operation === 'dex.commitPlan') {
-        value = await commitPlan(actor, request.args, executionContext);
-        receiptCheckpoint = (value as { checkpointId?: string | null }).checkpointId ?? null;
-      } else {
-        value = await executeOperation(request.operation, request.args, actor, reservation.decision.effectiveProfile, executionContext);
-      }
-    } finally {
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
-      heartbeatTimer = null;
-      const released = await coordinatedRelease(leaseId).catch(() => ({ released: false, reason: 'coordinator release failed' }));
-      if (!released.released) await taskStore.update(taskId, { status: `DEGRADED: coordinator lease release was not confirmed (${released.reason || 'unknown reason'}).` }).catch(() => undefined);
-      leaseId = null;
+    const execution: AdmittedTaskExecution = {
+      request, actor, trace, started, policy, budgetReservationId, task,
+      taskSafety, leaseId, heartbeatTimer, effectiveProfile: reservation.decision.effectiveProfile, authorizeSpan
+    };
+    executionStarted = true;
+    if (options.defer) {
+      void executeAdmittedTask(execution);
+      return { type: 'response', id: request.id, ok: true, result: { taskId: task.taskId, nodeId: config.nodeId, operation: request.operation, state: 'RUNNING', durable: true }, traceId: trace.traceId };
     }
-    const stored = await results.boundWithReference(value, taskId);
-    await taskStore.update(taskId, { resultRef: stored.metadata.handle, resultHash: stored.metadata.resultHash });
-    await taskStore.transition(taskId, 'COMPLETED', 'Task completed with a persisted result reference.');
-    const result = stored.publicValue;
-    const durationMs = Date.now() - started;
-    const executeSpan = childSpan(authorizeSpan);
-    enqueueSpan({
-      traceId: executeSpan.traceId, spanId: executeSpan.spanId, parentSpanId: executeSpan.parentSpanId,
-      stage: request.operation === 'dex.plan' ? 'plan' : request.operation === 'dex.commitPlan' ? 'commit' : 'execute',
-      at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId,
-      actorKind: actor?.kind, ok: true, durationMs,
-      requestHash: hashValue({ operation: request.operation, args: request.args }),
-      ...(receiptCheckpoint ? { checkpointId: receiptCheckpoint } : {})
-    });
-    await audit.append({
-      at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor,
-      operation: request.operation, ok: true, durationMs, args: request.args
-    });
-    const receipt = await appendReceipt({
-      nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: true,
-      result: value, durationMs, policy, checkpointId: receiptCheckpoint
-    });
-    const receiptSpan = childSpan(executeSpan);
-    enqueueSpan({
-      traceId: receiptSpan.traceId, spanId: receiptSpan.spanId, parentSpanId: receiptSpan.parentSpanId,
-      stage: 'receipt', at: new Date().toISOString(), operation: request.operation,
-      nodeId: config.nodeId, actorKind: actor?.kind, ok: true, receiptId: receipt.receiptId
-    });
-    return { type: 'response', id: request.id, ok: true, result, traceId: trace.traceId };
+    return executeAdmittedTask(execution);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -471,7 +548,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     }
     return { type: 'response', id: request.id, ok: false, error: message, traceId: trace.traceId };
   } finally {
-    await releaseBudgetConcurrency(config.nodeId, budgetReservationId).catch(() => undefined);
+    if (!executionStarted) await releaseBudgetConcurrency(config.nodeId, budgetReservationId).catch(() => undefined);
   }
 }
 
@@ -535,6 +612,7 @@ async function connect(): Promise<void> {
       tools: backend.listTools(),
       allowedRoots: config.allowedRoots,
       agentVersion: DEX_REACH_VERSION,
+      capabilities: { durable_tasks: true, task_event_stream: false },
       access: await currentAccess(),
       scheduler: redactWorkStatusForShare(await coordinatedStatus()) as SchedulerSnapshot
     };
