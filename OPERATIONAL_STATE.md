@@ -520,10 +520,17 @@ actor identity and current node policy. Internal states map to public `working`,
 Capability-absent `mode: durable` returns explicit `CAPABILITY_UNSUPPORTED_ON_NODE`; `mode: auto`
 returns a labelled synchronous fallback and never fabricates a handle.
 
-Local focused MCP contract validation passes 11/11, including capability-present routing, exact
-node and lifecycle arguments, public state projection, capability-absent fallback, and durable-only
-refusal. Typecheck, build, invariant manifest, and `git diff --check` pass. Native MCP Tasks are
-not claimed as externally accepted: the installed SDK exposes experimental task APIs, but the
-current ChatGPT connector has no native task proof in this campaign. No connector refresh,
-installation, deployment, or runtime control was performed. Primary checkouts and installed
-state remain untouched. Hosted CI and publication are still required before C5 closes.
+Local focused MCP contract validation passes 11/11, the full regression suite passes 307/307,
+typecheck, build, invariant manifest, production dependency audit with 0 vulnerabilities, the
+26-tool backend probe, and `git diff --check` pass. Clean-build reproduction passes 133/133
+artifacts. The repaired live proof passes 19 proven, 0 failed, and 3 hardware-dependent
+unverified. Implementation commit `9287123` (`9287123af7e72805ea6de687c807fe5e6262cba0`),
+the pending source-contract note `e027b9a429640cf4869bc04984a5ea3d1857d704`, and the proof
+repair `9d9484a2cdf98346e998a274e681e3cf1b0d8abc` are pushed on
+`origin/campaign/c2-c6` with exact local/remote parity. Hosted DEX validation run `37283765985`
+passed validate, runtime-proof, and reproducible-build; CodeQL run `111677993571` and analysis
+run `37283765948` passed. Native MCP Tasks are not claimed as externally accepted: the installed
+SDK exposes experimental task APIs, but the current ChatGPT connector has no native task proof in
+this campaign. No connector refresh, installation, deployment, or runtime control was performed.
+Primary checkouts and installed state remain untouched. C5 is closed at source/CI level; C6 may
+begin.
