@@ -78,6 +78,25 @@ test('activity ledger records process identity without persisting raw command ar
   });
 });
 
+test('activity records preserve durable task correlation while share projection omits local process identity', async () => {
+  await withStateDir(async () => {
+    const taskId = `rtsk_${Date.now().toString(16)}_${'c'.repeat(32)}`;
+    const record = await startProcessActivity({
+      kind: 'native-process', pid: process.pid, operation: 'dex.process.run', command: 'sleep 1',
+      taskId, attempt: 1, phase: 'dex.process.run'
+    });
+    assert.equal(record.taskId, taskId);
+    assert.equal(record.attempt, 1);
+    assert.equal(record.phase, 'dex.process.run');
+    const share = shareSafeActivity([record])[0];
+    assert.equal(share?.taskId, taskId);
+    assert.equal(share?.attempt, 1);
+    assert.equal(share?.phase, 'dex.process.run');
+    assert.equal('pid' in share!, false);
+    await finishProcessActivityByPid(process.pid, 'terminated');
+  });
+});
+
 test('nativeProcess exposes the real child pid while work is running and records completion', async () => {
   await withStateDir(async dir => {
     const cwd = path.join(dir, 'work');

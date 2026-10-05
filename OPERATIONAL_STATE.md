@@ -470,3 +470,29 @@ three jobs, including runtime proof and reproducible build; CodeQL run `37277579
 passed. The unverified physical-install/device proofs remain outside this source phase
 and are not promoted. The protected primary checkout, installed runtime, credentials,
 services, and public connector were not modified. No C4 semantics have been started.
+
+## 19. DEX Control System — Phase C4 Task Identity and Recovery Correlation — 2026-10-05
+
+**C4 IMPLEMENTATION CANDIDATE — LOCAL GATES PASS; PUBLICATION CLOSURE PENDING.** The isolated
+campaign worktree binds durable `taskId` and `attempt` through coordinator leases, queue tickets,
+events, process activity, native execution, compatibility execution, and the credential-free
+workspace worker. Coordinator admission now preserves FIFO queue position, repository/exclusive
+rules, and bounded queue wait with exact owner-visible blocker reasons; duplicate idempotent
+requests are checked before consuming another rolling mutation-budget slot. Task heartbeats and
+coordinator lease heartbeats run together during execution.
+
+Boot reconciliation now compares TaskStore records with coordinator leases/tickets, process
+activity, transport liveness, and verified result bodies. It can finish only from verified durable
+evidence, reattach live evidence, preserve a queue ticket, classify safe pre-execution retry, or
+mark `INPUT_REQUIRED`, `AMBIGUOUS`, or `DEGRADED`. Contradictory evidence is preserved; leases,
+tickets, task records, and processes are never deleted or replayed by reconciliation. Stall
+classification distinguishes quiet-but-alive, waiting-external, CPU-active, transport-lost,
+process-gone, and no-progress. Owner activity output exposes task correlation while its share-safe
+projection continues to omit local process identity and paths.
+
+Local validation passes: typecheck, 42 invariants, 305/305 tests, build, production dependency
+audit with 0 vulnerabilities, 26-tool backend probe, focused coordinator/activity/recovery tests,
+and `git diff --check`. The physical-install, device, second-machine, hosted-CI, publication, and
+runtime acceptance layers remain unverified for this candidate. The protected primary checkouts,
+installed runtime, credentials, services, and public connector were not modified. C5 has not
+started.

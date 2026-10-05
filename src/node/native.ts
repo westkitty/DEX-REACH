@@ -12,7 +12,7 @@ import { workspaceSafeOperationRefusal } from '../shared/profiles.js';
 import { stateDir } from '../shared/local-env.js';
 import { NO_SECRETS, requestedSecretAliases, resolveSecrets, scrubSecretValues, secretInjectionRefusal, type ResolvedSecrets } from '../shared/secrets.js';
 import { describeOperation } from '../shared/operations.js';
-import { finishProcessActivity, startProcessActivity } from '../shared/activity.js';
+import { finishProcessActivity, startProcessActivity, updateProcessActivity, type ProcessExecutionContext } from '../shared/activity.js';
 
 const execFileAsync = promisify(execFile);
 const SENSITIVE_ENV_KEY = /(^DEX_REACH_(?:NODE_TOKEN|OWNER_PASSWORD|ENV_FILE)$|TOKEN|PASSWORD|PASSWD|SECRET|AUTHORIZATION|COOKIE|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)/i;
@@ -139,7 +139,8 @@ export async function nativeProcess(
   profile: ReachProfile,
   timeoutMs: number,
   roots: string[] = [cwd],
-  secrets: ResolvedSecrets = NO_SECRETS
+  secrets: ResolvedSecrets = NO_SECRETS,
+  context: ProcessExecutionContext = {}
 ): Promise<Record<string, unknown>> {
   const blocked = commandGuard(command, profile, roots);
   if (blocked) throw new Error(blocked);
@@ -164,6 +165,7 @@ export async function nativeProcess(
   return new Promise(resolve => {
     const child = execFile(program, childArgs, { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env }, async (error, stdout, stderr) => {
       const activity = await activityPromise.catch(() => null);
+      if (activity && (stdout || stderr)) await updateProcessActivity(activity.id, { updatedAt: new Date().toISOString(), lastStdoutAt: new Date().toISOString() }).catch(() => undefined);
       if (!error) {
         if (activity) await finishProcessActivity(activity.id, 'completed', 0).catch(() => undefined);
         resolve({ exitCode: 0, stdout: scrub(stdout), stderr: scrub(stderr), secretsUsed: secrets.aliases });
@@ -182,7 +184,7 @@ export async function nativeProcess(
       });
     });
     const activityPromise = child.pid
-      ? startProcessActivity({ kind: 'native-process', pid: child.pid, operation: 'dex.process.run', command, cwd })
+      ? startProcessActivity({ kind: 'native-process', pid: child.pid, operation: 'dex.process.run', command, cwd, ...context })
       : Promise.resolve(null);
   });
 }
@@ -197,7 +199,7 @@ export function defaultCwd(roots: string[]): string {
   return roots[0] ?? cwd;
 }
 
-export async function nativeCall(nodeId: string, operation: string, args: Record<string, unknown>, roots: string[], profile: ReachProfile): Promise<unknown> {
+export async function nativeCall(nodeId: string, operation: string, args: Record<string, unknown>, roots: string[], profile: ReachProfile, context: ProcessExecutionContext = {}): Promise<unknown> {
   // Second, independent READ-ONLY check driven by the operation catalog. Policy already refuses
   // these before routing; this repeats the refusal at the executor so a future caller that reaches
   // nativeCall by another path cannot mutate under a read-only profile.
@@ -244,7 +246,7 @@ export async function nativeCall(nodeId: string, operation: string, args: Record
       // the invocation, so a value is in memory for the shortest window the design allows and never
       // while the request is still being authorized, planned, traced or recorded.
       const secrets = await resolveSecrets(nodeId, requestedSecretAliases(args));
-      return nativeProcess(String(args.command || ''), cwd, profile, Number(args.timeoutMs || 15000), roots, secrets);
+      return nativeProcess(String(args.command || ''), cwd, profile, Number(args.timeoutMs || 15000), roots, secrets, context);
     }
     default:
       throw new Error(`unknown native operation: ${operation}`);

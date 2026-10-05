@@ -243,7 +243,7 @@ export async function reserveOperation(
   operation: string,
   profile: ReachProfile,
   args: Record<string, unknown> = {},
-  options: { expectedPolicyHash?: string; dir?: string } = {}
+  options: { expectedPolicyHash?: string; dir?: string; reserveBudget?: boolean; consumeGrant?: boolean } = {}
 ): Promise<OperationReservation> {
   const dir = options.dir ?? stateDir();
   return withFileLock(accessLockFile(nodeId, dir), async () => {
@@ -258,13 +258,13 @@ export async function reserveOperation(
     // Indirect wrappers such as dex.commitPlan inherit cost at the inner target reservation.
     // Charging the wrapper here would either double-count or let a cheaper wrapper classification
     // launder the real target.
-    if (!descriptor?.riskInheritsFromTarget) {
+    if (options.reserveBudget !== false && !descriptor?.riskInheritsFromTarget) {
       const cost = requestedAuthorityCost(operation, args);
       const budget = await reserveBudgetUsage(nodeId, actor?.kind ?? 'other', cost, { dir });
       if (!budget.allowed) throw new Error(budget.reason);
       budgetReservationId = budget.id;
     }
-    if (decision.grantId) {
+    if (options.consumeGrant !== false && decision.grantId) {
       const grant = state.grants.find(candidate => candidate.id === decision.grantId);
       if (!grant || Date.parse(grant.until) <= Date.now() || (grant.maxUses !== null && grant.uses >= grant.maxUses)) {
         if (budgetReservationId) await releaseBudgetConcurrency(nodeId, budgetReservationId, dir);

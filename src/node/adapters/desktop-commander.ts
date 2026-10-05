@@ -15,7 +15,7 @@ import {
   decodeAdapterManifest
 } from '../../shared/adapter-contract.js';
 import { DESKTOP_COMMANDER_MANIFEST_DATA } from './desktop-commander.manifest.js';
-import { finishProcessActivityByPid, startProcessActivity, touchProcessActivityByPid } from '../../shared/activity.js';
+import { finishProcessActivityByPid, startProcessActivity, touchProcessActivityByPid, type ProcessExecutionContext } from '../../shared/activity.js';
 
 /**
  * The Desktop Commander capability adapter.
@@ -164,7 +164,7 @@ export class DesktopCommanderAdapter {
    * setup rather than a remote request, so this method does not itself apply the remote surface
    * filter. Remote requests are refused before they reach here, by the executor's registry check.
    */
-  async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  async callTool(name: string, args: Record<string, unknown>, context: ProcessExecutionContext = {}): Promise<unknown> {
     if (!this.client) throw new Error('Desktop Commander adapter is not started');
     const result = await this.client.callTool({ name, arguments: args });
     if (result.isError) {
@@ -184,11 +184,12 @@ export class DesktopCommanderAdapter {
             kind: 'compat-process',
             pid,
             operation: 'compat.start_process',
-            command: typeof args.command === 'string' ? args.command : 'process'
+            command: typeof args.command === 'string' ? args.command : 'process',
+            ...context
           });
         }
       } else if ((name === 'read_process_output' || name === 'interact_with_process') && typeof args.pid === 'number') {
-        await touchProcessActivityByPid(args.pid);
+        await touchProcessActivityByPid(args.pid, 'stdout');
       } else if ((name === 'force_terminate' || name === 'kill_process') && typeof args.pid === 'number') {
         await finishProcessActivityByPid(args.pid, 'terminated');
       }

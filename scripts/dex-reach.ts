@@ -362,7 +362,9 @@ function activityAge(iso: string): string {
 
 function activityLine(record: ProcessActivity): string {
   const where = record.cwd ? path.basename(record.cwd) || record.cwd : '-';
-  return `  ${record.id.slice(0, 14)}… ${record.kind.padEnd(14)} pid ${String(record.pid).padEnd(6)} ${record.processLabel.padEnd(16)} ${record.state.padEnd(10)} ${where}  ${activityAge(record.startedAt)}`;
+  const task = record.taskId ? ` task ${record.taskId.slice(0, 14)}…/${record.attempt ?? 1}` : '';
+  const phase = record.phase ? ` / ${record.phase}` : '';
+  return `  ${record.id.slice(0, 14)}… ${record.kind.padEnd(14)} pid ${String(record.pid).padEnd(6)} ${record.processLabel.padEnd(16)} ${record.state.padEnd(10)} ${where}  ${activityAge(record.startedAt)}${task}${phase}`;
 }
 
 async function activitySnapshot(includeFinished: boolean): Promise<{
@@ -412,7 +414,8 @@ async function printActivityOnce(): Promise<void> {
   else snapshot.status.leases.forEach(lease => {
     const where = lease.repositoryRoot ? path.basename(lease.repositoryRoot) : 'machine';
     const process = lease.pidIsWorkload ? ` pid ${lease.pid}` : ' workload-pid unbound';
-    console.log(`  ${lease.id.slice(0, 14)}… ${lease.executor.padEnd(11)} ${where} / ${lease.workload} / ${lease.access}${lease.phase ? ` / ${lease.phase}` : ''} /${process}`);
+    const task = lease.taskId ? ` / task ${lease.taskId.slice(0, 14)}…/${lease.attempt ?? 1}` : '';
+    console.log(`  ${lease.id.slice(0, 14)}… ${lease.executor.padEnd(11)} ${where} / ${lease.workload} / ${lease.access}${lease.phase ? ` / ${lease.phase}` : ''}${task} /${process}`);
   });
 
   console.log('\nQueued');

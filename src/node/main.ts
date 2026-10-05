@@ -36,12 +36,14 @@ import { workspaceSafeOperationRefusal, workspaceSafeToolRefusal } from '../shar
 import { AdapterRegistry, remoteAdapterToolRefusal } from '../shared/adapter-contract.js';
 import { childSpan, enqueueSpan, flushTraces, traceContextFrom, type ReachTraceContext } from '../shared/trace.js';
 import { loadTransportKeys } from './transport-keys.js';
-import { coordinatedStatus } from '../coordinator/client.js';
-import { redactWorkStatusForShare } from '../shared/work-coordinator.js';
+import { coordinatedAcquire, coordinatedCancel, coordinatedHeartbeat, coordinatedRelease, coordinatedStatus } from '../coordinator/client.js';
+import { HEARTBEAT_INTERVAL_MS, redactWorkStatusForShare, type WorkRequest } from '../shared/work-coordinator.js';
 import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 import { workspaceWorkerEligible, workspaceWorkerExecute, workspaceWorkerRootsHash } from '../shared/workspace-worker.js';
 import { NodeTaskStore } from './task-store.js';
 import { classifyFailure, classifyOperationSafety, defaultAttemptBudget, deriveIdempotencyKey, type SafetyClass } from '../shared/durable-execution.js';
+import { reconcileBootTasks } from './boot-recovery.js';
+import type { ProcessExecutionContext } from '../shared/activity.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -68,24 +70,19 @@ let activeSocket: WebSocket | null = null;
 let preferBearerCredential = false;
 let lastStatusJson = '';
 
-// Durable task state must be readable before the node advertises execution readiness. C2 only
-// loads and validates the records; worker recovery/reconciliation belongs to C4.
+// Reconcile durable tasks before advertising execution readiness. The recovery pass preserves
+// contradictory coordinator/process evidence and never replays an uncertain side effect.
 const activeTasks = await taskStore.loadActiveTasks();
-for (const task of activeTasks) {
-  const safety = classifyOperationSafety(task.operation);
-  if (task.state === 'RUNNING' && safety !== 'PURE_READ_IDEMPOTENT') {
-    await taskStore.transition(task.taskId, 'AMBIGUOUS', 'Node restarted while a side-effecting task had no terminal evidence.');
-  }
-}
+const bootRecovery = await reconcileBootTasks(taskStore, results);
 await backend.start(config.allowedRoots);
 await sweepExpiredPlans();
-console.log(`DEX//REACH node ${config.nodeId} started with ${backend.listTools().length} compatibility tools and ${activeTasks.length} durable active task(s) (state dir ${stateDir()})`);
+console.log(`DEX//REACH node ${config.nodeId} started with ${backend.listTools().length} compatibility tools, ${activeTasks.length} durable active task(s), ${bootRecovery.length} boot reconciliation decision(s) (state dir ${stateDir()})`);
 
 async function currentAccess(): Promise<AccessSnapshot> {
   return snapshot(await loadAccessState(config.nodeId));
 }
 
-async function executeOperation(operation: string, args: Record<string, unknown>, actor: RequestActor | undefined, profile: ReachProfile): Promise<unknown> {
+async function executeOperation(operation: string, args: Record<string, unknown>, actor: RequestActor | undefined, profile: ReachProfile, context: ProcessExecutionContext = {}): Promise<unknown> {
   // The node's configured profile is a standing constraint, evaluated here rather than through the
   // effective profile an authorization decision produced. READ-ONLY replaces that effective profile,
   // so reading the constraint from it would let READ-ONLY re-admit what workspace-safe refuses. Both
@@ -111,7 +108,7 @@ async function executeOperation(operation: string, args: Record<string, unknown>
     if (toolBlocked) throw new Error(toolBlocked);
     const blocked = toolGuard(tool, toolArgs, profile, config.allowedRoots);
     if (blocked) throw new Error(blocked);
-    return backend.callTool(tool, toolArgs);
+    return backend.callTool(tool, toolArgs, context);
   }
   if (operation === 'dex.result.read') {
     return results.read(String(args.handle || ''), Number(args.offset || 0), Number(args.length || 65536));
@@ -143,10 +140,10 @@ async function executeOperation(operation: string, args: Record<string, unknown>
     });
   }
   if (workspaceWorkerEligible(operation, args)) {
-    const delegated = await workspaceWorkerExecute(config.nodeId, operation, args, workspaceWorkerRootsHash(config.allowedRoots));
+    const delegated = await workspaceWorkerExecute(config.nodeId, operation, args, workspaceWorkerRootsHash(config.allowedRoots), context);
     if (delegated !== null) return delegated;
   }
-  return nativeCall(config.nodeId, operation, args, config.allowedRoots, profile);
+  return nativeCall(config.nodeId, operation, args, config.allowedRoots, profile, context);
 }
 
 function identityCwdForPlan(args: Record<string, unknown>): string {
@@ -211,7 +208,7 @@ async function buildPlan(actor: RequestActor | undefined, args: Record<string, u
   };
 }
 
-async function commitPlan(actor: RequestActor | undefined, args: Record<string, unknown>): Promise<unknown> {
+async function commitPlan(actor: RequestActor | undefined, args: Record<string, unknown>, context: ProcessExecutionContext = {}): Promise<unknown> {
   const plan = await consumePlan(String(args.planId || ''));
   if (plan.nodeId !== config.nodeId) throw new Error('execution plan targets a different node');
   if ((plan.actor?.clientId || null) !== (actor?.clientId || null) || (plan.actor?.kind || null) !== (actor?.kind || null)) {
@@ -238,7 +235,7 @@ async function commitPlan(actor: RequestActor | undefined, args: Record<string, 
     { expectedPolicyHash: plan.policyHash }
   );
   try {
-    const value = await executeOperation(plan.operation, plan.args, actor, reservation.decision.effectiveProfile);
+    const value = await executeOperation(plan.operation, plan.args, actor, reservation.decision.effectiveProfile, context);
     return {
       planId: plan.id,
       operation: plan.operation,
@@ -252,6 +249,53 @@ async function commitPlan(actor: RequestActor | undefined, args: Record<string, 
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function coordinatorRequest(taskId: string, attempt: number, operation: string, safety: SafetyClass): WorkRequest {
+  const access = safety === 'PURE_READ_IDEMPOTENT' ? 'read' : safety === 'DESTRUCTIVE' ? 'exclusive' : 'mutate';
+  const workload = access === 'read' ? 'light' : safety === 'PROCESS_UNKNOWN_EFFECT' ? 'heavy' : 'medium';
+  return {
+    executor: 'other', access, workload,
+    ...(access === 'read' ? {} : { repositoryRoot: config.allowedRoots[0] }),
+    phase: operation, taskId, attempt
+  };
+}
+
+async function acquireTaskLease(taskId: string, attempt: number, operation: string, safety: SafetyClass): Promise<string> {
+  const request = coordinatorRequest(taskId, attempt, operation, safety);
+  const deadline = Date.now() + 60_000;
+  let ticketId: string | undefined;
+  let lastReason = 'coordinator admission is pending';
+  try {
+    for (;;) {
+      const admission = await coordinatedAcquire({ ...request, ...(ticketId ? { ticketId } : {}) });
+      if (admission.status === 'acquired') return admission.lease.id;
+      ticketId = admission.ticket.id;
+      lastReason = admission.reasons.join('; ') || `position ${admission.position}`;
+      await taskStore.update(taskId, { status: `WAITING_FOR_COORDINATOR: ${lastReason}` });
+      if (Date.now() >= deadline) throw new Error(`COORDINATOR_WAIT_TIMEOUT: ${lastReason}`);
+      await sleep(250);
+    }
+  } catch (error) {
+    if (ticketId) await coordinatedCancel(ticketId).catch(() => false);
+    throw error;
+  }
+}
+
+function startTaskHeartbeat(taskId: string, leaseId: string): NodeJS.Timeout {
+  const timer = setInterval(() => {
+    void (async () => {
+      const alive = await coordinatedHeartbeat(leaseId).catch(() => false);
+      if (alive) await taskStore.update(taskId, { status: 'RUNNING: coordinator and task heartbeat current.' }).catch(() => undefined);
+      else await taskStore.update(taskId, { status: 'DEGRADED: coordinator heartbeat was not acknowledged; replay remains forbidden until reconciliation.' }).catch(() => undefined);
+    })();
+  }, HEARTBEAT_INTERVAL_MS);
+  timer.unref?.();
+  return timer;
+}
+
 async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> {
   const started = Date.now();
   const actor = request.actor;
@@ -260,6 +304,8 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
   let budgetReservationId: string | undefined;
   let taskId: string | null = null;
   let taskSafety: SafetyClass | null = null;
+  let leaseId: string | null = null;
+  let heartbeatTimer: NodeJS.Timeout | null = null;
   // Continue the caller's trace when it supplied a valid W3C context, otherwise start one here.
   // A malformed inbound header never fails the request and never propagates.
   const trace: ReachTraceContext = traceContextFrom({
@@ -272,24 +318,16 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     nodeId: config.nodeId, actorKind: actor?.kind
   });
   try {
-    // The final authorization reservation happens immediately before execution and is serialized with
-    // owner policy updates. OFF therefore wins over stale remote state instead of being overwritten.
+    // Preauthorize against current owner state without consuming rolling budget or grant uses. This
+    // lets a duplicate idempotent request attach to its existing task without charging a new slot.
     if (request.operation === 'dex.repoInfo' && request.args.inspection !== undefined) parseRepoInspection(request.args.inspection);
-    const reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args);
-    budgetReservationId = reservation.budgetReservationId;
-    policy = reservation.policy;
-    const authorizeSpan = childSpan(trace);
-    enqueueSpan({
-      traceId: authorizeSpan.traceId, spanId: authorizeSpan.spanId, parentSpanId: authorizeSpan.parentSpanId,
-      stage: 'authorize', at: new Date().toISOString(), operation: request.operation,
-      nodeId: config.nodeId, actorKind: actor?.kind, ok: true,
-      policyHash: hashValue(reservation.policy)
-    });
+    const preauthorization = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args, { reserveBudget: false, consumeGrant: false });
     const actorId = `actor_${hashValue(actor ? { kind: actor.kind, clientId: actor.clientId } : { kind: 'unknown' }).slice(0, 24)}`;
     taskSafety = classifyOperationSafety(request.operation);
+    const policyHash = hashValue(preauthorization.policy);
     const idempotency = deriveIdempotencyKey({
       actorId, nodeId: config.nodeId, operation: request.operation, args: request.args,
-      policyHash: hashValue(reservation.policy),
+      policyHash,
       requestedKey: typeof request.args.idempotencyKey === 'string' ? request.args.idempotencyKey : undefined,
       requestId: request.id
     });
@@ -297,7 +335,7 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       task.actorId === actorId && task.nodeId === config.nodeId && task.operation === request.operation
     );
     if (existing) {
-      if (existing.payloadSha256 !== idempotency.payloadHash || (existing.policyHash && existing.policyHash !== hashValue(reservation.policy))) {
+      if (existing.payloadSha256 !== idempotency.payloadHash || (existing.policyHash && existing.policyHash !== policyHash)) {
         throw new Error('IDEMPOTENCY_KEY_COLLISION_MISMATCH: existing task binding differs; refusing execution');
       }
       if (existing.state === 'COMPLETED' && existing.resultRef) {
@@ -312,6 +350,19 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
       }
       return { type: 'response', id: request.id, ok: false, error: `task ${existing.taskId} is already ${existing.state}; attach to the existing task`, traceId: trace.traceId };
     }
+
+    // The final authorization reservation happens immediately before execution and is serialized with
+    // owner policy updates. OFF therefore wins over stale remote state instead of being overwritten.
+    const reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args, { expectedPolicyHash: policyHash });
+    budgetReservationId = reservation.budgetReservationId;
+    policy = reservation.policy;
+    const authorizeSpan = childSpan(trace);
+    enqueueSpan({
+      traceId: authorizeSpan.traceId, spanId: authorizeSpan.spanId, parentSpanId: authorizeSpan.parentSpanId,
+      stage: 'authorize', at: new Date().toISOString(), operation: request.operation,
+      nodeId: config.nodeId, actorKind: actor?.kind, ok: true,
+      policyHash: hashValue(reservation.policy)
+    });
     const task = await taskStore.create({
       actorId, nodeId: config.nodeId, operation: request.operation,
       idempotencyKey: idempotency.key, payloadSha256: idempotency.payloadHash,
@@ -321,16 +372,27 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     });
     taskId = task.taskId;
     await taskStore.transition(taskId, 'PREPARING', 'Task admitted on the selected node.');
-    await taskStore.transition(taskId, 'RUNNING', 'Task execution started on the selected node.');
+    leaseId = await acquireTaskLease(taskId, task.attemptNumber, request.operation, taskSafety);
+    await taskStore.transition(taskId, 'RUNNING', `Task execution started with coordinator lease ${leaseId}.`);
+    heartbeatTimer = startTaskHeartbeat(taskId, leaseId);
+    const executionContext: ProcessExecutionContext = { taskId, attempt: task.attemptNumber, phase: request.operation };
     let value: unknown;
-    if (request.operation === 'dex.plan') {
-      value = await buildPlan(actor, request.args);
-      receiptCheckpoint = (value as { checkpointId?: string | null }).checkpointId ?? null;
-    } else if (request.operation === 'dex.commitPlan') {
-      value = await commitPlan(actor, request.args);
-      receiptCheckpoint = (value as { checkpointId?: string | null }).checkpointId ?? null;
-    } else {
-      value = await executeOperation(request.operation, request.args, actor, reservation.decision.effectiveProfile);
+    try {
+      if (request.operation === 'dex.plan') {
+        value = await buildPlan(actor, request.args);
+        receiptCheckpoint = (value as { checkpointId?: string | null }).checkpointId ?? null;
+      } else if (request.operation === 'dex.commitPlan') {
+        value = await commitPlan(actor, request.args, executionContext);
+        receiptCheckpoint = (value as { checkpointId?: string | null }).checkpointId ?? null;
+      } else {
+        value = await executeOperation(request.operation, request.args, actor, reservation.decision.effectiveProfile, executionContext);
+      }
+    } finally {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+      const released = await coordinatedRelease(leaseId).catch(() => ({ released: false, reason: 'coordinator release failed' }));
+      if (!released.released) await taskStore.update(taskId, { status: `DEGRADED: coordinator lease release was not confirmed (${released.reason || 'unknown reason'}).` }).catch(() => undefined);
+      leaseId = null;
     }
     const stored = await results.boundWithReference(value, taskId);
     await taskStore.update(taskId, { resultRef: stored.metadata.handle, resultHash: stored.metadata.resultHash });
@@ -363,11 +425,17 @@ async function handleRequest(request: GatewayRequest): Promise<GatewayResponse> 
     return { type: 'response', id: request.id, ok: true, result, traceId: trace.traceId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+    if (leaseId) {
+      await coordinatedRelease(leaseId).catch(() => undefined);
+      leaseId = null;
+    }
     if (taskId && taskSafety) {
       const failureClass = classifyFailure({ error, safety: taskSafety });
       await taskStore.update(taskId, { failureClass, status: `Task stopped: ${failureClass}.` }).catch(() => undefined);
       const current = await taskStore.read(taskId).catch(() => null);
-      if (current?.state === 'RUNNING') {
+      if (current?.state === 'RUNNING' || current?.state === 'PREPARING') {
         const next = failureClass === 'AMBIGUOUS_EFFECT' ? 'AMBIGUOUS' : 'FAILED';
         await taskStore.transition(taskId, next, `Task stopped: ${failureClass}.`).catch(() => undefined);
       }

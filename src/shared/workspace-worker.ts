@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import type { ProcessExecutionContext } from './activity.js';
 
 export const WORKSPACE_WORKER_PROTOCOL_VERSION = 1;
 export const WORKSPACE_WORKER_MAX_FRAME_BYTES = 32 * 1024;
@@ -98,10 +99,11 @@ export async function workspaceWorkerExecute(
   nodeId: string,
   operation: string,
   args: Record<string, unknown>,
-  expectedRootsHash: string
+  expectedRootsHash: string,
+  context: ProcessExecutionContext = {}
 ): Promise<unknown | null> {
   if (!workspaceWorkerEligible(operation, args)) return null;
-  const response = await callWorker({ nodeId, operation, args, expectedRootsHash });
+  const response = await callWorker({ nodeId, operation, args, expectedRootsHash, context });
   if (response === null) return null;
   if (!response.ok) {
     if (response.code === 'config-mismatch') return null;

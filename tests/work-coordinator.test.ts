@@ -261,6 +261,22 @@ test('a dead-PID lease is reclaimable but a live PID is never reclaimed from hea
   });
 });
 
+test('task identity and attempt survive coordinator admission, queueing, heartbeat, and release events', async () => {
+  await withStateDir(async () => {
+    const taskId = `rtsk_${Date.now().toString(16)}_${'b'.repeat(32)}`;
+    const acquired = await acquireWork({ snapshot: HOST, executor: 'codex', access: 'read', workload: 'light', taskId, attempt: 1 });
+    assert.equal(acquired.status, 'acquired');
+    if (acquired.status !== 'acquired') return;
+    assert.equal(acquired.lease.taskId, taskId);
+    assert.equal(acquired.lease.attempt, 1);
+    assert.equal(await heartbeat(acquired.lease.id), true);
+    assert.equal((await releaseWork(acquired.lease.id)).released, true);
+    const events = (await readWorkEvents(0, 100)).events.filter(event => event.id === acquired.lease.id);
+    assert.ok(events.length >= 3);
+    assert.ok(events.every(event => event.taskId === taskId && event.attempt === 1));
+  });
+});
+
 // 8 --------------------------------------------------------------------------
 test('corrupted coordinator state falls back to conservative mode rather than unlimited admission', async () => {
   await withStateDir(async dir => {

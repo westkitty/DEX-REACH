@@ -14,6 +14,28 @@ export const PROCESS_ACTIVITY_STATES = ['running', 'completed', 'failed', 'timed
 export type ProcessActivityState = (typeof PROCESS_ACTIVITY_STATES)[number];
 export type ProcessActivityKind = 'native-process' | 'compat-process';
 
+export type ProcessExecutionContext = {
+  taskId?: string;
+  attempt?: number;
+  phase?: string;
+};
+
+const TASK_ID_PATTERN = /^rtsk_[0-9a-f]{11,13}_[0-9a-f]{16,32}$/;
+
+export function validateProcessExecutionContext(value: unknown): ProcessExecutionContext {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('execution context must be an object');
+  const source = value as Record<string, unknown>;
+  if (source.taskId !== undefined && (typeof source.taskId !== 'string' || !TASK_ID_PATTERN.test(source.taskId))) throw new Error('execution context taskId is invalid');
+  if (source.attempt !== undefined && (!Number.isInteger(source.attempt) || Number(source.attempt) < 1 || Number(source.attempt) > 100)) throw new Error('execution context attempt is invalid');
+  if (source.phase !== undefined && (typeof source.phase !== 'string' || source.phase.length === 0 || source.phase.length > 64 || !/^[A-Za-z0-9._:-]+$/.test(source.phase))) throw new Error('execution context phase is invalid');
+  return {
+    ...(source.taskId ? { taskId: source.taskId } : {}),
+    ...(source.attempt !== undefined ? { attempt: Number(source.attempt) } : {}),
+    ...(source.phase ? { phase: source.phase } : {})
+  };
+}
+
 export type ProcessActivity = {
   id: string;
   kind: ProcessActivityKind;
@@ -21,10 +43,15 @@ export type ProcessActivity = {
   pid: number;
   operation: string;
   processLabel: string;
+  taskId?: string;
+  attempt?: number;
+  phase?: string;
   cwd?: string;
   externalId?: string;
   startedAt: string;
   updatedAt: string;
+  lastStdoutAt?: string;
+  lastResourceAt?: string;
   finishedAt?: string;
   exitCode?: number;
 };
@@ -68,6 +95,12 @@ function validRecord(raw: unknown): ProcessActivity | null {
   if (typeof value.pid !== 'number' || !Number.isInteger(value.pid) || value.pid <= 0) return null;
   if (typeof value.operation !== 'string' || typeof value.processLabel !== 'string') return null;
   if (typeof value.startedAt !== 'string' || typeof value.updatedAt !== 'string') return null;
+  if (value.taskId !== undefined && (typeof value.taskId !== 'string' || !/^rtsk_[0-9a-f]{11,13}_[0-9a-f]{16,32}$/.test(value.taskId))) return null;
+  if (value.attempt !== undefined && (!Number.isInteger(value.attempt) || Number(value.attempt) < 1 || Number(value.attempt) > 100)) return null;
+  if (value.phase !== undefined && (typeof value.phase !== 'string' || value.phase.length > 64)) return null;
+  for (const [timestamp, label] of [[value.lastStdoutAt, 'lastStdoutAt'], [value.lastResourceAt, 'lastResourceAt']] as const) {
+    if (timestamp !== undefined && (typeof timestamp !== 'string' || !Number.isFinite(Date.parse(timestamp)))) return null;
+  }
   return value as ProcessActivity;
 }
 
@@ -105,9 +138,13 @@ export async function startProcessActivity(input: {
   pid: number;
   operation: string;
   command: string;
+  taskId?: string;
+  attempt?: number;
+  phase?: string;
   cwd?: string;
   externalId?: string;
 }): Promise<ProcessActivity> {
+  const context = validateProcessExecutionContext({ taskId: input.taskId, attempt: input.attempt, phase: input.phase });
   const now = new Date().toISOString();
   const record: ProcessActivity = {
     id: `activity-${crypto.randomUUID()}`,
@@ -116,6 +153,9 @@ export async function startProcessActivity(input: {
     pid: input.pid,
     operation: input.operation,
     processLabel: safeProcessLabel(input.command),
+    ...(context.taskId ? { taskId: context.taskId } : {}),
+    ...(context.attempt !== undefined ? { attempt: context.attempt } : {}),
+    ...(context.phase ? { phase: context.phase } : {}),
     ...(input.cwd ? { cwd: input.cwd } : {}),
     ...(input.externalId ? { externalId: input.externalId } : {}),
     startedAt: now,
@@ -127,7 +167,7 @@ export async function startProcessActivity(input: {
 
 export async function updateProcessActivity(
   id: string,
-  patch: Partial<Pick<ProcessActivity, 'state' | 'updatedAt' | 'finishedAt' | 'exitCode' | 'externalId'>>
+  patch: Partial<Pick<ProcessActivity, 'state' | 'updatedAt' | 'finishedAt' | 'exitCode' | 'externalId' | 'lastStdoutAt' | 'lastResourceAt'>>
 ): Promise<boolean> {
   return mutateRecords(records => {
     const record = records.find(entry => entry.id === id);
@@ -139,7 +179,7 @@ export async function updateProcessActivity(
 
 export async function updateProcessActivityByPid(
   pid: number,
-  patch: Partial<Pick<ProcessActivity, 'state' | 'updatedAt' | 'finishedAt' | 'exitCode'>>
+  patch: Partial<Pick<ProcessActivity, 'state' | 'updatedAt' | 'finishedAt' | 'exitCode' | 'lastStdoutAt' | 'lastResourceAt'>>
 ): Promise<boolean> {
   return mutateRecords(records => {
     const record = [...records].reverse().find(entry => entry.pid === pid && entry.state === 'running');
@@ -167,8 +207,13 @@ export async function finishProcessActivityByPid(
   return updateProcessActivityByPid(pid, { state, finishedAt: now, updatedAt: now, ...(exitCode !== undefined ? { exitCode } : {}) });
 }
 
-export async function touchProcessActivityByPid(pid: number): Promise<boolean> {
-  return updateProcessActivityByPid(pid, { updatedAt: new Date().toISOString() });
+export async function touchProcessActivityByPid(pid: number, signal: 'stdout' | 'resource' | 'activity' = 'activity'): Promise<boolean> {
+  const now = new Date().toISOString();
+  return updateProcessActivityByPid(pid, {
+    updatedAt: now,
+    ...(signal === 'stdout' ? { lastStdoutAt: now } : {}),
+    ...(signal === 'resource' ? { lastResourceAt: now } : {})
+  });
 }
 
 async function reconcileRunning(records: ProcessActivity[]): Promise<boolean> {
@@ -238,6 +283,11 @@ export function shareSafeActivity(records: readonly ProcessActivity[]): Array<Re
     processLabel: record.processLabel,
     startedAt: record.startedAt,
     updatedAt: record.updatedAt,
+    ...(record.taskId ? { taskId: record.taskId } : {}),
+    ...(record.attempt !== undefined ? { attempt: record.attempt } : {}),
+    ...(record.phase ? { phase: record.phase } : {}),
+    ...(record.lastStdoutAt ? { lastStdoutAt: record.lastStdoutAt } : {}),
+    ...(record.lastResourceAt ? { lastResourceAt: record.lastResourceAt } : {}),
     ...(record.finishedAt ? { finishedAt: record.finishedAt } : {}),
     ...(record.exitCode !== undefined ? { exitCode: record.exitCode } : {})
   }));

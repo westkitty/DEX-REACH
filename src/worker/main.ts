@@ -3,6 +3,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { nativeCall } from '../node/native.js';
+import { validateProcessExecutionContext } from '../shared/activity.js';
 import {
   WORKSPACE_WORKER_MAX_FRAME_BYTES,
   WORKSPACE_WORKER_OPERATIONS,
@@ -105,6 +106,7 @@ const server = net.createServer(socket => {
         const operation = request.payload.operation;
         const args = request.payload.args;
         const expectedRootsHash = request.payload.expectedRootsHash;
+        const context = request.payload.context;
         if (nodeId !== config.nodeId) {
           response = { ok: false, code: 'config-mismatch', error: 'workspace worker node identity no longer matches the node; use normal node execution' };
           socket.end(JSON.stringify(response) + '\n');
@@ -125,7 +127,8 @@ const server = net.createServer(socket => {
           socket.end(JSON.stringify(response) + '\n');
           return;
         }
-        const value = await nativeCall(config.nodeId, operation as WorkspaceWorkerOperation, args as Record<string, unknown>, config.allowedRoots, 'workspace-safe');
+        const safeContext = validateProcessExecutionContext(context);
+        const value = await nativeCall(config.nodeId, operation as WorkspaceWorkerOperation, args as Record<string, unknown>, config.allowedRoots, 'workspace-safe', safeContext);
         response = { ok: true, value };
       } catch (error) {
         response = { ok: false, code: 'invalid', error: safeError(error) };

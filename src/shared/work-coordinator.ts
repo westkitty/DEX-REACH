@@ -46,6 +46,8 @@ export type WorkEvent = {
   at: string;
   event: WorkEventKind;
   id?: string;
+  taskId?: string;
+  attempt?: number;
   executor?: WorkExecutor;
   access?: AccessClass;
   workload?: WorkloadClass;
@@ -72,6 +74,12 @@ export type ObservationCacheMetrics = {
 };
 
 const MAX_LABEL_LENGTH = 64;
+const TASK_ID_PATTERN = /^rtsk_[0-9a-f]{11,13}_[0-9a-f]{16,32}$/;
+
+function validateTaskBinding(taskId: unknown, attempt: unknown): void {
+  if (taskId !== undefined && (typeof taskId !== 'string' || !TASK_ID_PATTERN.test(taskId))) throw new Error('taskId must be a durable rtsk_ identifier');
+  if (attempt !== undefined && (!Number.isInteger(attempt) || Number(attempt) < 1 || Number(attempt) > 100)) throw new Error('attempt must be an integer between 1 and 100');
+}
 
 /**
  * Coordination metadata only. There is deliberately no capability, grant, root, token, mode or
@@ -80,6 +88,8 @@ const MAX_LABEL_LENGTH = 64;
  */
 export type WorkLease = {
   id: string;
+  taskId?: string;
+  attempt?: number;
   pid: number;
   parentPid?: number;
   pidIsWorkload?: boolean;
@@ -96,6 +106,8 @@ export type WorkLease = {
 
 export type WorkQueueTicket = {
   id: string;
+  taskId?: string;
+  attempt?: number;
   pid: number;
   pidIsWorkload?: boolean;
   executor: WorkExecutor;
@@ -110,10 +122,10 @@ export type WorkQueueTicket = {
 
 /** Exact persisted key sets. Anything else is dropped on write and ignored on read. */
 export const LEASE_FIELDS: readonly (keyof WorkLease)[] = [
-  'id', 'pid', 'parentPid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'branch', 'access', 'workload', 'bundle', 'phase', 'createdAt', 'heartbeatAt'
+  'id', 'taskId', 'attempt', 'pid', 'parentPid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'branch', 'access', 'workload', 'bundle', 'phase', 'createdAt', 'heartbeatAt'
 ];
 export const TICKET_FIELDS: readonly (keyof WorkQueueTicket)[] = [
-  'id', 'pid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'access', 'workload', 'bundle', 'phase', 'enqueuedAt', 'heartbeatAt'
+  'id', 'taskId', 'attempt', 'pid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'access', 'workload', 'bundle', 'phase', 'enqueuedAt', 'heartbeatAt'
 ];
 
 export type WorkRequest = {
@@ -124,6 +136,8 @@ export type WorkRequest = {
   repositoryRoot?: string;
   branch?: string;
   phase?: string;
+  taskId?: string;
+  attempt?: number;
   /** Present when re-attempting an existing queue position. */
   ticketId?: string;
   pid?: number;
@@ -255,6 +269,7 @@ function validLease(raw: unknown): WorkLease | null {
   if (!WORK_ACCESS_CLASSES.includes(record.access as AccessClass)) return null;
   if (!WORK_WORKLOAD_CLASSES.includes(record.workload as WorkloadClass)) return null;
   if (record.bundle !== undefined && !isWorkBundle(record.bundle)) return null;
+  try { validateTaskBinding(record.taskId, record.attempt); } catch { return null; }
   return pick<WorkLease>(record, LEASE_FIELDS);
 }
 
@@ -268,6 +283,7 @@ function validTicket(raw: unknown): WorkQueueTicket | null {
   if (!WORK_ACCESS_CLASSES.includes(record.access as AccessClass)) return null;
   if (!WORK_WORKLOAD_CLASSES.includes(record.workload as WorkloadClass)) return null;
   if (record.bundle !== undefined && !isWorkBundle(record.bundle)) return null;
+  try { validateTaskBinding(record.taskId, record.attempt); } catch { return null; }
   return pick<WorkQueueTicket>(record, TICKET_FIELDS);
 }
 
@@ -369,6 +385,14 @@ function validWorkEvent(raw: unknown): WorkEvent | null {
       event: value.event as WorkEventKind
     };
     const id = safeEventId(value.id); if (id) event.id = id;
+    if (value.taskId !== undefined) {
+      validateTaskBinding(value.taskId, undefined);
+      event.taskId = value.taskId as string;
+    }
+    if (value.attempt !== undefined) {
+      validateTaskBinding(undefined, value.attempt);
+      event.attempt = Number(value.attempt);
+    }
     if (value.executor !== undefined) {
       if (!WORK_EXECUTORS.includes(value.executor as WorkExecutor)) return null;
       event.executor = value.executor as WorkExecutor;
@@ -447,7 +471,7 @@ async function pruneExpired(state: CoordinatorState, now = Date.now()): Promise<
   for (const lease of state.leases) {
     if (leaseIsReclaimable(lease, now)) {
       await removeLeaseFile(lease.id);
-      await recordWorkEvent({ event: 'lease-reclaimed', id: lease.id, executor: lease.executor, reason: 'heartbeat expired and process absent' });
+      await recordWorkEvent({ event: 'lease-reclaimed', id: lease.id, taskId: lease.taskId, attempt: lease.attempt, executor: lease.executor, reason: 'heartbeat expired and process absent' });
     } else {
       leases.push(lease);
     }
@@ -456,7 +480,7 @@ async function pruneExpired(state: CoordinatorState, now = Date.now()): Promise<
   for (const ticket of state.tickets) {
     if (ticketIsStale(ticket, now)) {
       await removeTicketFile(ticket.id);
-      await recordWorkEvent({ event: 'ticket-expired', id: ticket.id, executor: ticket.executor });
+      await recordWorkEvent({ event: 'ticket-expired', id: ticket.id, taskId: ticket.taskId, attempt: ticket.attempt, executor: ticket.executor, phase: ticket.phase ?? null });
     } else {
       tickets.push(ticket);
     }
@@ -584,6 +608,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
   const workload = assertMember(request.workload, WORK_WORKLOAD_CLASSES, 'workload');
   const bundle = normalizeWorkBundle(workload, access, request.bundle);
   const phase = sanitizeLabel(request.phase, 'phase');
+  validateTaskBinding(request.taskId, request.attempt);
   const branch = sanitizeLabel(request.branch, 'branch');
   const repositoryRoot = await canonicalRepositoryRoot(request.repositoryRoot);
   const pid = request.pid ?? process.pid;
@@ -604,6 +629,8 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
     if (decision.admit) {
       const lease: WorkLease = {
         id: `lease-${crypto.randomUUID()}`,
+        ...(request.taskId ? { taskId: request.taskId } : {}),
+        ...(request.attempt !== undefined ? { attempt: request.attempt } : {}),
         pid,
         ...(Number.isInteger(parentPid) && parentPid > 0 ? { parentPid } : {}),
         pidIsWorkload: request.pid !== undefined,
@@ -619,7 +646,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
       };
       await writeLease(lease);
       if (request.ticketId) await removeTicketFile(request.ticketId);
-      await recordWorkEvent({ event: 'lease-acquired', id: lease.id, executor, access, workload, phase: phase ?? null });
+      await recordWorkEvent({ event: 'lease-acquired', id: lease.id, taskId: request.taskId, attempt: request.attempt, executor, access, workload, phase: phase ?? null });
       return { status: 'acquired', lease, capacity: decision.capacity };
     }
 
@@ -628,6 +655,8 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
       ? { ...existing, heartbeatAt: now }
       : {
           id: `ticket-${crypto.randomUUID()}`,
+          ...(request.taskId ? { taskId: request.taskId } : {}),
+          ...(request.attempt !== undefined ? { attempt: request.attempt } : {}),
           pid,
           pidIsWorkload: request.pid !== undefined,
           executor,
@@ -640,7 +669,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
           heartbeatAt: now
         };
     await writeTicket(ticket);
-    if (!existing) await recordWorkEvent({ event: 'ticket-enqueued', id: ticket.id, executor, access, workload });
+    if (!existing) await recordWorkEvent({ event: 'ticket-enqueued', id: ticket.id, taskId: request.taskId, attempt: request.attempt, executor, access, workload });
 
     const queue = existing ? state.tickets : [...state.tickets, ticket];
     const position = queue.findIndex(entry => entry.id === ticket.id) + 1;
@@ -665,7 +694,7 @@ export async function releaseWork(leaseId: string, options: { pid?: number; forc
       return { released: false, reason: `lease ${leaseId} belongs to live pid ${lease.pid}; use --force as the local owner to override` };
     }
     await removeLeaseFile(leaseId);
-    await recordWorkEvent({ event: 'lease-released', id: leaseId, executor: lease.executor, forced: Boolean(options.force) });
+    await recordWorkEvent({ event: 'lease-released', id: leaseId, taskId: lease.taskId, attempt: lease.attempt, executor: lease.executor, phase: lease.phase ?? null, forced: Boolean(options.force) });
     return { released: true };
   }, { timeoutMs: 15_000 });
 }
@@ -681,6 +710,8 @@ export async function heartbeat(id: string): Promise<boolean> {
       await recordWorkEvent({
         event: lease.phase ? 'phase-progress' : 'heartbeat',
         id: lease.id,
+        taskId: lease.taskId,
+        attempt: lease.attempt,
         executor: lease.executor,
         access: lease.access,
         workload: lease.workload,
@@ -694,6 +725,8 @@ export async function heartbeat(id: string): Promise<boolean> {
       await recordWorkEvent({
         event: ticket.phase ? 'phase-progress' : 'heartbeat',
         id: ticket.id,
+        taskId: ticket.taskId,
+        attempt: ticket.attempt,
         executor: ticket.executor,
         access: ticket.access,
         workload: ticket.workload,
@@ -712,7 +745,8 @@ export async function cancelTicket(ticketId: string): Promise<boolean> {
     const state = await readCoordinatorState();
     if (!state.tickets.some(ticket => ticket.id === ticketId)) return false;
     await removeTicketFile(ticketId);
-    await recordWorkEvent({ event: 'ticket-cancelled', id: ticketId });
+    const ticket = state.tickets.find(entry => entry.id === ticketId);
+    await recordWorkEvent({ event: 'ticket-cancelled', id: ticketId, taskId: ticket?.taskId, attempt: ticket?.attempt, executor: ticket?.executor, phase: ticket?.phase ?? null });
     return true;
   }, { timeoutMs: 15_000 });
 }
