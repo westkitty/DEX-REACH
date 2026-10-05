@@ -255,7 +255,10 @@ function sleep(ms: number): Promise<void> {
 
 function coordinatorRequest(taskId: string, attempt: number, operation: string, safety: SafetyClass): WorkRequest {
   const access = safety === 'PURE_READ_IDEMPOTENT' ? 'read' : safety === 'DESTRUCTIVE' ? 'exclusive' : 'mutate';
-  const workload = access === 'read' ? 'light' : safety === 'PROCESS_UNKNOWN_EFFECT' ? 'heavy' : 'medium';
+  // Unknown-effect shell/process work is still bounded and repository-serialized, but must not be
+  // classified as an impossible heavy bundle on small hosts: a 4-CPU runner has a 3-unit budget.
+  // The operation's safety class controls replay/reconciliation; workload controls admission cost.
+  const workload = access === 'read' ? 'light' : 'medium';
   return {
     executor: 'other', access, workload,
     ...(access === 'read' ? {} : { repositoryRoot: config.allowedRoots[0] }),
