@@ -73,7 +73,7 @@ if (flag('--service')) {
 
     // Stage and lint the node definition before touching a running service. A node may be updating
     // itself through DEX//REACH, so inline bootout/kickstart would destroy the request doing the update.
-    await atomicWriteFile(plist, launchdPlist(spec), 0o600);
+    await atomicWriteFile(plist, launchdPlist({ ...spec, processType: 'Standard' }), 0o600);
     await execFileAsync('/usr/bin/plutil', ['-lint', plist]);
     try { await execFileAsync('/bin/launchctl', ['bootout', `${domain}/${helperLabel}`]); } catch {}
     await atomicWriteFile(installStatus, JSON.stringify({

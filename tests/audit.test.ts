@@ -35,7 +35,8 @@ test('service templates quote paths, carry state/PATH, and never embed secrets',
     label: 'com.stinkyweasel.dex-reach.node', entry: 'dist/src/node/main.js',
     envFile: '/home/b/.dex-reach/nodes/b.env', stateDir: '/home/b/.dex-reach',
     pathEnv: '/opt/homebrew/bin:/usr/bin:/bin', root: '/opt/dex root',
-    nodeBin: '/usr/bin/node', logsDir: '/home/b/.dex-reach/logs'
+    nodeBin: '/usr/bin/node', logsDir: '/home/b/.dex-reach/logs',
+    processType: 'Standard' as const
   };
   const plist = launchdPlist(spec);
   assert.match(plist, /DEX_REACH_ENV_FILE<\/key><string>\/home\/b\/\.dex-reach\/nodes\/b\.env/);
@@ -43,6 +44,9 @@ test('service templates quote paths, carry state/PATH, and never embed secrets',
   assert.match(plist, /<key>PATH<\/key><string>\/opt\/homebrew\/bin:/);
   assert.match(plist, /<string>\/opt\/dex root\/dist\/src\/node\/main\.js<\/string>/);
   assert.match(plist, /KeepAlive/);
+  assert.match(plist, /ProcessType<\/key><string>Standard<\/string>/);
+  assert.doesNotMatch(plist, /ProcessType<\/key><string>Background<\/string>/);
+  assert.match(launchdPlist({ ...spec, processType: undefined }), /ProcessType<\/key><string>Background<\/string>/);
   const unit = systemdUnit(spec);
   assert.match(unit, /WorkingDirectory="\/opt\/dex root"/);
   assert.match(unit, /ExecStart="\/usr\/bin\/node" "\/opt\/dex root\/dist\/src\/node\/main\.js"/);

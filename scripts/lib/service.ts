@@ -19,6 +19,7 @@ export type ServiceSpec = {
   root: string;
   nodeBin: string;
   logsDir: string;
+  processType?: 'Background' | 'Standard';
 };
 
 export type IntervalLaunchdSpec = {
@@ -59,7 +60,7 @@ export function launchdPlist(spec: ServiceSpec): string {
 ${envBlock}<key>RunAtLoad</key><true/>
 <key>KeepAlive</key><true/>
 <key>ThrottleInterval</key><integer>5</integer>
-<key>ProcessType</key><string>Background</string>
+<key>ProcessType</key><string>${spec.processType ?? 'Background'}</string>
 <key>StandardOutPath</key><string>${xml(out)}</string>
 <key>StandardErrorPath</key><string>${xml(err)}</string>
 </dict></plist>\n`;

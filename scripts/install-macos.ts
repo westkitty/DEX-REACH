@@ -70,6 +70,8 @@ const services = [
 // install:macos is itself executed through DEX//REACH: cycling the gateway or node inline would
 // sever the request carrying the install before the caller received its result.
 for (const service of services) {
+  // The node launches MCP adapter children; Background scheduling can delay their cold start past
+  // the protocol timeout. Other persistent services remain explicitly background workloads.
   await atomicWriteFile(service.target, launchdPlist({
     label: service.label,
     entry: service.entry,
@@ -78,7 +80,8 @@ for (const service of services) {
     pathEnv,
     root: runtimeRoot,
     nodeBin,
-    logsDir
+    logsDir,
+    processType: service.label === 'com.stinkyweasel.dex-reach.node' ? 'Standard' : 'Background'
   }), 0o600);
   await execFileAsync('/usr/bin/plutil', ['-lint', service.target]);
   console.log(`Staged ${service.label}`);
