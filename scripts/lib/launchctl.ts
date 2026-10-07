@@ -54,7 +54,7 @@ export function launchdIsRunning(output: string): boolean {
 
 export function launchdIsAbsent(error: unknown): boolean {
   const text = errorText(error);
-  return /could not find (?:service|specified service)|service not found|no such service/i.test(text);
+  return /could not find (?:service|specified service)|service not found|no such (?:service|process)/i.test(text);
 }
 
 export function launchdServiceIsEnabled(output: string, label: string): boolean {

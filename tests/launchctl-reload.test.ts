@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   launchctlWithReconciliation,
+  launchdIsAbsent,
   launchdIsRunning,
   launchdServiceIsEnabled,
   type LaunchctlResult,
@@ -115,4 +116,8 @@ test('idempotent legacy remove reconciles an ordinary error against launchd stat
   });
   assert.equal(result, 'reconciled');
   assert.deepEqual(calls.map(args => args[0]), ['remove', 'print']);
+});
+
+test('launchd reports a missing prior helper as an absent process', () => {
+  assert.equal(launchdIsAbsent(Object.assign(new Error('Boot-out failed: 3: No such process'), { code: 3 })), true);
 });
