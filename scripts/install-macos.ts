@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { stateDir } from '../src/shared/local-env.js';
 import { readEnvFile } from './lib/node-files.js';
 import { atomicWriteFile } from '../src/shared/state-io.js';
+import { errorText, failureOutcome, launchctlWithReconciliation, launchdIsAbsent, launchdIsRunning } from './lib/launchctl.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
 import { launchdIntervalPlist, launchdOneShotPlist, launchdPlist, servicePath } from './lib/service.js';
 import { buildRuntimeRelease, runtimeReleaseId } from './lib/runtime-release.js';
@@ -108,15 +109,20 @@ console.log(`Staged ${canaryLabel}`);
 // Clean up the experimental submitted-job label used by early 0.3.1 development. A submitted job
 // can be respawned by launchd after a successful exit. Production installation instead uses one
 // fixed RunAtLoad helper with no KeepAlive; each install unloads the prior inactive helper first.
-try {
-  await execFileAsync('/bin/launchctl', ['remove', 'com.stinkyweasel.dex-reach.install-reloader']);
-} catch {}
+const legacyHelperLabel = 'com.stinkyweasel.dex-reach.install-reloader';
+await launchctlWithReconciliation({
+  args: ['remove', legacyHelperLabel], reconcileArgs: ['print', `${domain}/${legacyHelperLabel}`],
+  reconciled: () => false, reconciledError: launchdIsAbsent,
+  expectation: 'legacy helper absent after remove timeout'
+}).catch(error => { if (!launchdIsAbsent(error)) throw error; });
 
 const helperLabel = 'com.stinkyweasel.dex-reach.install-reloader-once';
 const helperTarget = path.join(agentsDir, `${helperLabel}.plist`);
-try {
-  await execFileAsync('/bin/launchctl', ['bootout', `${domain}/${helperLabel}`]);
-} catch {}
+await launchctlWithReconciliation({
+  args: ['bootout', `${domain}/${helperLabel}`], reconcileArgs: ['print', `${domain}/${helperLabel}`],
+  reconciled: () => false, reconciledError: launchdIsAbsent,
+  expectation: 'prior one-shot helper absent after bootout timeout'
+}).catch(error => { if (!launchdIsAbsent(error)) throw error; });
 const helperArgs = [
   nodeBin,
   helperEntry,
@@ -137,17 +143,31 @@ await atomicWriteFile(helperTarget, launchdOneShotPlist({
 }), 0o600);
 await execFileAsync('/usr/bin/plutil', ['-lint', helperTarget]);
 
+const scheduledAt = new Date().toISOString();
 await atomicWriteFile(installStatus, JSON.stringify({
   version: DEX_REACH_VERSION,
   state: 'scheduled',
-  scheduledAt: new Date().toISOString(),
+  scheduledAt,
   domain,
   helperLabel,
   runtimeRoot,
   services: [...services.map(service => ({ label: service.label, target: service.target })), { label: canaryLabel, target: canaryTarget }]
 }, null, 2) + '\n');
 
-await execFileAsync('/bin/launchctl', ['bootstrap', domain, helperTarget]);
+try {
+  await launchctlWithReconciliation({
+    args: ['bootstrap', domain, helperTarget], reconcileArgs: ['print', `${domain}/${helperLabel}`],
+    reconciled: state => launchdIsRunning(state.stdout),
+    expectation: 'one-shot helper running after bootstrap timeout'
+  });
+} catch (error) {
+  await atomicWriteFile(installStatus, JSON.stringify({
+    version: DEX_REACH_VERSION, state: 'failed', outcome: failureOutcome(error), scheduledAt, failedAt: new Date().toISOString(),
+    domain, helperLabel, runtimeRoot, error: errorText(error),
+    services: [...services.map(service => ({ label: service.label, target: service.target })), { label: canaryLabel, target: canaryTarget }]
+  }, null, 2) + '\n');
+  throw error;
+}
 
 console.log(`DEX//REACH ${DEX_REACH_VERSION} launchd definitions staged and validated.`);
 console.log(`DEX service reload delegated to one-shot helper ${helperLabel}.`);

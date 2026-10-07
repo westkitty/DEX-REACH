@@ -18,6 +18,7 @@ import { isAccessMode, saveAccessState, loadAccessState, defaultAccessState } fr
 import { arg, cleanNodeId, flag, nodeEnvFile, readEnvFile, writeEnvFile } from './lib/node-files.js';
 import { launchAgentsDir, launchdOneShotPlist, launchdPlist, servicePath, systemdUnit, systemdUserDir } from './lib/service.js';
 import { atomicWriteFile } from '../src/shared/state-io.js';
+import { errorText, failureOutcome, launchctlWithReconciliation, launchdIsAbsent, launchdIsRunning } from './lib/launchctl.js';
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -75,9 +76,14 @@ if (flag('--service')) {
     // itself through DEX//REACH, so inline bootout/kickstart would destroy the request doing the update.
     await atomicWriteFile(plist, launchdPlist({ ...spec, processType: 'Standard' }), 0o600);
     await execFileAsync('/usr/bin/plutil', ['-lint', plist]);
-    try { await execFileAsync('/bin/launchctl', ['bootout', `${domain}/${helperLabel}`]); } catch {}
+    await launchctlWithReconciliation({
+      args: ['bootout', `${domain}/${helperLabel}`], reconcileArgs: ['print', `${domain}/${helperLabel}`],
+      reconciled: () => false, reconciledError: launchdIsAbsent,
+      expectation: 'prior node helper absent after bootout timeout'
+    }).catch(error => { if (!launchdIsAbsent(error)) throw error; });
+    const scheduledAt = new Date().toISOString();
     await atomicWriteFile(installStatus, JSON.stringify({
-      state: 'scheduled', scheduledAt: new Date().toISOString(), domain,
+      state: 'scheduled', scheduledAt, domain,
       services: [{ label: spec.label, target: plist }]
     }, null, 2) + '\n', 0o600);
     await atomicWriteFile(helperTarget, launchdOneShotPlist({
@@ -87,7 +93,19 @@ if (flag('--service')) {
       logsDir
     }), 0o600);
     await execFileAsync('/usr/bin/plutil', ['-lint', helperTarget]);
-    await execFileAsync('/bin/launchctl', ['bootstrap', domain, helperTarget]);
+    try {
+      await launchctlWithReconciliation({
+        args: ['bootstrap', domain, helperTarget], reconcileArgs: ['print', `${domain}/${helperLabel}`],
+        reconciled: state => launchdIsRunning(state.stdout),
+        expectation: 'node one-shot helper running after bootstrap timeout'
+      });
+    } catch (error) {
+      await atomicWriteFile(installStatus, JSON.stringify({
+        state: 'failed', outcome: failureOutcome(error), scheduledAt, domain, failedAt: new Date().toISOString(), helperLabel, error: errorText(error),
+        services: [{ label: spec.label, target: plist }]
+      }, null, 2) + '\n', 0o600);
+      throw error;
+    }
     console.log(`Staged launchd service ${spec.label}; one-shot reload scheduled. Status: ${installStatus}`);
   } else if (process.platform === 'linux') {
     const unit = path.join(systemdUserDir(), 'dex-reach-node.service');

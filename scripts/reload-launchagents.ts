@@ -1,10 +1,8 @@
 import fs from 'node:fs/promises';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { atomicWriteFile } from '../src/shared/state-io.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
-
-const execFileAsync = promisify(execFile);
+import { errorText, failureOutcome, LAUNCHCTL_QUERY_TIMEOUT_MS, launchdIsRunning, runLaunchctl } from './lib/launchctl.js';
+import { reloadLaunchdService, type ReloadResult } from './lib/service-reloader.js';
 
 type Service = { label: string; target: string };
 
@@ -34,11 +32,6 @@ function serviceArgs(): Service[] {
   return out;
 }
 
-function errorText(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
 const domain = requiredArg('--domain');
 const statusFile = requiredArg('--status');
 const cleanupPlist = optionalArg('--cleanup-plist');
@@ -61,24 +54,10 @@ await atomicWriteFile(statusFile, JSON.stringify({
 
 await new Promise(resolve => setTimeout(resolve, delayMs));
 
-const results: Array<{ label: string; bootout: 'ok' | 'not-loaded'; bootstrap?: 'ok'; kickstart?: 'ok'; verified?: 'running' | 'exit-0' }> = [];
-
-async function reloadService(service: Service): Promise<void> {
-    let bootout: 'ok' | 'not-loaded' = 'ok';
-    try {
-      await execFileAsync('/bin/launchctl', ['bootout', domain, service.target]);
-    } catch {
-      bootout = 'not-loaded';
-    }
-
-    await execFileAsync('/bin/launchctl', ['enable', `${domain}/${service.label}`]);
-    await execFileAsync('/bin/launchctl', ['bootstrap', domain, service.target]);
-    await execFileAsync('/bin/launchctl', ['kickstart', `${domain}/${service.label}`]);
-    results.push({ label: service.label, bootout, bootstrap: 'ok', kickstart: 'ok' });
-}
+const results: ReloadResult[] = [];
 
 async function launchdPrint(label: string): Promise<string> {
-  const { stdout } = await execFileAsync('/bin/launchctl', ['print', `${domain}/${label}`]);
+  const { stdout } = await runLaunchctl(['print', `${domain}/${label}`], LAUNCHCTL_QUERY_TIMEOUT_MS);
   return stdout;
 }
 
@@ -86,7 +65,7 @@ async function verifyPersistent(service: Service): Promise<void> {
   let last = '';
   for (let attempt = 0; attempt < 20; attempt += 1) {
     last = await launchdPrint(service.label);
-    if (/\bstate = running\b/.test(last) && /\bpid = \d+\b/.test(last)) {
+    if (launchdIsRunning(last)) {
       const result = results.find(item => item.label === service.label);
       if (result) result.verified = 'running';
       return;
@@ -136,7 +115,12 @@ const persistent = services.filter(service => !service.label.endsWith('.oauth-ca
 
 try {
   for (const service of persistent) {
-    await reloadService(service);
+    try { results.push(await reloadLaunchdService(service, domain)); }
+    catch (error) {
+      const failed = (error as Error & { reloadResult?: ReloadResult }).reloadResult;
+      if (failed) results.push(failed);
+      throw error;
+    }
     if (service.label.endsWith('.gateway')) await new Promise(resolve => setTimeout(resolve, 500));
   }
 
@@ -144,7 +128,12 @@ try {
   if (healthUrl) await verifyHealth(healthUrl);
 
   for (const service of canaries) {
-    await reloadService(service);
+    try { results.push(await reloadLaunchdService(service, domain)); }
+    catch (error) {
+      const failed = (error as Error & { reloadResult?: ReloadResult }).reloadResult;
+      if (failed) results.push(failed);
+      throw error;
+    }
     await verifyCanary(service);
   }
 
@@ -164,6 +153,7 @@ try {
     failedAt: new Date().toISOString(),
     domain,
     results,
+    outcome: failureOutcome(error),
     error: errorText(error)
   }, null, 2) + '\n');
   process.exitCode = 1;

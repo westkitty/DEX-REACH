@@ -132,33 +132,57 @@ async function prepareSocket(): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
-  await prepareSocket();
-  const server = net.createServer(socket => {
-    socket.setEncoding('utf8');
-    let input = '';
-    let handled = false;
-    socket.on('data', chunk => {
-      if (handled) return;
-      input += chunk;
-      const newline = input.indexOf('\n');
-      if (Buffer.byteLength(input) > MAX_FRAME_BYTES || newline < 0) {
-        if (Buffer.byteLength(input) > MAX_FRAME_BYTES) socket.destroy();
+export function handleCoordinatorSocket(socket: net.Socket, executeRequest = execute): void {
+  socket.setEncoding('utf8');
+  let input = '';
+  let handled = false;
+  let disconnected = false;
+  const isPeerDisconnect = (error: unknown) => ['EPIPE', 'ECONNRESET'].includes((error as NodeJS.ErrnoException)?.code || '');
+  // A peer may close while an asynchronous request is still running. Socket errors belong to
+  // this connection; an EPIPE/ECONNRESET must not become an unhandled daemon-level error.
+  socket.on('error', error => {
+    disconnected = true;
+    if (!isPeerDisconnect(error)) console.error(`coordinator client socket error: ${safeError(error)}`);
+  });
+  socket.once('close', () => { disconnected = true; });
+  socket.on('data', chunk => {
+    if (handled) return;
+    input += chunk;
+    const newline = input.indexOf('\n');
+    if (Buffer.byteLength(input) > MAX_FRAME_BYTES || newline < 0) {
+      if (Buffer.byteLength(input) > MAX_FRAME_BYTES) socket.destroy();
+      return;
+    }
+    if (input.slice(newline + 1).trim()) { socket.destroy(); return; }
+    handled = true;
+    void (async () => {
+      let request: Request;
+      try { request = safeRequest(JSON.parse(input.slice(0, newline))); }
+      catch (error) {
+        await recordWorkEvent({ event: 'request-rejected', reason: 'invalid-request' }).catch(() => undefined);
+        await writeResponse({ ok: false, error: safeError(error) });
         return;
       }
-      if (input.slice(newline + 1).trim()) { socket.destroy(); return; }
-      handled = true;
-      void (async () => {
-        let response: Response;
-        try { response = { ok: true, value: await execute(safeRequest(JSON.parse(input.slice(0, newline)))) }; }
-        catch (error) {
-          await recordWorkEvent({ event: 'request-rejected', reason: 'invalid-request' }).catch(() => undefined);
-          response = { ok: false, error: safeError(error) };
-        }
-        socket.end(JSON.stringify(response) + '\n');
-      })();
-    });
+      let response: Response;
+      try { response = { ok: true, value: await executeRequest(request) }; }
+      catch (error) {
+        console.error(`coordinator request failed: ${safeError(error)}`);
+        response = { ok: false, error: safeError(error) };
+      }
+      await writeResponse(response);
+    })();
+
+    async function writeResponse(response: Response): Promise<void> {
+      if (disconnected || socket.destroyed || !socket.writable || socket.writableEnded) return;
+      try { socket.end(JSON.stringify(response) + '\n'); }
+      catch (error) { if (!isPeerDisconnect(error)) console.error(`coordinator client response write failed: ${safeError(error)}`); }
+    }
   });
+}
+
+export async function startCoordinatorServer(executeRequest = execute): Promise<net.Server> {
+  await prepareSocket();
+  const server = net.createServer(socket => handleCoordinatorSocket(socket, executeRequest));
   // The socket lives beneath os.tmpdir() because a Unix socket path has a ~104-character platform
   // limit that the durable state path can exceed. `readableAll`/`writableAll` govern Windows named
   // pipes and do nothing for a Unix socket, so `listen` would otherwise create it with the process
@@ -167,12 +191,18 @@ async function main(): Promise<void> {
   // chmod below in which another local account could connect. Binding under a 0177 umask closes it;
   // the chmod stays as the assertion that the final mode is what we intend.
   const umask = process.umask(0o177);
+  server.on('error', error => console.error(`coordinator server error: ${safeError(error)}`));
   try {
     await new Promise<void>((resolve, reject) => server.once('error', reject).listen({ path: coordinatorSocketPath(), readableAll: false, writableAll: false }, resolve));
   } finally {
     process.umask(umask);
   }
   await fs.chmod(coordinatorSocketPath(), 0o600);
+  return server;
+}
+
+async function main(): Promise<void> {
+  const server = await startCoordinatorServer();
   console.log(`DEX//REACH coordinator daemon listening for ${os.userInfo().username}`);
   const stop = () => server.close(() => void fs.rm(coordinatorSocketPath(), { force: true }).finally(() => process.exit(0)));
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
