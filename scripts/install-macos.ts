@@ -113,6 +113,7 @@ const legacyHelperLabel = 'com.stinkyweasel.dex-reach.install-reloader';
 await launchctlWithReconciliation({
   args: ['remove', legacyHelperLabel], reconcileArgs: ['print', `${domain}/${legacyHelperLabel}`],
   reconciled: () => false, reconciledError: launchdIsAbsent,
+  reconcileFailures: true,
   expectation: 'legacy helper absent after remove timeout'
 }).catch(error => { if (!launchdIsAbsent(error)) throw error; });
 

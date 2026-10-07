@@ -23,6 +23,7 @@ export async function launchctlWithReconciliation(options: {
   reconcileArgs: string[];
   reconciled: (result: LaunchctlResult) => boolean;
   reconciledError?: (error: unknown) => boolean;
+  reconcileFailures?: boolean;
   expectation: string;
   runner?: LaunchctlRunner;
   timeoutMs?: number;
@@ -33,15 +34,17 @@ export async function launchctlWithReconciliation(options: {
     await runner(options.args, timeoutMs);
     return 'command-succeeded';
   } catch (error) {
-    if (!isLaunchctlTimeout(error)) throw error;
+    if (!isLaunchctlTimeout(error) && !options.reconcileFailures) throw error;
     let observed: LaunchctlResult;
     try { observed = await runner(options.reconcileArgs, timeoutMs); }
     catch (reconcileError) {
       if (options.reconciledError?.(reconcileError)) return 'reconciled';
-      throw new Error(`${options.args[0]} timed out; outcome ambiguous because reconciliation failed: ${errorText(reconcileError)}`);
+      const reason = isLaunchctlTimeout(error) ? 'timed out' : `failed (${errorText(error)})`;
+      throw new Error(`${options.args[0]} ${reason}; outcome ambiguous because reconciliation failed: ${errorText(reconcileError)}`);
     }
     if (options.reconciled(observed)) return 'reconciled';
-    throw new Error(`${options.args[0]} timed out; expected ${options.expectation} was not proven by bounded launchctl reconciliation: ${bounded(observed.stdout || observed.stderr)}`);
+    const reason = isLaunchctlTimeout(error) ? 'timed out' : `failed (${errorText(error)})`;
+    throw new Error(`${options.args[0]} ${reason}; expected ${options.expectation} was not proven by bounded launchctl reconciliation: ${bounded(observed.stdout || observed.stderr)}`);
   }
 }
 

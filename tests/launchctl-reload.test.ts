@@ -97,3 +97,22 @@ test('enable timeout reconciles only when print-disabled confirms enabled', asyn
   }), 'reconciled');
   assert.equal(calls, 2);
 });
+
+test('idempotent legacy remove reconciles an ordinary error against launchd state', async () => {
+  const calls: string[][] = [];
+  const runner: LaunchctlRunner = async args => {
+    calls.push(args);
+    if (args[0] === 'remove') throw Object.assign(new Error('launchctl exit 3'), { code: 3 });
+    throw Object.assign(new Error('launchctl exit 113'), {
+      stderr: 'Could not find service "com.example.legacy" in domain'
+    });
+  };
+  const result = await launchctlWithReconciliation({
+    args: ['remove', 'com.example.legacy'], reconcileArgs: ['print', 'gui/501/com.example.legacy'],
+    reconciled: () => false,
+    reconciledError: error => /could not find service/i.test(String((error as Error & { stderr?: string }).stderr)),
+    reconcileFailures: true, expectation: 'legacy helper absent', runner
+  });
+  assert.equal(result, 'reconciled');
+  assert.deepEqual(calls.map(args => args[0]), ['remove', 'print']);
+});
