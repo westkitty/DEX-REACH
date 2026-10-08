@@ -7,6 +7,7 @@ import { atomicWriteFile } from '../src/shared/state-io.js';
 import { loadOwnerSecrets, stateDir } from '../src/shared/local-env.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
 import { waitForOnlineNode } from './lib/wait-for-online-node.js';
+import { retryReadOnlyCheck } from './lib/retry-read-only-check.js';
 
 loadOwnerSecrets();
 
@@ -148,6 +149,7 @@ async function revokeCanaryAccessToken(clientId: string, accessToken: string): P
 const provider = new CanaryOAuthProvider();
 await provider.initialize();
 const client = new Client({ name: 'dex-reach-oauth-canary', version: DEX_REACH_VERSION }, { capabilities: {} });
+let targetNodeOnline = false;
 
 async function connect(): Promise<void> {
   const transport = new StreamableHTTPClientTransport(resource, { authProvider: provider });
@@ -168,9 +170,12 @@ try {
     if (nodesResult.isError) throw new Error('reach_list_nodes_failed');
     return JSON.parse(textContent(nodesResult)) as Array<{ nodeId: string; online: boolean }>;
   });
+  targetNodeOnline = true;
 
-  const fingerprint = await client.callTool({ name: 'reach_fingerprint', arguments: { node_id: nodeId } });
-  if (fingerprint.isError) throw new Error('reach_fingerprint_failed');
+  await retryReadOnlyCheck(async () => {
+    const fingerprint = await client.callTool({ name: 'reach_fingerprint', arguments: { node_id: nodeId } });
+    return fingerprint.isError ? undefined : fingerprint;
+  }, { failureMessage: 'reach_fingerprint_failed' });
 
   // Active refresh proof: revoke only this disposable canary access token, leave its refresh
   // credential intact, then make another real MCP call. The MCP client transport must receive
@@ -222,7 +227,7 @@ try {
     checkedAt: new Date().toISOString(),
     ok: false,
     publicBaseUrl: base.origin,
-    nodeOnline: false,
+    nodeOnline: targetNodeOnline,
     refreshCredentialPresent: Boolean(provider.tokens()?.refresh_token),
     refreshRecoveryVerified: false,
     postRefreshMcpVerified: false,

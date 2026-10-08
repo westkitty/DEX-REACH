@@ -88,9 +88,9 @@ async function verifyHealth(url: string): Promise<void> {
 
 async function verifyCanary(service: Service): Promise<void> {
   let last = '';
-  // The OAuth canary waits up to 90 seconds for the exact node to re-register after launchd.
-  // Allow that bounded recovery window plus a small scheduling margin before declaring failure.
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  // The canary waits for the exact node for up to three minutes, then performs bounded
+  // read-only MCP checks and OAuth refresh proof. Keep the helper alive for that full window.
+  for (let attempt = 0; attempt < 500; attempt += 1) {
     last = await launchdPrint(service.label);
     if (/\blast exit code = 0\b/.test(last) && !/\bstate = running\b/.test(last)) {
       const result = results.find(item => item.label === service.label);
