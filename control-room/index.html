@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111112">
+  <title>STINKY WEASEL CONTROL · DEX//REACH</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to control room</a>
+  <header class="topbar">
+    <a class="brand" href="#overview" aria-label="Stinky Weasel Control overview"><span class="mark" aria-hidden="true">SW</span><span><b>STINKY WEASEL</b><small>PRODUCTIONS / DEX//REACH</small></span></a>
+    <div class="top-status"><span class="live-dot" aria-hidden="true"></span><span id="connection">Checking local backend</span><button id="refresh" class="icon-button" type="button" aria-label="Refresh now">↻</button></div>
+  </header>
+  <div class="layout">
+    <nav class="nav" aria-label="Main navigation">
+      <p class="nav-label">CONTROL</p>
+      <a href="#overview" data-route="overview" class="nav-link active"><span>▦</span> Overview</a>
+      <a href="#tasks" data-route="tasks" class="nav-link"><span>▤</span> Tasks <b id="task-badge" class="badge">—</b></a>
+      <a href="#log" data-route="log" class="nav-link"><span>≋</span> LOG / TRACE</a>
+      <a href="#machine" data-route="machine" class="nav-link"><span>⌘</span> Machine</a>
+      <div class="nav-foot"><span class="nav-rule"></span><small>LOCAL OWNER CONSOLE<br>Loopback only · read view</small></div>
+    </nav>
+    <main id="main" tabindex="-1" class="main">
+      <div id="app" aria-live="polite"><div class="loading">Reading local DEX state…</div></div>
+    </main>
+  </div>
+  <footer><span>DEX//REACH · OWNER AUTHORITY REMAINS LOCAL</span><span id="updated">Last update —</span></footer>
+</body>
+</html>

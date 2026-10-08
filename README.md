@@ -42,6 +42,27 @@ The important design rule is simple:
 
 A node can be locally set to `off`, `read-only`, or `on`; access can be temporary; individual AI clients can be capped or blocked; and a missing or corrupt policy fails closed.
 
+## STINKY WEASEL CONTROL
+
+DEX//REACH includes an independent, read-only local operations console. It runs without ChatGPT,
+Sites, Spaces, or plugin-management pages and reads the existing owner-local task, event, activity,
+trace, node-runtime, access-policy, coordinator, and source-revision services.
+
+From this checkout, run `npm run control:room` and open <http://127.0.0.1:4177>. The server binds
+only to IPv4 loopback, accepts same-origin loopback requests, serves no cross-origin API, and only
+implements `GET`/`HEAD` routes. `DEX_CONTROL_PORT` can select another local port. The browser never
+reads node state files directly. The adapter selects only a local node whose configured ID exactly
+matches this machine's hostname; it does not fall back to another node.
+
+The console shows durable task states and recorded lifecycle events, content-free process activity
+and traces, node/gateway/coordinator health, and separate source/test/commit/push/deploy/install
+observations. Task pages and activity/trace views are bounded. Result contents, local process paths,
+credentials, and unrestricted audit/request payloads are not exposed. The browser surface currently
+has no mutation controls; cancellation, retry, restart, policy, and reconciliation remain in the
+governed owner CLI/backend. Public MCP availability and independent ChatGPT tool exposure are
+reported as unmeasured unless separately verified. CPU and memory pressure are unavailable in this
+view. See `OPERATIONAL_STATE.md` for the current browser and runtime proof boundary.
+
 ---
 
 ## Current Project Status
@@ -128,7 +149,7 @@ A reproducible read-only schedule is discovery and explicit selection, fingerpri
 
 ## What It Can Do
 
-DEX//REACH currently exposes 16 first-class MCP actions:
+DEX//REACH currently exposes 17 first-class MCP actions:
 
 | Action | Purpose |
 | --- | --- |
@@ -148,6 +169,7 @@ DEX//REACH currently exposes 16 first-class MCP actions:
 | `reach_receipts` | Read recent node-signed execution receipts and their tamper-evident hash chain |
 | `reach_result_read` | Continue reading a large bounded result |
 | `reach_revoke_node` | Revoke one node credential and disconnect that node |
+| `reach_task` | Start, inspect, or read one durable task on an explicitly selected node; use only supported lifecycle actions |
 
 The pinned compatibility package currently exposes 26 raw local tools to the node internally. DEX//REACH deliberately advertises only **22** of them to remote clients: safety-configuration mutation, compatibility call-history recovery, vendor feedback, and vendor onboarding/prompt tools are withheld. URL-fetch mode is also blocked, so `reach_call` cannot turn the node into a generic HTTP/SSRF proxy. DEX//REACH owns the gateway, authentication, routing, node policy, audit, native operations, and safety boundaries; `@wonderwhy-er/desktop-commander` remains a pinned local compatibility dependency while the remaining primitives are replaced incrementally.
 

@@ -247,6 +247,20 @@ export async function listProcessActivities(options: {
     .slice(0, limit);
 }
 
+/** Bounded owner read with no stale-process reconciliation or state write. */
+export async function readProcessActivities(options: {
+  includeFinished?: boolean;
+  limit?: number;
+} = {}): Promise<ProcessActivity[]> {
+  const records = await withFileLock(activityLockFile(), readRecordsUnlocked);
+  const includeFinished = options.includeFinished ?? false;
+  const limit = Math.max(1, Math.min(options.limit ?? 50, MAX_ACTIVITY_RECORDS));
+  return records
+    .filter(record => includeFinished || record.state === 'running')
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    .slice(0, limit);
+}
+
 function observation(row: ProcessRow): ProcessObservation {
   return { pid: row.pid, ppid: row.ppid, cpu: row.cpu, mem: row.mem, processLabel: safeProcessLabel(row.command) };
 }

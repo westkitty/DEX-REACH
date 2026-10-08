@@ -8,3 +8,5 @@ dist/
 .DS_Store
 coverage/
 release/
+# Local browser evidence can include private task identifiers.
+output/playwright/

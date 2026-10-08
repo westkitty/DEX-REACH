@@ -8,6 +8,7 @@ import {
   activityFile,
   finishProcessActivityByPid,
   listProcessActivities,
+  readProcessActivities,
   safeProcessLabel,
   shareSafeActivity,
   startProcessActivity
@@ -94,6 +95,17 @@ test('activity records preserve durable task correlation while share projection 
     assert.equal(share?.phase, 'dex.process.run');
     assert.equal('pid' in share!, false);
     await finishProcessActivityByPid(process.pid, 'terminated');
+  });
+});
+
+test('Control Room activity reads do not reconcile or write stale process records', async () => {
+  await withStateDir(async () => {
+    await startProcessActivity({ kind: 'native-process', pid: 99999999, operation: 'dex.process.run', command: 'node stale', taskId: `rtsk_${Date.now().toString(16)}_${'d'.repeat(32)}` });
+    const before = await fs.readFile(activityFile(), 'utf8');
+    const snapshot = await readProcessActivities({ includeFinished: true, limit: 20 });
+    const after = await fs.readFile(activityFile(), 'utf8');
+    assert.equal(snapshot[0]?.state, 'running');
+    assert.equal(after, before);
   });
 });
 

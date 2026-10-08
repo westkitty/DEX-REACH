@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "gateway": "tsx src/gateway/main.ts",
+    "control:room": "tsx scripts/control-room.ts",
     "coordinator": "tsx src/coordinator/main.ts",
     "worker": "tsx src/worker/main.ts",
     "node": "tsx src/node/main.ts",
