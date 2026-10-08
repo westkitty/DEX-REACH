@@ -3,6 +3,7 @@ import { atomicWriteFile } from '../src/shared/state-io.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
 import { errorText, failureOutcome, LAUNCHCTL_QUERY_TIMEOUT_MS, launchdIsRunning, runLaunchctl } from './lib/launchctl.js';
 import { reloadLaunchdService, type ReloadResult } from './lib/service-reloader.js';
+import { waitForGatewayHealth } from './lib/wait-for-gateway-health.js';
 
 type Service = { label: string; target: string };
 
@@ -76,21 +77,13 @@ async function verifyPersistent(service: Service): Promise<void> {
 }
 
 async function verifyHealth(url: string): Promise<void> {
-  let last = '';
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
-      last = await response.text();
-      if (response.ok) {
-        const body = JSON.parse(last) as { onlineNodes?: number };
-        if (Number(body.onlineNodes) >= 1) return;
-      }
-    } catch (error) {
-      last = errorText(error);
-    }
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  throw new Error(`DEX health verification failed: ${last.slice(0, 300)}`);
+  await waitForGatewayHealth(async () => {
+    const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
+    const body = await response.text();
+    if (!response.ok) return { ready: false, detail: `HTTP ${response.status}: ${body}` };
+    const health = JSON.parse(body) as { onlineNodes?: number };
+    return { ready: Number(health.onlineNodes) >= 1, detail: body };
+  });
 }
 
 async function verifyCanary(service: Service): Promise<void> {
