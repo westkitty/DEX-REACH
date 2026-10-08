@@ -142,6 +142,8 @@ export type WorkRequest = {
   ticketId?: string;
   pid?: number;
   parentPid?: number;
+  /** Whether pid identifies the executing workload rather than its coordinator caller. */
+  pidIsWorkload?: boolean;
   /**
    * Host measurement to decide against. Callers normally omit this and the host is measured here;
    * supplying it lets a caller reuse one measurement across a poll loop, and lets tests exercise
@@ -633,7 +635,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
         ...(request.attempt !== undefined ? { attempt: request.attempt } : {}),
         pid,
         ...(Number.isInteger(parentPid) && parentPid > 0 ? { parentPid } : {}),
-        pidIsWorkload: request.pid !== undefined,
+        pidIsWorkload: request.pidIsWorkload ?? request.pid !== undefined,
         executor,
         ...(repositoryRoot ? { repositoryRoot } : {}),
         ...(branch ? { branch } : {}),
@@ -658,7 +660,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
           ...(request.taskId ? { taskId: request.taskId } : {}),
           ...(request.attempt !== undefined ? { attempt: request.attempt } : {}),
           pid,
-          pidIsWorkload: request.pid !== undefined,
+          pidIsWorkload: request.pidIsWorkload ?? request.pid !== undefined,
           executor,
           ...(repositoryRoot ? { repositoryRoot } : {}),
           access,

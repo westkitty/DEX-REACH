@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { coordinatorSocketPath } from '../src/shared/work-coordinator.js';
-import { coordinatedEvents, coordinatedStatus } from '../src/coordinator/client.js';
+import { bindCoordinatorCaller, coordinatedEvents, coordinatedStatus } from '../src/coordinator/client.js';
 
 async function socketCall(socketPath: string, request: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -70,6 +70,17 @@ test('coordinator daemon owns an account-private socket and rejects malformed fr
     if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previous;
     await fs.rm(state, { recursive: true, force: true });
   }
+});
+
+test('routed acquisition binds liveness to the caller without claiming its PID is a workload', () => {
+  const callerPid = 12_345;
+  const bound = bindCoordinatorCaller({ executor: 'chatgpt', access: 'read', workload: 'light' }, callerPid);
+  assert.equal(bound.pid, callerPid);
+  assert.equal(bound.pidIsWorkload, false);
+
+  const workload = bindCoordinatorCaller({ executor: 'chatgpt', access: 'read', workload: 'light', pid: 54_321 }, callerPid);
+  assert.equal(workload.pid, 54_321);
+  assert.equal(workload.pidIsWorkload, true);
 });
 
 test('a coordinator socket owned by another account is refused rather than trusted or bypassed', async () => {

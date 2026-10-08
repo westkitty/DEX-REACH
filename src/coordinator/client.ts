@@ -75,10 +75,20 @@ async function callDaemon(command: Command, payload?: Record<string, unknown>): 
 
 function object<T>(value: unknown): T { return value as T; }
 
+/** Give the coordinator the requester's liveness identity, not the daemon's own PID. */
+export function bindCoordinatorCaller(request: WorkRequest, callerPid = process.pid): WorkRequest {
+  return {
+    ...request,
+    pid: request.pid ?? callerPid,
+    pidIsWorkload: request.pidIsWorkload ?? request.pid !== undefined
+  };
+}
+
 /** Production callers prefer the single-writer daemon. Direct mode is bootstrap/test-only. */
 export async function coordinatedAcquire(request: WorkRequest): Promise<AdmissionResult> {
-  const value = await callDaemon('acquire', { request: request as unknown as Record<string, unknown> });
-  return value === null ? acquireWork(request) : object<AdmissionResult>(value);
+  const bound = bindCoordinatorCaller(request);
+  const value = await callDaemon('acquire', { request: bound as unknown as Record<string, unknown> });
+  return value === null ? acquireWork(bound) : object<AdmissionResult>(value);
 }
 
 export async function coordinatedRelease(id: string, options: { pid?: number; force?: boolean } = {}): Promise<ReleaseResult> {
