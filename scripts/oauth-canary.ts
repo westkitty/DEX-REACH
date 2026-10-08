@@ -6,6 +6,7 @@ import type { OAuthClientInformationFull, OAuthClientMetadata, OAuthTokens } fro
 import { atomicWriteFile } from '../src/shared/state-io.js';
 import { loadOwnerSecrets, stateDir } from '../src/shared/local-env.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
+import { waitForOnlineNode } from './lib/wait-for-online-node.js';
 
 loadOwnerSecrets();
 
@@ -162,11 +163,11 @@ async function connect(): Promise<void> {
 try {
   if (!nodeId) throw new Error('node_id_missing');
   await connect();
-  const nodesResult = await client.callTool({ name: 'reach_list_nodes', arguments: {} });
-  if (nodesResult.isError) throw new Error('reach_list_nodes_failed');
-  const nodes = JSON.parse(textContent(nodesResult)) as Array<{ nodeId: string; online: boolean }>;
-  const node = nodes.find(item => item.nodeId === nodeId);
-  if (!node?.online) throw new Error('target_node_offline');
+  await waitForOnlineNode(nodeId, async () => {
+    const nodesResult = await client.callTool({ name: 'reach_list_nodes', arguments: {} });
+    if (nodesResult.isError) throw new Error('reach_list_nodes_failed');
+    return JSON.parse(textContent(nodesResult)) as Array<{ nodeId: string; online: boolean }>;
+  });
 
   const fingerprint = await client.callTool({ name: 'reach_fingerprint', arguments: { node_id: nodeId } });
   if (fingerprint.isError) throw new Error('reach_fingerprint_failed');

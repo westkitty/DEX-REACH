@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -223,6 +223,9 @@ test('a corrupt capability request log is refused rather than silently emptied',
 });
 
 test('a full nonce cache refuses new proofs instead of forgetting replayable ones', async () => {
+  // This is a replay-window/capacity test, not a throughput test. Keep the five-minute nonce
+  // validity window stable so slow CI or a loaded developer machine cannot expire entries mid-fill.
+  mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-fix-nonce-'));
   try {
     const store = new NodeAuthStore(dir);
@@ -258,6 +261,7 @@ test('a full nonce cache refuses new proofs instead of forgetting replayable one
     assert.equal(replayAfterFull.ok ? '' : replayAfterFull.reason, 'replay');
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
+    mock.timers.reset();
   }
 });
 
@@ -267,6 +271,7 @@ test('a full nonce cache refuses new proofs instead of forgetting replayable one
  * every other node's proofs. A node must only ever exhaust its own share.
  */
 test('one node filling its nonce share does not lock another node out', async () => {
+  mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-fix-nonce-scope-'));
   try {
     const store = new NodeAuthStore(dir);
@@ -296,6 +301,7 @@ test('one node filling its nonce share does not lock another node out', async ()
     assert.equal(quiet.ok, true, 'one node must not be able to deny another node authentication');
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
+    mock.timers.reset();
   }
 });
 
