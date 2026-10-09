@@ -61,6 +61,46 @@ test('coordinator daemon owns an account-private socket and rejects malformed fr
     const malformed = await socketCall(socketPath, '{not-json') as { ok: boolean; error?: string };
     assert.equal(malformed.ok, false);
     assert.match(malformed.error || '', /JSON|request/);
+
+    // Exercise the actual routed path: a short-lived caller acquires through the daemon,
+    // queues behind a conflicting repository lease, then exits. The ticket must retain that
+    // caller PID so stale-ticket recovery can observe its death instead of the daemon PID.
+    const { acquireWork, cancelTicket, readCoordinatorState, releaseWork } = await import('../src/shared/work-coordinator.js');
+    const repositoryRoot = path.join(state, 'repo');
+    await fs.mkdir(repositoryRoot, { recursive: true });
+    const held = await acquireWork({ executor: 'human', access: 'mutate', workload: 'medium', repositoryRoot, snapshot: host() });
+    assert.equal(held.status, 'acquired');
+    if (held.status === 'acquired') {
+      const taskId = `rtsk_${Date.now().toString(16)}_${'a'.repeat(32)}`;
+      const source = `import { coordinatedAcquire } from './src/coordinator/client.ts'; const result = await coordinatedAcquire({ executor: 'chatgpt', access: 'mutate', workload: 'medium', repositoryRoot: ${JSON.stringify(repositoryRoot)}, taskId: ${JSON.stringify(taskId)} }); console.log(JSON.stringify({ pid: process.pid, result }));`;
+      const caller = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', source], {
+        cwd: process.cwd(), env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe']
+      });
+      let callerStdout = '';
+      let callerStderr = '';
+      caller.stdout?.setEncoding('utf8');
+      caller.stderr?.setEncoding('utf8');
+      caller.stdout?.on('data', chunk => { callerStdout += chunk; });
+      caller.stderr?.on('data', chunk => { callerStderr += chunk; });
+      const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+        caller.once('error', reject);
+        caller.once('exit', (code, signal) => resolve({ code, signal }));
+      });
+      try {
+        assert.equal(exit.code, 0, callerStderr);
+        const returned = JSON.parse(callerStdout) as { pid: number; result: { status: string } };
+        assert.equal(returned.result.status, 'queued');
+        const ticket = (await readCoordinatorState()).tickets.find(item => item.taskId === taskId);
+        assert.ok(ticket);
+        assert.equal(ticket?.pid, returned.pid);
+        assert.notEqual(ticket?.pid, child.pid);
+        assert.equal(ticket?.pidIsWorkload, false);
+      } finally {
+        const ticket = (await readCoordinatorState()).tickets.find(item => item.taskId === taskId);
+        if (ticket) await cancelTicket(ticket.id);
+        await releaseWork(held.lease.id, { force: true });
+      }
+    }
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
