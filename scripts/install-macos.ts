@@ -124,7 +124,7 @@ for (const service of [...services, { label: canaryLabel, target: canaryTarget }
   const observed = (await execFileAsync('/bin/launchctl', ['print', `${domain}/${service.label}`])).stdout;
   const activeDefinition = await fs.readFile(service.target, 'utf8');
   const declaredRoot = activeDefinition.match(/<key>WorkingDirectory<\/key><string>([^<]+)<\/string>/)?.[1]
-    ?.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    ?.replace(/&(?:amp|lt|gt);/g, entity => ({ '&amp;': '&', '&lt;': '<', '&gt;': '>' })[entity] ?? entity);
   if (!declaredRoot || !observed.includes(`working directory = ${declaredRoot}`)) {
     throw new Error(`running LaunchAgent does not match its on-disk runtime definition: ${service.label}`);
   }

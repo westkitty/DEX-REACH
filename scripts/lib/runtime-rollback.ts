@@ -90,7 +90,14 @@ export async function runtimeTreeSha256(root: string): Promise<string> {
 }
 
 function decodeXml(value: string): string {
-  return value.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+  const entities: Record<string, string> = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&apos;': "'"
+  };
+  return value.replace(/&(?:amp|lt|gt|quot|apos);/g, entity => entities[entity] ?? entity);
 }
 
 function releaseIdFromPlist(text: string, label: string, expectedRoot?: string): string {
