@@ -8,6 +8,7 @@ import {
   restoreRuntimeRollbackSnapshot,
   runtimeTreeSha256,
   validateRuntimeRollbackSnapshot,
+  verifiedOnlineNodeCount,
   type RuntimeRollbackService
 } from '../scripts/lib/runtime-rollback.js';
 import { reloadLaunchdService } from '../scripts/lib/service-reloader.js';
@@ -24,6 +25,13 @@ const requiredEntries = [
   'dist/scripts/reload-launchagents.js',
   'node_modules/@modelcontextprotocol/client/package.json'
 ];
+
+test('rollback health receipt preserves the verified online-node count', () => {
+  assert.equal(verifiedOnlineNodeCount(true, 2), 2);
+  assert.equal(verifiedOnlineNodeCount(true, 0), null);
+  assert.equal(verifiedOnlineNodeCount(false, 1), null);
+  assert.equal(verifiedOnlineNodeCount(true, 1.5), null);
+});
 
 async function write(file: string, value: string): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });

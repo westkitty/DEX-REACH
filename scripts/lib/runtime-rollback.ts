@@ -48,6 +48,10 @@ function sha256(value: string | Buffer): string {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+export function verifiedOnlineNodeCount(responseOk: boolean, value: unknown): number | null {
+  return responseOk && typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : null;
+}
+
 async function hashFile(file: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');

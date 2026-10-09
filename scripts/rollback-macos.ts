@@ -8,7 +8,7 @@ import { workspaceWorkerConfigFile } from '../src/shared/workspace-worker.js';
 import { errorText, failureOutcome, launchdIsRunning, launchdServiceIsEnabled } from './lib/launchctl.js';
 import { reloadLaunchdService } from './lib/service-reloader.js';
 import { readEnvFile } from './lib/node-files.js';
-import { restoreRuntimeRollbackSnapshot, validateRuntimeRollbackSnapshot, type RuntimeRollbackService } from './lib/runtime-rollback.js';
+import { restoreRuntimeRollbackSnapshot, validateRuntimeRollbackSnapshot, verifiedOnlineNodeCount, type RuntimeRollbackService } from './lib/runtime-rollback.js';
 
 const releaseIndex = process.argv.indexOf('--candidate-release-id');
 const candidateReleaseId = releaseIndex >= 0 ? process.argv[releaseIndex + 1] : undefined;
@@ -40,7 +40,7 @@ async function runLaunchctl(args: string[]): Promise<string> {
   return stdout;
 }
 
-async function verifyGateway(): Promise<void> {
+async function verifyGateway(): Promise<number> {
   const url = `http://127.0.0.1:${gatewayPort}/healthz`;
   let last = 'gateway has not responded';
   for (let attempt = 0; attempt < 120; attempt += 1) {
@@ -48,7 +48,8 @@ async function verifyGateway(): Promise<void> {
       const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
       const text = await response.text();
       const body = JSON.parse(text) as { onlineNodes?: number };
-      if (response.ok && typeof body.onlineNodes === 'number' && body.onlineNodes >= 1) return;
+      const onlineNodes = verifiedOnlineNodeCount(response.ok, body.onlineNodes);
+      if (onlineNodes !== null) return onlineNodes;
       last = `gateway health did not report an online node: ${text.slice(0, 200)}`;
     } catch (error) { last = errorText(error); }
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -96,7 +97,7 @@ try {
 
   const persistent = services.filter(service => !service.label.endsWith('.oauth-canary'));
   for (const service of persistent) await reloadLaunchdService(service, domain);
-  await verifyGateway();
+  const gatewayOnlineNodes = await verifyGateway();
 
   const pids = new Set<number>();
   for (const service of persistent) {
@@ -113,7 +114,7 @@ try {
   const completedAt = new Date().toISOString();
   await atomicWriteFile(statusPath, JSON.stringify({
     schemaVersion: 1, state: 'complete', candidateReleaseId, restoredReleaseId: previousReleaseId,
-    startedAt, completedAt, persistentServices: [...pids.keys()].length, gatewayOnlineNodes: 1,
+    startedAt, completedAt, persistentServices: [...pids.keys()].length, gatewayOnlineNodes,
     canary: 'exit-0'
   }, null, 2) + '\n');
   await atomicWriteFile(installStatusPath, JSON.stringify({
