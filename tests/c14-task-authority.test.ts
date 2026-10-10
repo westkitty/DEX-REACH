@@ -35,6 +35,8 @@ test('atomic cancellation cannot cancel a task that advanced to running, and eve
     assert.equal((await taskStreamPage(log,task.taskId,'node-a','RUNNING',events[0]!.eventId)).gap,true);
     assert.equal((await taskStreamPage(log,task.taskId,'node-a','RUNNING')).gap,true);
     await assert.rejects(store.create({actorId:'actor-a',nodeId:'node-a',operation:'dex.file.read',idempotencyKey:'fixture',payloadSha256:'a'.repeat(64)}),/reattach/);
+    await fs.appendFile(taskEventFile(dir),'{corrupt\n');
+    await assert.rejects(taskStreamPage(log,task.taskId,'node-a','RUNNING'),/event history is corrupt/);
     await store.create({actorId:'actor-b',nodeId:'node-a',operation:'dex.file.read',idempotencyKey:'fixture',payloadSha256:'a'.repeat(64)});
   } finally {await fs.rm(dir,{recursive:true,force:true});}
 });

@@ -81,15 +81,16 @@ export class TaskEventLog {
     return event;
   }
 
-  async list(taskId?: string, limit = 200): Promise<TaskEvent[]> {
+  async list(taskId?: string, limit = 200, strict = false): Promise<TaskEvent[]> {
     let raw: string;
     try { raw = await fs.readFile(taskEventFile(this.dir), 'utf8'); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
     const events = raw.split('\n').filter(Boolean).flatMap(line => {
       try {
         const value = JSON.parse(line) as unknown;
-        return validEvent(value) && (!taskId || value.taskId === taskId) ? [value] : [];
-      } catch { return []; }
+        if (!validEvent(value)) { if (strict) throw new Error('event history is corrupt'); return []; }
+        return !taskId || value.taskId === taskId ? [value] : [];
+      } catch { if (strict) throw new Error('event history is corrupt'); return []; }
     });
     return events.slice(-Math.max(1, Math.min(limit, 2000)));
   }
