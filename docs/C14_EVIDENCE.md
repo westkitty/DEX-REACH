@@ -21,4 +21,25 @@ No physical service restart, connector interruption, installed-runtime change, B
 
 ## Verification boundary
 
-The repository-wide `npm test` invocation was started but did not reach a trustworthy aggregate result within the bounded observation window; it remained active in the existing `phase-6-10-corrections` test process and was stopped. Full-suite status is therefore **UNKNOWN**, not PASS. This does not invalidate the focused 28/28 result above, but it remains uncovered scope for this source packet.
+The repository-wide `npm test` invocation was previously observed beyond the bounded window in `phase-6-10-corrections.test.ts`. A bounded isolation run identified the exact cause: `a full nonce cache refuses new proofs instead of forgetting replayable ones` takes about 58 seconds alone and passes; the C14-A/B tests pass before it. No C14 interaction was observed. The full-suite aggregate remains **UNKNOWN**, not PASS, because no unbounded rerun was used to convert the earlier incomplete observation into a repository-wide result.
+
+## C14-B — mutation ambiguity and safe recovery
+
+| Field | Evidence |
+| --- | --- |
+| Requirement scope | Mutation uncertainty after a lost response; no blind replay |
+| Harness | `tests/c14-mutation-ambiguity.test.ts`; ephemeral state, isolated coordinator daemon, IPv4 loopback transport, deterministic external-effect oracle file |
+| Scenario | One `PROCESS_UNKNOWN_EFFECT` mutation reaches `RUNNING`; the fake external system records one effect; transport terminates before any DEX result or receipt; coordinator lease is released; boot recovery reopens the original task |
+| Recovery | First reopen classifies the task `AMBIGUOUS` and persists `failureClass=AMBIGUOUS_EFFECT`; second reopen preserves `AMBIGUOUS` and returns `INPUT_REQUIRED`; no result or receipt is invented |
+| Replay refusal | Same identity returns `REFUSE_AMBIGUOUS`; changed actor, node, or payload returns `COLLISION`; execution counter remains exactly 1 |
+| Identity and cleanup | Original task ID, actor, node, idempotency key, and missing result reference are preserved; unrelated lease survives; task lease and ticket are absent |
+| Focused result | C14-A/B plus adjacent durability, task-store, result-store, boot-recovery, and coordinator tests: 29/29 PASS; typecheck, build, 42 invariants, and `git diff --check` PASS |
+| Status | PASS at focused source/regression scope; not physical chaos proof and not whole-C14 PASS |
+
+### Source changes
+
+- `src/shared/durable-execution.ts` now owns the duplicate-task decision so actor, node, operation, payload, policy, terminal result, ambiguity, and in-flight states cannot be bypassed by a filtered lookup.
+- `src/node/main.ts` uses that decision before authorization/execution and refuses ambiguous or binding-collision requests.
+- `src/node/boot-recovery.ts` persists `AMBIGUOUS_EFFECT` when recovery lacks authoritative result evidence.
+
+The installed C13 runtime, live services, connector, Big Mac, PR #15, `main`, credentials, and owner task state were not changed.

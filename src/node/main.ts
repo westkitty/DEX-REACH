@@ -41,7 +41,7 @@ import { HEARTBEAT_INTERVAL_MS, redactWorkStatusForShare, type WorkRequest } fro
 import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 import { workspaceWorkerEligible, workspaceWorkerExecute, workspaceWorkerRootsHash } from '../shared/workspace-worker.js';
 import { NodeTaskStore } from './task-store.js';
-import { classifyFailure, classifyOperationSafety, defaultAttemptBudget, deriveIdempotencyKey, type SafetyClass } from '../shared/durable-execution.js';
+import { classifyFailure, classifyOperationSafety, defaultAttemptBudget, decideExistingTask, deriveIdempotencyKey, type SafetyClass } from '../shared/durable-execution.js';
 import { reconcileBootTasks } from './boot-recovery.js';
 import type { ProcessExecutionContext } from '../shared/activity.js';
 
@@ -450,26 +450,28 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
       requestedKey: typeof request.args.idempotencyKey === 'string' ? request.args.idempotencyKey : undefined,
       requestId: request.id
     });
-    const existing = (await taskStore.list({ idempotencyKey: idempotency.key })).find(task =>
-      task.actorId === actorId && task.nodeId === config.nodeId && task.operation === request.operation
-    );
-    if (existing) {
-      if (existing.payloadSha256 !== idempotency.payloadHash || (existing.policyHash && existing.policyHash !== policyHash)) {
-        throw new Error('IDEMPOTENCY_KEY_COLLISION_MISMATCH: existing task binding differs; refusing execution');
-      }
-      if (existing.state === 'COMPLETED' && existing.resultRef) {
-        const recovered = await results.readValue(existing.resultRef);
-        return { type: 'response', id: request.id, ok: true, result: recovered, traceId: trace.traceId };
-      }
-      if (existing.state === 'AMBIGUOUS') {
-        return { type: 'response', id: request.id, ok: false, error: `task ${existing.taskId} is AMBIGUOUS; reconciliation is required and replay is forbidden`, traceId: trace.traceId };
-      }
-      if (existing.state === 'FAILED' || existing.state === 'CANCELLED') {
-        return { type: 'response', id: request.id, ok: false, error: `task ${existing.taskId} already ended as ${existing.state}: ${existing.summary.status}`, traceId: trace.traceId };
-      }
-      return { type: 'response', id: request.id, ok: false, error: `task ${existing.taskId} is already ${existing.state}; attach to the existing task`, traceId: trace.traceId };
+    const existing = (await taskStore.list({ idempotencyKey: idempotency.key }))[0];
+    const duplicate = decideExistingTask({
+      existing: existing ? { ...existing, summaryStatus: existing.summary.status } : undefined,
+      actorId, nodeId: config.nodeId, operation: request.operation,
+      payloadSha256: idempotency.payloadHash, policyHash
+    });
+    if (duplicate.kind === 'COLLISION') {
+      throw new Error('IDEMPOTENCY_KEY_COLLISION_MISMATCH: existing task binding differs; refusing execution');
     }
-
+    if (duplicate.kind === 'RETURN_RESULT') {
+      const recovered = await results.readValue(duplicate.task.resultRef!);
+      return { type: 'response', id: request.id, ok: true, result: recovered, traceId: trace.traceId };
+    }
+    if (duplicate.kind === 'REFUSE_AMBIGUOUS') {
+      return { type: 'response', id: request.id, ok: false, error: `task ${duplicate.task.taskId} is AMBIGUOUS; reconciliation is required and replay is forbidden`, traceId: trace.traceId };
+    }
+    if (duplicate.kind === 'REFUSE_TERMINAL') {
+      return { type: 'response', id: request.id, ok: false, error: `task ${duplicate.task.taskId} already ended as ${duplicate.task.state}: ${duplicate.task.summaryStatus || duplicate.task.state}`, traceId: trace.traceId };
+    }
+    if (duplicate.kind === 'REFUSE_IN_FLIGHT') {
+      return { type: 'response', id: request.id, ok: false, error: `task ${duplicate.task.taskId} is already ${duplicate.task.state}; attach to the existing task`, traceId: trace.traceId };
+    }
     // The final authorization reservation happens immediately before execution and is serialized with
     // owner policy updates. OFF therefore wins over stale remote state instead of being overwritten.
     reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args, { expectedPolicyHash: policyHash });

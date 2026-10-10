@@ -67,7 +67,10 @@ export async function reconcileBootTasks(taskStore: NodeTaskStore, results: Resu
         await taskStore.transition(task.taskId, 'COMPLETED', `Boot reconciliation completed the task from verified durable result evidence.`);
       }
     } else if (decision.kind === 'AMBIGUOUS' || decision.kind === 'DEGRADED') {
-      if (task.state === 'RUNNING') await taskStore.transition(task.taskId, 'AMBIGUOUS', decision.reason);
+      if (task.state === 'RUNNING') {
+        if (decision.kind === 'AMBIGUOUS') await taskStore.update(task.taskId, { failureClass: 'AMBIGUOUS_EFFECT' });
+        await taskStore.transition(task.taskId, 'AMBIGUOUS', decision.reason);
+      }
       else await taskStore.update(task.taskId, { status: decision.reason });
     } else if (decision.kind === 'INPUT_REQUIRED') {
       if (task.state === 'RUNNING') await taskStore.transition(task.taskId, 'INPUT_REQUIRED', decision.reason);
