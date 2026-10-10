@@ -12,6 +12,22 @@ Canonical public repository: `https://github.com/westkitty/DEX-REACH`.
 
 ## 2. Current Baseline
 
+**2026-10-10 local — C14 cross-project audit and ADR-0003 source closure packet.**
+The bounded repository/branch/PR audit is recorded in
+[C14 cross-project scope audit](docs/c14-acceptance/C14_CROSS_PROJECT_SCOPE_AUDIT.md)
+and classified `CLEAN_WITHIN_INSPECTED_SCOPE`; the unrelated project was not
+opened or modified. Protocol v2 source support now adds semantic `1.0`/`2.0`
+negotiation, capability intersection, hello acknowledgement, content-free task
+progress frames, and explicit no-downgrade durable refusal while preserving the
+legacy integer transport marker and v1 synchronous path. Isolated IPv4
+loopback fixtures cover current-v2 and historical-v1 hello behavior plus the
+v1/v2 A-F matrix boundaries. Local validation is 387/387 tests, typecheck,
+42 invariants, build, audit threshold, and diff check PASS. Commit
+`cff8a30945cf1a5dfe397e00e0de363a6ca61633` is pushed with exact remote parity
+on `c14-chaos-recovery`; PR #16 remains draft/open and has no hosted checks at
+this exact head (`UNKNOWN`). Installed runtime, owner state, credentials,
+connector, Big Mac, main, PR #15, and physical systems remain unchanged.
+
 **2026-10-10 local — EXTENDED C14 EVIDENCE CLOSURE FROZEN.** The final branch head is `07cd89b74b9a14b6d3bd50397aa4bc3871fd8b77`; the frozen source candidate validated by hosted CI is `ab1cf13ae2ce38b5916410b2e8c72cea71ddf848`, followed only by documentation bookkeeping. Draft PR #16 targets `c13-worker-repair`; current-head hosted DEX validation run `38024937682` passed `validate`, `reproducible-build`, and `runtime-proof`, and CodeQL run `38024937603` passed `analyze`; the source candidate also passed runs `38024779749` and `38024779741`. The recovered master plan is hash-verified outside this worktree. DEX ecosystem contracts are mapped read-only, but no REACH product-adapter consumer exists; independent evaluation remains UNVERIFIED because the separate evaluator returned only a task restatement. C14 source acceptance is PASS within tested repository scope; C14 program acceptance remains PARTIAL. C13 remains NOT PASS, E7 remains BLOCKED — HOST CAPABILITY, and C15 remains BLOCKED. No installed runtime, services, credentials, owner task data, policy, connector, Big Mac, physical system, main branch, PR #15, or separate DEX checkout was changed. See [hosted CI](docs/c14-acceptance/C14_HOSTED_CI_EVIDENCE.md), [final gate](docs/c14-acceptance/C14_FINAL_EVIDENCE_GATE.md), and [owner packet](docs/c14-acceptance/C14_OWNER_DECISION_PACKET.md).
 
 **2026-10-10 local — EXTENDED C14 AUTHORITY RECONCILIATION.** The canonical master-plan DOCX was located read-only outside this worktree at `/Users/andrew/Dex_Reach/DEX_Control_System_Master_Plan.docx`; SHA-256 `84f3f64b31ba7abadb3bdeb2474ce2ab1360da95ceae249c5fd9eccdbdb0c8fb` matches the supplied handoff. Its actual C14 section confirms chaos, ambiguity, performance, long-session, security, privacy, mixed-version, cold-start, and failure-prevention requirements; its C15 section requires C14 PASS, no unresolved release-blocking ambiguity, and explicit release/install authority. The document was not copied or published. Earlier missing-document claims remain historical search results; current traceability is [C14 master-plan traceability](docs/c14-acceptance/C14_MASTER_PLAN_TRACEABILITY.md). Installed baseline remains separate from current source; no runtime or owner state changed.
