@@ -85,3 +85,19 @@ See the [C14-D report](c14-performance/c14-d-report.md) and [raw baseline](c14-p
 | Status | **PARTIAL**. The sustained run predates the repair and has no exact committed source SHA. Initial harness revisions omitted the temporary-state environment assignment and appended synthetic coordinator history to the owner namespace. Active owner leases/tickets were cleaned and re-read as zero, but historical entries remain preserved. No installed-runtime, physical-chaos, connector, Big Mac, public-exposure, or human-acceptance proof is claimed. |
 
 See the [C14-E report](c14-performance/c14-e-stress-report.md). C14-E is source-level bounded evidence only; C14 overall remains incomplete.
+
+### C14-E corrected sustained confirmation
+
+| Field | Evidence |
+| --- | --- |
+| Exact source | `5b569d8bc21fdddb132d82385ed64eefd5dba2f1` on `c14-chaos-recovery`; runtime-bound by `git rev-parse` before execution |
+| Sustained result | [New raw artifact](c14-performance/c14-e-stress-confirmation.json): 661.1 seconds, 3,611 cycles, concurrency 2, zero failed cycles; 1,445 normal, 361 failed, 215 ambiguous tasks |
+| Coverage | Normal completion, indexed retrieval/listing, coordinator acquire/release, queue admission/cancellation, controlled failure, AMBIGUOUS_EFFECT preservation, duplicate refusal, result binding, event append/pagination, periodic recovery, and cleanup |
+| Recovery | Early/middle/late median and p95: 83.3/116.6 ms, 177.0/326.3 ms, and 204.1/304.2 ms. The pre-repair multi-second drift was not reproduced under this bounded workload. |
+| Resources | Early/middle/late RSS: 75.5/218.1/261.6 MiB; late task/result/event stores: 3.14 MiB/687.3 KiB/543.3 KiB. Growth tracks the intentional fixture; no resource-pressure stop fired. |
+| Cleanup | Zero leases/tickets; 215 expected ambiguous tasks preserved; 1,806 terminal tasks archived; 1,445 results expired; socket absent; temporary fixture removed; no duplicate synthetic effects or incorrect bindings. |
+| Isolation | Runtime asserted all persistent workload paths under `/var/folders/lm/f_zcrpb94bvg69m2y35klb8r0000gn/T/dex-c14-stress-rPhXJp`; owner root was excluded. Owner history digest changed from 17,783 to 17,952 bytes; tail showed installed cache/classifier events, so workload attribution is `UNKNOWN`, not a clean no-change claim. Current owner state is zero leases, zero tickets, `degraded=false`. |
+| Validation | Path regression 4/4, focused C14-A/B/C 67/67, typecheck, 42 invariants, build, and `git diff --check` PASS. Full suite and hosted CI UNKNOWN. |
+| Status | **PASS at corrected isolated source-only sustained-confirmation scope.** Historical pre-repair C14-E remains PARTIAL and unchanged. No installed-runtime, physical-chaos, connector, Big Mac, public-exposure, or human-acceptance proof is claimed. |
+
+See the [corrected confirmation report](c14-performance/c14-e-stress-confirmation-report.md). C14 overall remains incomplete.
