@@ -6,7 +6,7 @@
 - Draft PR: [#16](https://github.com/westkitty/DEX-REACH/pull/16)
 - Base: `c13-worker-repair`
 - Head branch: `c14-chaos-recovery`
-- Head SHA: `7161f95536f7ca787f1772f5afdd66c3e274f351`
+- Head SHA: `ab1cf13ae2ce38b5916410b2e8c72cea71ddf848`
 - Event: `pull_request`
 - PR state: OPEN, DRAFT, not merged
 
@@ -18,8 +18,8 @@ the PR head revision; this is not a main-branch or installed-runtime result.
 
 | Workflow | Run ID | Jobs | Conclusion |
 | --- | ---: | --- | --- |
-| DEX validation | `38024604247` | `validate` `114132648122`; `reproducible-build` `114132648209`; `runtime-proof` `114132647947` | PASS |
-| CodeQL | `38024604152` | `analyze` `114132647851` | PASS |
+| DEX validation | `38024779749` | `validate` `114133195189`; `reproducible-build` `114133195349`; `runtime-proof` `114133195425` | PASS |
+| CodeQL | `38024779741` | `analyze` `114133195320` | PASS |
 
 The validation job passed npm installation, typecheck, 42 invariants, the full
 385-test suite, build, and production audit. Reproducible-build passed the
@@ -32,3 +32,6 @@ These runs establish hosted source validation for the PR head. They do not
 prove the MacBook installed runtime, launchd behavior, physical chaos, public
 connector refresh, DEX product conformance, or human acceptance. PR #16 must
 not be merged automatically; PR #15 remains separate and unchanged.
+
+Later bookkeeping commits may change documentation only; no production source
+changed after this exact-head validation.
