@@ -1,7 +1,7 @@
 # DEX//REACH Operational State
 
 <!-- operational-state:metadata
-{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":87,"last_updated":"2026-10-10T09:00:02.620610Z","current_baseline":{"identity":"C13 corrected immutable runtime 0.3.2-87a99494ebb3-2f44ae46b11b installed and retained on MacBook-Air.local under transaction 9bf5079f-397e-4cd8-af35-99f1550d3d68. Published source 87a99494ebb3471d3ecc3a79acd630ec18858a92 passed all five hosted checks and full local verification (374 tests). Fresh authenticated same-ID fingerprint E4 PASS; installed lease success/failure/forgery and queue acceptance PASS with zero claims. Previous release/capsules/protected state preserved. E7 BLOCKED HOST CAPABILITY, C13 NOT PASS, C14 preparation only, C15 not started.","state":"c13-runtime-retained-e4-pass-e7-host-blocked","last_verified":"2026-10-10T02:01:08.520507Z"},"scope_boundaries":["Current maximum-scope C14 authority permits source development, isolated fixtures and c14-chaos-recovery publication with PR16 draft/unmerged. Installed runtime, launchd, owner state, credentials, connector administration, main, PR15, Big Mac, DEX and Gay Cast remain protected. C13/E7 and C15 gates are not waived."],"linked_parent_state":null}
+{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":88,"last_updated":"2026-10-10T09:14:25.751611Z","current_baseline":{"identity":"C13 corrected immutable runtime 0.3.2-87a99494ebb3-2f44ae46b11b installed and retained on MacBook-Air.local under transaction 9bf5079f-397e-4cd8-af35-99f1550d3d68. Published source 87a99494ebb3471d3ecc3a79acd630ec18858a92 passed all five hosted checks and full local verification (374 tests). Fresh authenticated same-ID fingerprint E4 PASS; installed lease success/failure/forgery and queue acceptance PASS with zero claims. Previous release/capsules/protected state preserved. E7 BLOCKED HOST CAPABILITY, C13 NOT PASS, C14 preparation only, C15 not started.","state":"c13-runtime-retained-e4-pass-e7-host-blocked","last_verified":"2026-10-10T02:01:08.520507Z"},"scope_boundaries":["Current maximum-scope C14 authority permits source development, isolated fixtures and c14-chaos-recovery publication with PR16 draft/unmerged. Installed runtime, launchd, owner state, credentials, connector administration, main, PR15, Big Mac, DEX and Gay Cast remain protected. C13/E7 and C15 gates are not waived."],"linked_parent_state":null}
 -->
 
 ## 1. Project Identity and Scope
@@ -13,14 +13,17 @@ Canonical public repository: `https://github.com/westkitty/DEX-REACH`.
 ## 2. Current Baseline
 
 **2026-10-10 — Maximum-scope Protocol v2 source campaign.** Production source
-`f4efc91643a71a3b163665df072f3832322a855f`, following baseline `2571382`,
+`77cb28940f4ff1774111381a74905597fab4f63d`, following baseline `2571382`,
 binds responses to current authenticated node sockets, hardens offer/ack states,
 implements authorized persisted SSE replay, preserves original task authority,
-refuses unproven running cancellation and serializes credential refresh/mutation.
+refuses unproven running cancellation, serializes credential refresh/mutation,
+and bounds stream admission to 300/minute before authorization.
 Genuine compiled historical revision `5b08354` passed A-F plus signed auth,
 reconnect and no-fallback control. Native source proof is 20 proven / 0 failed /
 2 unverified; clean rebuild is 172 artifacts. Subsequent test-only `0ea344a`
-removes a short-sleep activity race. Exact final regression/CI and measurements
+removes a short-sleep activity race. Final source verification is 398/398, 42 invariants, typecheck/build, audit
+threshold and 26-tool probe PASS. All five hosted checks, including separate
+CodeQL security clearance, passed on source 77cb289. Exact CI and measurements
 are in [completion report](docs/c14-compatibility/C14_V2_COMPLETION_REPORT.md).
 PR16 remains draft/open/unmerged, base c13-worker-repair. This updates source
 campaign state only; the installed metadata identity and its verification time

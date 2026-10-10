@@ -2,6 +2,12 @@
 
 ## Current source note — 2026-10-10 maximum-scope v2 campaign
 
+Final source `77cb289` passes 398/398 local tests and all five hosted checks. The
+separate CodeQL security alert was repaired with a real 300/minute admission
+limiter before bearer verification; the analyzer workflow and security check
+are independently PASS. Native proof 20/0/2, clean build 172 artifacts, compiled
+historical A-F and source SSE example were rerun on that source.
+
 The older frozen candidate and counts below are historical. Production candidate f4efc91643a71a3b163665df072f3832322a855f has real client-visible replay and compiled historical evidence, plus 172 byte-for-byte build artifacts. Performance remains PARTIAL without latency budgets; installed/connector/program gates remain open.
 
 Evidence and exact validation/publication boundaries: [../c14-compatibility/C14_V2_COMPLETION_REPORT.md](../c14-compatibility/C14_V2_COMPLETION_REPORT.md).

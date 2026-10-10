@@ -3,9 +3,10 @@
 Date: 2026-10-10. Authority: source-only maximum-scope campaign on
 `c14-chaos-recovery`, PR [#16](https://github.com/westkitty/DEX-REACH/pull/16),
 base `c13-worker-repair`. Starting source was
-`257138213f24cf2eaa97d5426bbd73442d025f7c`. Tested production candidate is
-`f4efc91643a71a3b163665df072f3832322a855f`; the subsequent activity fixture and report commits are
-bookkeeping and do not replace the measured source identity.
+`257138213f24cf2eaa97d5426bbd73442d025f7c`. Final tested production/source candidate is
+`77cb28940f4ff1774111381a74905597fab4f63d`, including the admission-rate repair
+after the earlier core candidate `f4efc91`. Report-only publication commits do
+not replace those measured source identities.
 
 ## Verdicts and measured scope
 
@@ -88,6 +89,14 @@ not the authoritative public stream. Gateway/node restart does not reconstruct
 progress from an in-memory push buffer. Terminal closure requires matching
 persisted terminal history, not merely a terminal snapshot.
 
+Admission limit: 300 stream requests per minute per gateway, before bearer
+verification, using one bounded limiter identity. Authenticated and unauthenticated
+callers share this allowance; an anonymous burst can consume it until reset.
+Existing streams continue. A 300/301 HTTP fixture verifies admission/refusal and
+that forwarded-IP changes cannot evade the limit. `express-rate-limit` 8.7.0 was
+already installed transitively and is now a pinned direct dependency; no package
+version was upgraded.
+
 Limits: 32 subscribers per gateway; one outstanding node read per subscriber;
 100 events per page; 2,000 retained log events; 5-second read timeout; 250-ms poll;
 60-second polling deadline checked between pages and 60-second socket idle
@@ -153,7 +162,7 @@ Production candidate checks are recorded in the validation supplement below.
 Native proof: 20 proven, 0 failed, 2 unverified; fresh-node installation and a
 second physical machine remain unproven. Its Android item was an existing
 read-only identity probe, not deployment or new physical v2 acceptance.
-Clean rebuild: 172 artifacts, byte-for-byte at `f4efc91643a7`, no differences.
+Clean rebuild: 172 artifacts, byte-for-byte at final source `77cb28940f4f`, no differences.
 
 Independent adversarial subagent review reproduced authority and timestamp
 leaks, identified the cancellation and lock-contention hazards, and rechecked
@@ -168,6 +177,13 @@ was incorrectly assumed to always return a handle. The recovery fixture now
 reconciles the original key and retains same-ID/one-effect assertions. Initial
 native proof was 19/1/2; the deterministic credential race failed before repair.
 The f4efc91 local full run additionally failed an existing 350-ms activity fixture (396/397): its child exited between two reads. Commit 0ea344a holds that child until running activity is observed, retaining real PID, running-state, completion and exit assertions; focused activity tests passed 8/8. These results are retained, not relabeled green.
+
+A separate GitHub CodeQL security check `114178408740` failed with one high
+alert for the authorized SSE route lacking a request limiter, while its analysis
+workflow itself had succeeded. This was a **CONFIRMED_DEFECT**, repaired at
+`77cb289` with actual middleware before authorization. The separate security
+check `114179243124` now passes, alongside the analyzer workflow. An analysis
+workflow success alone is not security-check clearance.
 
 ## Supplemental boundaries and continuation
 
@@ -243,14 +259,18 @@ pagination measurements remain in [before](../c14-performance/C14_V2_BEFORE.json
 and [after](../c14-performance/C14_V2_AFTER.json). Harness RSS delta was 71,030,656
 before and 53,659,456 bytes after; neither is installed-service cost or leak proof.
 
-[Actual SSE workload](../c14-performance/C14_V2_STREAM.json): 64 complete replays,
-concurrency 8, one OAuth durable task; p50 4.95 ms, p95 262.30 ms, p99 262.46 ms;
-92,160 response bytes; harness RSS delta 3,017,024 bytes. The first batch includes
+[Final SSE workload](../c14-performance/C14_V2_STREAM.json), source `77cb289`: 64 complete replays,
+concurrency 8, one OAuth durable task; p50 4.61 ms, p95 266.12 ms, p99 266.31 ms;
+92,160 response bytes; harness RSS delta 6,621,824 bytes. The first batch includes
 completion polling while the task runs; later batches replay terminal history.
 The 250-ms poll explains that initial delivery tail. This is not a warmed
 per-event latency or reconnection-delay benchmark. No prior SSE route existed
 at the starting revision, so no fabricated before/after SSE speedup is claimed.
-The production example also delivered ACCEPTED, PREPARING, RUNNING and COMPLETED.
+The final source example also delivered ACCEPTED, PREPARING, RUNNING and COMPLETED.
+The [pre-limiter run](../c14-performance/C14_V2_STREAM_BEFORE_ADMISSION_LIMIT.json)
+on `0ea344a` measured 4.95 / 262.30 / 262.46 ms and RSS delta 3,017,024 bytes.
+The tail and memory deltas are retained; these short harness samples do not
+establish a leak, an attributable regression, or a guaranteed latency budget.
 
 No project latency budget exists for these paths. Descriptor growth, separate
 v1/v2 handshake latency, installed idle use, and sustained new-stream churn are
@@ -262,23 +282,23 @@ unmeasured lifecycle rows into PASS.
 
 | Check | Actual result / identity |
 | --- | --- |
-| Full local `npm run verify` | PASS on source/test candidate `0ea344aa216c2d4dfdcf329f1373519e05b96f6a`: 397 tests, 397 passed, zero failed/skipped/cancelled |
+| Full local `npm run verify` | PASS on final source `77cb28940f4ff1774111381a74905597fab4f63d`: 398 tests, 398 passed, zero failed/skipped/cancelled |
 | Typecheck / invariant manifest / build | PASS; 42 release-blocking invariants; current dist rebuilt |
-| Production audit | PASS at high threshold, six moderate advisories remain; no dependency or lockfile change |
+| Production audit | PASS at high threshold, six moderate advisories remain; existing transitive express-rate-limit promoted to pinned direct dependency |
 | Backend probe | PASS, 26 compatibility tools |
-| Focused changed protocol/authority/security fixtures | 29/29 pre-final set; expanded actual stream integration 2/2; final boundary 2/2; auth/provenance 5/5; activity repair 8/8 |
-| Native `proof -- --require-live` | 20 proven / 0 failed / 2 unverified on production f4efc91; no installation proof |
-| Local clean rebuild | 172 artifacts byte-for-byte at production `f4efc91`; final publication rebuild is separately checked after report commit |
-| Compiled historical integration | Four pairings on f4efc91, all primary ADR cells and signed transport checks successful |
-| Actual example client | ACCEPTED through COMPLETED using source/test candidate 0ea344a |
-| Hosted DEX validation | [38039688988](https://github.com/westkitty/DEX-REACH/actions/runs/38039688988), completed success associated with PR head `0ea344a`: validate, runtime-proof, reproducible-build all PASS |
-| CodeQL workflow | [38039688967](https://github.com/westkitty/DEX-REACH/actions/runs/38039688967), completed success associated with PR head `0ea344a` |
+| Focused changed protocol/authority/security fixtures | 29/29 pre-final set; expanded actual stream integration 2/2; final boundary 3/3 and stream/boundary set 5/5; auth/provenance 5/5; activity repair 8/8 |
+| Native `proof -- --require-live` | 20 proven / 0 failed / 2 unverified on final source 77cb289; no installation proof |
+| Local clean rebuild | 172 artifacts byte-for-byte at final source `77cb289`; final report-publication rebuild is separately checked |
+| Compiled historical integration | Four pairings on final source 77cb289, all primary ADR cells and signed transport checks successful |
+| Actual example client | ACCEPTED through COMPLETED using final source 77cb289 |
+| Hosted DEX validation | [38040326605](https://github.com/westkitty/DEX-REACH/actions/runs/38040326605), completed success associated with PR head `77cb289`: validate, runtime-proof, reproducible-build all PASS |
+| CodeQL workflow | [38040326590](https://github.com/westkitty/DEX-REACH/actions/runs/38040326590), completed success associated with PR head `77cb289`; separate security check `114179243124` PASS |
 | Diff hygiene | PASS before report publication |
 
 Hosted revision distinction: validation checked synthetic merge
-`a004485307f8d439b25e007a67fec27d6fd24ea7`, merging source head `0ea344a` into base
-`391d0b0024b0db8e8da473e5a683a92d190bdb13`. Runtime-proof and reproducible-build
-explicitly checked out PR source head. A workflow's headSha is not by itself
+`3e0631fc1cbfeeffae219af45143ea29e09befcb`, merging source head `77cb289` into base
+`391d0b0024b0db8e8da473e5a683a92d190bdb13`. Runtime-proof also checked out the synthetic merge;
+reproducible-build explicitly checked out PR source head. A workflow's headSha is not by itself
 proof that every job checked out that SHA. Report-publication CI is observed on
 the final bookkeeping head separately; latest owning results are visible on
 [PR16 checks](https://github.com/westkitty/DEX-REACH/pull/16/checks).
@@ -292,6 +312,8 @@ Campaign commits before documentation:
 - `02368b2`: allowlisted lifecycle kinds and flow-control fixture.
 - `f4efc91`: credential refresh/enrollment serialization and deterministic race.
 - `0ea344a`: test-owned activity child held until live observation.
+- `05d5a21`: earlier report/metrics publication, retained in history.
+- `77cb289`: admission limiter, exact pinned dependency, 300/301 regression and CodeQL repair.
 
 Final documentation/metric inventory and publication SHA are available through
 Git/PR16; the report does not claim to contain its own commit hash. Source and
