@@ -28,13 +28,15 @@ export type NodeRequestResult = {
 };
 
 type Pending = {
+  nodeId: string;
+  socket: WebSocket;
   resolve: (value: NodeRequestResult) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 };
 
 export class NodeRegistry {
-  private readonly wss = new WebSocketServer({ noServer: true });
+  private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   private readonly nodes = new Map<string, NodeRecord>();
   private readonly pending = new Map<string, Pending>();
   private readonly revoked = new Set<string>();
@@ -61,6 +63,7 @@ export class NodeRegistry {
     for (const [nodeId, record] of this.nodes) {
       if (!(await this.nodeAuth.isRevoked(nodeId))) continue;
       this.revoked.add(nodeId);
+      this.rejectConnection(record.socket, 'node revoked; execution outcome may be uncertain');
       record.socket.close(4001, 'node revoked');
       this.nodes.delete(nodeId);
       dropped += 1;
@@ -159,7 +162,7 @@ export class NodeRegistry {
         reject(new Error(`node request timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       timer.unref();
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { nodeId, socket: record.socket, resolve, reject, timer });
       record.socket.send(JSON.stringify(request), error => {
         if (!error) return;
         clearTimeout(timer);
@@ -179,6 +182,7 @@ export class NodeRegistry {
     await this.nodeAuth.revoke(nodeId);
     const record = this.nodes.get(nodeId);
     if (record) {
+      this.rejectConnection(record.socket, 'node revoked; execution outcome may be uncertain');
       record.socket.close(4001, 'node revoked');
       this.nodes.delete(nodeId);
     }
@@ -214,8 +218,8 @@ export class NodeRegistry {
   }
 
   /** Test seam: deliver a node response as if it arrived on the socket. */
-  deliverForTest(response: GatewayResponse): void {
-    this.finishResponse(response);
+  deliverForTest(response: GatewayResponse, nodeId = this.pending.get(response.id)?.nodeId, socket = this.pending.get(response.id)?.socket): void {
+    if (nodeId && socket) void this.finishResponse(response, nodeId, socket);
   }
   private accept(ws: WebSocket, expectedNodeId: string): void {
     let registered = false;
@@ -241,7 +245,10 @@ export class NodeRegistry {
           return ws.close(1008, 'incompatible semantic protocol');
         }
         const existing = this.nodes.get(hello.nodeId);
-        if (existing && existing.socket !== ws) existing.socket.close(4000, 'replaced by newer connection');
+        if (existing && existing.socket !== ws) {
+          this.rejectConnection(existing.socket, 'node connection replaced; execution outcome may be uncertain');
+          existing.socket.close(4000, 'replaced by newer connection');
+        }
         this.nodes.set(hello.nodeId, { hello, socket: ws, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null, negotiated });
         registered = true;
         const ack: ProtocolHelloAck = { type: 'hello_ack', protocolVersion: negotiated.version, capabilities: negotiated.capabilities };
@@ -249,8 +256,9 @@ export class NodeRegistry {
         return;
       }
       const record = this.nodes.get(expectedNodeId);
-      if (record) record.lastSeenAt = Date.now();
-      if (typed.type === 'response') this.finishResponse(message as GatewayResponse);
+      if (!record || record.socket !== ws || ws.readyState !== WebSocket.OPEN || this.revoked.has(expectedNodeId)) return;
+      record.lastSeenAt = Date.now();
+      if (typed.type === 'response') void this.finishResponse(message as GatewayResponse, expectedNodeId, ws);
       if (typed.type === 'task_event') this.acceptTaskEvent(message as TaskProgressEvent);
       if (typed.type === 'status' && record) {
         const status = message as NodeStatus;
@@ -260,14 +268,29 @@ export class NodeRegistry {
     });
 
     ws.on('close', () => {
+      this.rejectConnection(ws, 'node disconnected; execution outcome may be uncertain');
       const record = this.nodes.get(expectedNodeId);
       if (record?.socket === ws) this.nodes.delete(expectedNodeId);
     });
   }
 
-  private finishResponse(response: GatewayResponse): void {
+  private rejectConnection(socket: WebSocket, reason: string): void {
+    for (const [id, pending] of this.pending) {
+      if (pending.socket !== socket) continue;
+      clearTimeout(pending.timer);
+      this.pending.delete(id);
+      pending.reject(new Error(reason));
+    }
+  }
+
+  private async finishResponse(response: GatewayResponse, nodeId: string, socket: WebSocket): Promise<void> {
+    if (typeof response.id !== 'string' || typeof response.ok !== 'boolean') return;
     const pending = this.pending.get(response.id);
-    if (!pending) return;
+    if (!pending || pending.nodeId !== nodeId || pending.socket !== socket) return;
+    if (await this.nodeAuth.isRevoked(nodeId)) return;
+    // Recheck after credential-store I/O: timeout, replacement or revocation may have won.
+    if (this.pending.get(response.id) !== pending || this.nodes.get(nodeId)?.socket !== socket
+      || socket.readyState !== WebSocket.OPEN || this.revoked.has(nodeId)) return;
     clearTimeout(pending.timer);
     this.pending.delete(response.id);
     if (response.ok) {
