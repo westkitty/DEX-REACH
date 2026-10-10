@@ -12,6 +12,8 @@ Canonical public repository: `https://github.com/westkitty/DEX-REACH`.
 
 ## 2. Current Baseline
 
+**2026-10-10 — C14 recovery foundation source campaign.** Read-only reconciliation reports 15 existing AMBIGUOUS_EFFECT histories and 2 RUNNING records with insufficient evidence; all 17 remain unresolved and untouched. New source coverage/integrity verification, isolated synthetic restoration, prospective retained-C13 baseline eligibility and a twenty-prerequisite C14 preflight preserve all live stop gates. The primary evidence and remaining owner decisions are in [C14 recovery readiness](docs/c14-recovery/C14_RECOVERY_READINESS.md). No live backup, capsule replacement, install/restart/rollback, connector change or merge occurred. C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 program PARTIAL; C15 BLOCKED.
+
 **2026-10-10 — Maximum-scope Protocol v2 source campaign.** Production source
 `77cb28940f4ff1774111381a74905597fab4f63d`, following baseline `2571382`,
 binds responses to current authenticated node sockets, hardens offer/ack states,

@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "gateway": "tsx src/gateway/main.ts",
+    "recovery:c14": "tsx scripts/c14-recovery.ts",
     "control:room": "tsx scripts/control-room.ts",
     "coordinator": "tsx src/coordinator/main.ts",
     "worker": "tsx src/worker/main.ts",
