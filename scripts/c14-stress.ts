@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -39,6 +40,10 @@ function numberArg(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 function flag(name: string): boolean { return process.argv.includes('--' + name); }
+function sourceIdentity(): { branch: string; commit: string } {
+  const git = (args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+  return { branch: git(['rev-parse', '--abbrev-ref', 'HEAD']), commit: git(['rev-parse', 'HEAD']) };
+}
 function taskId(sequence: number): string {
   const hex = sequence.toString(16);
   return 'rtsk_' + hex.padStart(11, '0') + '_' + hex.padStart(16, '0');
@@ -368,6 +373,7 @@ async function main(): Promise<void> {
   const totalMemory = os.totalmem();
   const maxRssBytes = numberArg('max-rss-mib', Math.max(256, Math.min(512, Math.floor(totalMemory / GIB * 64)))) * MIB;
   const state = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-c14-stress-'));
+  const source = sourceIdentity();
   const previousState = process.env.DEX_REACH_STATE_DIR;
   process.env.DEX_REACH_STATE_DIR = state;
   let isolation: ReturnType<typeof isolationPaths>;
@@ -406,7 +412,7 @@ async function main(): Promise<void> {
     schemaVersion: 1, kind: smoke ? 'C14-E bounded stress smoke' : 'C14-E bounded long-session stress',
     status: errorMessage || run.failures ? 'FAILED' : cleanup ? 'PASS' : 'PARTIAL',
     generatedAtUtc: new Date().toISOString(), startedAtUtc: run.startedUtc,
-    source: { branch: process.env.GIT_BRANCH ?? 'c14-chaos-recovery', commit: process.env.GIT_COMMIT ?? 'unknown' },
+    source,
     isolation: { ...isolation, ownerHistoryBefore, ownerHistoryAfter: await fingerprint(path.join(isolation.ownerRoot, 'coordinator', 'history', 'events.jsonl')) },
     environment: { platform: process.platform, arch: process.arch, node: process.version, cpuCount: os.cpus().length, totalMemoryBytes: totalMemory, initialFreeMemoryBytes: initial.freeMemoryBytes, initialLoadAverage: initial.loadAverage },
     limits: { durationSeconds, maxOperations, concurrency, maxRssBytes, sampleIntervalMs: SAMPLE_INTERVAL_MS, resultTtlMs: RESULT_TTL_MS },
