@@ -101,3 +101,17 @@ See the [C14-E report](c14-performance/c14-e-stress-report.md). C14-E is source-
 | Status | **PASS at corrected isolated source-only sustained-confirmation scope.** Historical pre-repair C14-E remains PARTIAL and unchanged. No installed-runtime, physical-chaos, connector, Big Mac, public-exposure, or human-acceptance proof is claimed. |
 
 See the [corrected confirmation report](c14-performance/c14-e-stress-confirmation-report.md). C14 overall remains incomplete.
+
+## C14-F — mixed-version compatibility and migration safety
+
+| Field | Evidence |
+| --- | --- |
+| Contract | Current source uses Protocol v1 (`REACH_PROTOCOL_VERSION=1`) plus independently advertised node capabilities. ADR-0003's semantic v2.0 wire negotiation is not implemented. |
+| Matrix fixture | [C14-F matrix test](../tests/c14-mixed-version.test.ts) uses synthetic hello records and in-memory MCP transport; it is explicitly not binary v1/v2 interoperability proof. |
+| Current supported behavior | Legacy capability absence, empty/false/malformed capability metadata, and stale capability replacement fail closed. `mode=auto` returns an explicitly labeled synchronous fallback; `mode=durable` refuses without dispatch or a fabricated task handle. Task-capable routing preserves exact node and actor identity. |
+| Refusal/routing | Existing protocol-auth tests reject wrong protocol versions. Mixed-node fixture proves one node's capability and socket never receive another node's selected request. |
+| Matrix status | Current v1 capability-based legacy/task-capable combinations: **IMPLEMENTED_AND_TESTED**. Genuine ADR-defined v2 gateway/node combinations: **UNSUPPORTED_BY_CURRENT_SOURCE**, documented without changing the wire constant. |
+| Validation | C14-F matrix 5/5 PASS; combined compatibility/durable/recovery/security set 46/46 PASS; typecheck, 42 invariants, build, and `git diff --check` PASS. Full suite and hosted CI remain UNKNOWN. |
+| Status | **PASS at focused current-source compatibility scope; PARTIAL for the ADR-defined v1/v2 migration matrix.** No installed mixed-version runtime, public connector refresh, live migration, credential/policy change, or production restart was performed. |
+
+See the [C14-F matrix report](c14-compatibility/C14_F_MATRIX.md). C13 remains NOT PASS, E7 remains BLOCKED — HOST CAPABILITY, and C14 overall remains incomplete.
