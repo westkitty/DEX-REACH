@@ -20,4 +20,32 @@ This ledger records source-level campaign state. It does not certify installed r
 
 ## Next executable packet
 
-C14-F2 protocol compatibility closure is already covered at current source scope by `docs/c14-compatibility/C14_F_MATRIX.md` and `tests/c14-mixed-version.test.ts`. Continue with the independent C14-H chaos coverage matrix, then C14-I/J, fresh C14-K validation, and C15 readiness preparation. Do not install, deploy, merge, or touch the owner runtime.
+## C14-F2 — protocol compatibility closure
+
+- Status: PASS at current-source compatibility scope; PARTIAL for genuine ADR v1/v2 interoperability.
+- Evidence: `docs/c14-compatibility/C14_F_MATRIX.md`, `tests/c14-mixed-version.test.ts`, 5/5 matrix tests and combined 46/46 compatibility-adjacent tests.
+- No Protocol v2 constant or production path was invented. Genuine v2 combinations remain explicitly unsupported.
+
+## C14-H — isolated chaos matrix
+
+- Status: PASS at supported source-fixture scope; PARTIAL for dedicated node/worker process interruption; BLOCKED for physical installed interruption.
+- Evidence: `docs/c14-chaos/C14_H_MATRIX.md` plus existing C14-A/B, coordinator disconnect, result-store, task-control, routing, and recovery fixtures.
+
+## C14-I — security/privacy/trust boundaries
+
+- Status: PASS at current REACH source-regression scope; ecosystem runtime conformance UNVERIFIED.
+- Evidence: `docs/c14-security/C14_I_TRUST_MATRIX.md` and existing access, budget, security, secrets, receipts, trace, coordinator, and control-room tests.
+
+## C14-J — observability/performance gaps
+
+- Status: PASS for source-level gap reconciliation; dashboard delta refresh and installed-service idle profiling remain NOT MEASURED.
+- Evidence: `docs/c14-performance/C14_J_GAP_RECONCILIATION.md`, C14-D report, and corrected C14-E confirmation.
+
+## C15 preparation
+
+- Status: BLOCKED because C14 program acceptance is incomplete and release/install/deploy authority is not granted.
+- Evidence: `docs/C15_READINESS_PREPARATION.md`.
+
+## Next executable packet
+
+C14-K fresh source validation and acceptance matrix. Do not install, deploy, merge, or touch the owner runtime.
