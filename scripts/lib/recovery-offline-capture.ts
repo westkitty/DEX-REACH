@@ -13,6 +13,8 @@ import { verifyRestoredApplication } from './recovery-application.js';
 import { artifactDigest, type ExpectationStore, type TransactionEvidenceLog } from './recovery-evidence.js';
 import { materializeManifest, syncDirectories, durableWrite, stagingRoots } from './recovery-capture.js';
 import { WRITER_OWNERSHIP, nestedLocks, refusalCode } from './recovery-checkpoint.js';
+import { verifyLegacyCompatibility } from './recovery-compatibility.js';
+import { COMPAT_HOME_PRESERVATION_RULE } from './recovery-symlinks.js';
 
 const execFileAsync = promisify(execFile);
 export const SERVICE_ROLES = ['coordinator', 'worker', 'gateway', 'node', 'oauth-canary'] as const;
@@ -61,6 +63,8 @@ export async function offlineQuiescenceBlockers(probe: HostProbe, state: string)
 export type OfflineCaptureRequest = {
   nodeId: 'macbook-air.local';
   transactionId: string;
+  /** Exact 40-hex source revision of the code performing the capture: the release candidate. */
+  sourceSha: string;
   roots: Roots;
   destination: DestinationFacts;
   log: TransactionEvidenceLog;
@@ -91,8 +95,10 @@ async function nonterminalCount(state: string): Promise<number> {
 export async function captureOffline(req: OfflineCaptureRequest): Promise<OfflineCaptureOutcome> {
   const { transactionId: txn, roots, destination: facts, log } = req;
   const base = { transactionId: txn, retryAuthorized: false as const, installationAuthority: false as const, servicesRestarted: false as const };
-  if (req.nodeId !== 'macbook-air.local' || !UUID.test(txn)) return Object.freeze({ ...base, status: 'REFUSED' as const, reason: 'OFFLINE_REQUEST_INVALID' });
-  await log.append(txn, 'PREPARED', { mode: 'offline-services-stopped' });
+  if (req.nodeId !== 'macbook-air.local' || !UUID.test(txn) || !/^[a-f0-9]{40}$/.test(req.sourceSha)) return Object.freeze({ ...base, status: 'REFUSED' as const, reason: 'OFFLINE_REQUEST_INVALID' });
+  const policy = req.linkPolicy ?? defaultLinkPolicy();
+  const linkPolicyKind = JSON.stringify(policy) === JSON.stringify({ version: 1, rules: [COMPAT_HOME_PRESERVATION_RULE] }) ? 'compat-home-preservation' : policy.rules.length ? 'custom' : 'default';
+  await log.append(txn, 'PREPARED', { mode: 'offline-services-stopped', sourceSha: req.sourceSha, linkPolicy: linkPolicyKind });
   let started = false;
   const refuse = async (reason: string) => { await log.append(txn, 'REFUSED', { reason }); return Object.freeze({ ...base, status: 'REFUSED' as const, reason }); };
   const fail = async (reason: string) => { await log.append(txn, 'FAILED', { reason }); return Object.freeze({ ...base, status: 'FAILED_UNCERTAIN' as const, reason }); };
@@ -102,7 +108,7 @@ export async function captureOffline(req: OfflineCaptureRequest): Promise<Offlin
     if (destinationIssues.length) return await refuse(destinationIssues[0]!);
     const quiet = await offlineQuiescenceBlockers(req.probe, roots.state);
     if (quiet.length) return await refuse(quiet[0]!);
-    await log.append(txn, 'ACKNOWLEDGED', { quiescence: 'SERVICES_BOOTED_OUT_NO_WRITER_PROCESSES', services: SERVICE_ROLES.length });
+    await log.append(txn, 'ACKNOWLEDGED', { quiescence: 'SERVICES_BOOTED_OUT_NO_WRITER_PROCESSES', services: SERVICE_ROLES.length, destination: { root: facts.root, device: facts.device, inode: facts.inode, volume: facts.mountIdentity, encrypted: facts.encrypted, durable: facts.durable, cloudSynced: facts.cloudSynced } });
 
     const locks: string[] = [];
     for (const m of WRITER_OWNERSHIP) for (const file of m.locks(roots.state, req.nodeId)) if (await fs.lstat(path.dirname(file)).then(s => s.isDirectory(), () => false)) locks.push(file);
@@ -111,7 +117,7 @@ export async function captureOffline(req: OfflineCaptureRequest): Promise<Offlin
       await req.hooks?.afterFence?.();
       const heldLocks = new Set(locks.map(f => path.resolve(f)));
       return await withFencedLocks(heldLocks, async () => {
-        const observe = () => inspectCoverage(roots, 'inspection', req.linkPolicy ?? defaultLinkPolicy(), { heldLocks });
+        const observe = () => inspectCoverage(roots, 'inspection', policy, { heldLocks });
         const manifest: Manifest = await observe();
         if (!manifest.consistent || manifest.problems.length) return await refuse('SNAPSHOT_UNPROVEN');
         const reprove = async () => {
@@ -146,9 +152,10 @@ export async function captureOffline(req: OfflineCaptureRequest): Promise<Offlin
         const restored = await materializeManifest(manifest, captured, restoreCheck);
         await verifyCoverage(manifest, restored, manifest.digest);
         await verifyRestoredApplication(restored);
+        const compatibility = await verifyLegacyCompatibility(restored, req.nodeId);
         await req.hooks?.afterRestore?.();
         await fs.rm(restoreCheck, { recursive: true });
-        await log.append(txn, 'RESTORE_VERIFIED', {});
+        await log.append(txn, 'RESTORE_VERIFIED', { application: 'VERIFIED', legacyCompatibility: { ...compatibility, sourceSha: req.sourceSha } });
 
         // Last word: still quiescent, source unchanged, backup bytes unchanged, destination unchanged.
         await reprove();
@@ -156,7 +163,7 @@ export async function captureOffline(req: OfflineCaptureRequest): Promise<Offlin
         if (await artifactDigest(staging) !== artifact) throw new Error('ARTIFACT_CHANGED_BEFORE_CERTIFICATION');
         const now = await fs.lstat(facts.root);
         if (now.ino !== before.ino || now.dev !== before.dev || now.mode !== before.mode || now.uid !== before.uid) throw new Error('DESTINATION_CHANGED');
-        await log.append(txn, 'CERTIFIED', { manifestDigest: manifest.digest, artifactDigest: artifact });
+        await log.append(txn, 'CERTIFIED', { manifestDigest: manifest.digest, artifactDigest: artifact, sourceSha: req.sourceSha, files: manifest.entries.length, bytes: manifest.totalBytes, preservedNonterminalTasks: preserved });
         const files = manifest.entries.length, bytes = manifest.totalBytes;
         return Object.freeze({ ...base, status: 'OFFLINE_BACKUP_CERTIFIED' as const, manifestDigest: manifest.digest, artifactDigest: artifact, files, bytes, preservedNonterminalTasks: preserved });
       });

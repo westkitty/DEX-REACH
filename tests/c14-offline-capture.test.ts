@@ -29,7 +29,7 @@ async function setup() {
   const manifest = await inspectCoverage(w.source, 'inspection');
   const st = await fs.lstat(root), v = await fs.statfs(root);
   const destination: DestinationFacts = { root, approvedRoot: root, approved: true, device: st.dev, approvedDevice: st.dev, inode: st.ino, approvedInode: st.ino, mountIdentity: 'synthetic-volume', approvedMountIdentity: 'synthetic-volume', ownerUid: st.uid, expectedUid: st.uid, mode: 0o700, writable: true, cloudSynced: false, cloudApproved: false, encrypted: true, durable: true, freeBytes: v.bavail * v.bsize, measured: true, space: recoveryStoragePlan(manifest), sources: w.source, gitRoots: ['/synthetic/git'] };
-  const request = (overrides: Partial<Parameters<typeof captureOffline>[0]> = {}) => ({ nodeId, transactionId: crypto.randomUUID(), roots: w.source, destination, log, expectations, probe: quietProbe(), ...overrides });
+  const request = (overrides: Partial<Parameters<typeof captureOffline>[0]> = {}) => ({ nodeId, transactionId: crypto.randomUUID(), sourceSha: 'c'.repeat(40), roots: w.source, destination, log, expectations, probe: quietProbe(), ...overrides });
   return { w, root, log, expectations, destination, request };
 }
 

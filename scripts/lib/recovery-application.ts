@@ -1,3 +1,4 @@
+import { RETAINED_RELEASE, RETAINED_SOURCE, RETAINED_TRANSACTION, RETAINED_TREE } from './c14-recovery-preflight.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -76,9 +77,16 @@ export async function verifyRestoredApplication(roots: Roots): Promise<void> {
       if (!Number.isInteger(claim.pid) || claim.pid < 1 || !Number.isFinite(Date.parse(claim.claimedAt))) throw new Error('APPLICATION_PLAN_CLAIM');
     }
   }
-  const releaseEvidence = await safeRead(roots.state, 'runtime/retained-evidence.json').then(b => JSON.parse(b.toString())).catch(e => { if (e.code === 'ENOENT') return null; throw e; });
-  const releases = await fs.readdir(path.join(roots.state, 'runtime/releases')).catch(e => { if (e.code === 'ENOENT') return []; throw e; });
-  if (releases.length && !releaseEvidence) throw new Error('APPLICATION_RUNTIME_PROVENANCE_MISSING');
+  let releaseEvidence = await safeRead(roots.state, 'runtime/retained-evidence.json').then(b => JSON.parse(b.toString())).catch(e => { if (e.code === 'ENOENT') return null; throw e; });
+  const releases: string[] = await fs.readdir(path.join(roots.state, 'runtime/releases')).catch(e => { if (e.code === 'ENOENT') return []; throw e; });
+  if (releases.length && !releaseEvidence) {
+    // The installed C13 runtime predates retained-evidence.json. Its provenance is the C13 install journal,
+    // accepted only when every anchor matches the independently verified C13 retention: transaction,
+    // source, release id, decision, and the release tree hashing to the recorded trusted digest.
+    const journal = await safeRead(roots.state, 'runtime/c13-maintenance.json').then(b => JSON.parse(b.toString()) as Record<string, unknown>).catch(e => { if (e.code === 'ENOENT') return null; throw e; });
+    if (!journal || journal.transactionId !== RETAINED_TRANSACTION || journal.head !== RETAINED_SOURCE || journal.candidateId !== RETAINED_RELEASE || journal.decision !== 'RETAIN CANDIDATE' || !releases.includes(RETAINED_RELEASE)) throw new Error('APPLICATION_RUNTIME_PROVENANCE_MISSING');
+    releaseEvidence = { version: 1, releaseId: RETAINED_RELEASE, sourceSha: RETAINED_SOURCE, treeDigest: RETAINED_TREE };
+  }
   if (releaseEvidence) {
     if (releaseEvidence.version !== 1 || !/^[a-z0-9][a-z0-9._-]{0,119}$/.test(releaseEvidence.releaseId) || !/^[a-f0-9]{40}$/.test(releaseEvidence.sourceSha) || await runtimeTreeSha256(path.join(roots.state, 'runtime/releases', releaseEvidence.releaseId)) !== releaseEvidence.treeDigest) throw new Error('APPLICATION_RUNTIME');
     for (const role of ['coordinator', 'worker', 'gateway', 'node', 'oauth-canary']) {
