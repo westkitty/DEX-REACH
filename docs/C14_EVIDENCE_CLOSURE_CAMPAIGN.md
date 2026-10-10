@@ -22,7 +22,7 @@ header.
 | Dimension | Current state | Evidence |
 | --- | --- | --- |
 | INSTALLED_RUNTIME | Historical C13 candidate preserved; not changed | `OPERATIONAL_STATE.md` metadata header and C13 recovery evidence |
-| CURRENT_SOURCE | `c14-chaos-recovery`, final branch head `35629d84bf3070e7375e9dfaa02f77416e73bb07`; frozen source candidate `ab1cf13ae2ce38b5916410b2e8c72cea71ddf848` | Git HEAD, exact-head CI evidence, and this record |
+| CURRENT_SOURCE | `c14-chaos-recovery`, final branch head `07cd89b74b9a14b6d3bd50397aa4bc3871fd8b77`; frozen source candidate `ab1cf13ae2ce38b5916410b2e8c72cea71ddf848`; later commits are documentation bookkeeping | Git HEAD, exact-head CI evidence, and this record |
 | LOCAL_VALIDATION | Prior 385/385 suite and native gates PASS; fresh final rerun pending only after source changes | `docs/c14-acceptance/C14_K_SOURCE_ACCEPTANCE.md` |
 | HOSTED_CI | PASS on exact head through draft PR #16; no merge performed | `docs/c14-acceptance/C14_HOSTED_CI_EVIDENCE.md` |
 | PROGRAM_ACCEPTANCE | PARTIAL / NOT COMPLETE | recovered-plan traceability and final gate |
