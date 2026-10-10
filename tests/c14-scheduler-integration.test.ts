@@ -149,7 +149,8 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  // Interrupt RUNNING execution. Restart retains uncertainty and refuses identical-key replay.
  const activeCommand='printf started >> active-restart.txt; while ! test -f never-release.txt; do sleep 0.1; done; printf effect >> active-effect.txt';
  const active=(await start('active-restart',activeCommand)).result as {taskId:string};
- await until(async()=>fs.access(path.join(roots,'active-restart.txt')).then(()=>true,()=>false));
+ // The shell's `>>` creates the file before printf writes: wait for the marker itself, not the empty file.
+ await until(async()=>(await fs.readFile(path.join(roots,'active-restart.txt'),'utf8').catch(()=>''))==='started');
  await stop(child);await until(async()=>registry.listNodes().length===0);child=launch();
  await until(ready);
  assert.equal((await store.read(active.taskId))?.state,'AMBIGUOUS');
