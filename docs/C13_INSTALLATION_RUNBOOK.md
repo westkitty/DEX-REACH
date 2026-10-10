@@ -78,6 +78,8 @@ cd /Users/andrew/dex-reach-c13-worker-repair && node --import tsx scripts/c13-ma
 
 The journal preserves the error and the fresh observation reports recovery eligibility separately from historical decision state.
 
+When a pre-activation failure needs a source fix, commit/push the corrected branch and wait for required exact-head checks before another standalone owner Terminal attempt. The historical journal remains bound to its original transaction; retry eligibility and read-only report compare the **current** clean checkout to its remote without requiring it to equal the failed transaction head. No historic failure record is rewritten. The retry still requires a fresh local preflight and a newly authorized install invocation; it is not an automatic replay.
+
 | Classification | Operator action |
 | --- | --- |
 | SAFE TO RETRY | Only when helper is proven inactive, previous services/tree and exact pre-install definitions/configuration are intact, and no rollback capsule was created. Correct the reported non-consequential cause, rerun preflight, then rerun the authorized install command. Prior journal history is retained. A remaining capsule blocks automatic replay. |

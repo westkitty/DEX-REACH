@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { EventEmitter } from 'node:events';
-import { acceptCandidate, conditionalRecovery, recoveryDecision, installedReady, freshTask, installStatusFresh, assertTarget, validateConnectorReadback, type Observation } from '../scripts/lib/c13-acceptance.js';
+import { acceptCandidate, conditionalRecovery, recoveryDecision, installedReady, freshTask, installStatusFresh, assertTarget, expectedHeadForObservation, validateConnectorReadback, type Observation } from '../scripts/lib/c13-acceptance.js';
 import { installedQueueProof, waitForCallerExit } from '../scripts/lib/c13-queue-proof.js';
 import { coordinatedStatus, CoordinatorUnavailableError } from '../src/coordinator/client.js';
 import { ResultStore } from '../src/node/result-store.js';
@@ -55,6 +55,18 @@ test('rollback requires separate authorization and failure remains visible', asy
   assert.equal(effects, 0);
   await assert.rejects(conditionalRecovery(ready, true, async () => { throw new Error('rollback failed'); }), /rollback failed/);
 });
+test('historical failed transaction can be assessed on a newly published clean revision without unpinning active acceptance', () => {
+  const oldHead = '075e270';
+  const newHead = 'repaired-next-commit';
+  assert.equal(expectedHeadForObservation(oldHead, 'active'), oldHead);
+  assert.equal(expectedHeadForObservation(oldHead, 'historical-retry'), undefined);
+  const target = { root: '/Users/andrew/dex-reach-c13-worker-repair', platform: 'darwin', arch: 'arm64', hostname: 'MacBook-Air.local', user: 'andrew', branch: 'c13-worker-repair', head: newHead, remoteHead: newHead, expectedHead: expectedHeadForObservation(oldHead, 'historical-retry') ?? newHead, dirty: false };
+  assert.doesNotThrow(() => assertTarget(target));
+  assert.throws(() => assertTarget({ ...target, expectedHead: expectedHeadForObservation(oldHead, 'active')! }));
+  assert.throws(() => assertTarget({ ...target, remoteHead: oldHead }));
+  assert.equal(recoveryDecision({ ...ready, previousRunning: true, snapshotValid: false, snapshotPresent: false, candidateRunning: false }), 'SAFE TO RETRY');
+});
+
 test('missing task, historical handle, incomplete task and ambiguous fresh selection cannot pass', () => {
   const since = '2026-10-09T12:00:00Z';
   assert.throws(() => freshTask([], since, task.nodeId));

@@ -44,6 +44,29 @@ function safeReleaseId(value: string): string {
   return value;
 }
 
+/** Admit the exact owner-local worker config alongside the state root, never an arbitrary outside path. */
+async function checkedWorkerConfigPath(file: string, stateDir: string): Promise<string> {
+  const configPath = path.resolve(file);
+  const normalizedStateDir = path.resolve(stateDir);
+  if (configPath.startsWith(`${normalizedStateDir}${path.sep}`)) return configPath;
+
+  const dedicatedConfig = path.join(path.dirname(normalizedStateDir), '.dex-reach-worker', 'config.json');
+  if (configPath !== dedicatedConfig) throw new Error('worker configuration path is outside the two approved locations');
+  const ownerUid = process.getuid?.();
+  const parent = await fs.lstat(path.dirname(configPath));
+  if (!parent.isDirectory() || parent.isSymbolicLink() || (parent.mode & 0o077) !== 0 || (ownerUid !== undefined && parent.uid !== ownerUid)) {
+    throw new Error('dedicated worker configuration directory is not owner-private and non-symlinked');
+  }
+  const configStat = await fs.lstat(configPath).catch(error => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  });
+  if (configStat && (!configStat.isFile() || configStat.isSymbolicLink() || (configStat.mode & 0o077) !== 0 || (ownerUid !== undefined && configStat.uid !== ownerUid))) {
+    throw new Error('dedicated worker configuration file is not owner-private and regular');
+  }
+  return configPath;
+}
+
 function sha256(value: string | Buffer): string {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -199,9 +222,7 @@ export async function prepareRuntimeRollbackSnapshot(input: {
   await verifyRuntimeRelease(previousRoot);
   const previousReleaseSha256 = await runtimeTreeSha256(previousRoot);
 
-  const configPath = path.resolve(input.workerConfigPath);
-  const normalizedStateDir = path.resolve(input.stateDir);
-  if (!configPath.startsWith(`${normalizedStateDir}${path.sep}`)) throw new Error('worker configuration path must be inside the DEX state directory');
+  const configPath = await checkedWorkerConfigPath(input.workerConfigPath, input.stateDir);
   const candidateConfig = Buffer.from(input.candidateWorkerConfig);
   const oldConfig = await readOptional(configPath);
   const snapshot: RuntimeRollbackSnapshot = {
@@ -309,10 +330,8 @@ async function preflightRestore(input: RestoreRuntimeRollbackInput): Promise<Res
     restoreFiles.push({ target, bytes: Buffer.from(saved.previousBase64, 'base64'), mode: 0o600 });
   }
 
-  const configPath = path.resolve(input.workerConfigPath);
-  if (configPath !== path.resolve(snapshot.workerConfig.path) || !configPath.startsWith(`${path.resolve(input.stateDir)}${path.sep}`)) {
-    throw new Error('worker configuration path mismatch');
-  }
+  const configPath = await checkedWorkerConfigPath(input.workerConfigPath, input.stateDir);
+  if (configPath !== path.resolve(snapshot.workerConfig.path)) throw new Error('worker configuration path mismatch');
   const currentConfig = await readOptional(configPath);
   const currentConfigHash = currentConfig ? sha256(currentConfig) : null;
   if (currentConfigHash !== snapshot.workerConfig.previousSha256 && currentConfigHash !== snapshot.workerConfig.candidateSha256) {

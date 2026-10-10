@@ -12,7 +12,7 @@ import { readEnvFile } from './lib/node-files.js';
 import { runtimeReleaseId } from './lib/runtime-release.js';
 import { runtimeTreeSha256, validateRuntimeRollbackSnapshot, type RuntimeRollbackSnapshot } from './lib/runtime-rollback.js';
 import { launchdIsAbsent, launchdIsRunning, launchdServiceIsEnabled } from './lib/launchctl.js';
-import { acceptCandidate, QueueProofFailure, freshTask, validateConnectorReadback, installStatusFresh, assertTarget, installedReady, recoveryDecision, type Observation } from './lib/c13-acceptance.js';
+import { acceptCandidate, QueueProofFailure, freshTask, validateConnectorReadback, installStatusFresh, assertTarget, installedReady, recoveryDecision, expectedHeadForObservation, type Observation } from './lib/c13-acceptance.js';
 import { installedQueueProof } from './lib/c13-queue-proof.js';
 import type { ReachTaskRecord } from '../src/node/task-store.js';
 
@@ -116,8 +116,8 @@ async function preflight(): Promise<{ head: string; candidateId: string }> {
 function restoreInput(j: Journal) {
   return { snapshotPath: path.join(localState, 'runtime/rollback', j.candidateId, 'snapshot.json'), stateDir: localState, agentsDir: agents, workerConfigPath: workspaceWorkerConfigFile(), services, candidateReleaseId: j.candidateId };
 }
-async function observe(j: Journal): Promise<Observation> {
-  await identity(true, j.head);
+async function observe(j: Journal, mode: 'active' | 'historical-retry' = 'active'): Promise<Observation> {
+  await identity(true, expectedHeadForObservation(j.head, mode));
   if (j.protectedHash && await protectedHash() !== j.protectedHash) throw new Error('protected enrollment/secrets/policy changed; REQUIRES OWNER INPUT');
   const o: Observation = { statusFresh: false, complete: false, helperIdle: await helperIdle(), snapshotValid: false, previousIntact: false, candidateIntact: false, definitionsKnown: false, previousRunning: false, candidateRunning: false };
   o.previousIntact = await runtimeTreeSha256(path.join(localState, 'runtime/releases', previousId)) === previousHash;
@@ -168,7 +168,7 @@ try {
   if (command === 'preflight') console.log(JSON.stringify({ state: 'INSTALLATION READY', ...await preflight(), liveExecuted: false }, null, 2));
   else if (command === 'report') {
     const j = await json(journalPath) as Journal;
-    const observation = await observe(j);
+    const observation = await observe(j, 'historical-retry');
     console.log(JSON.stringify({ ...j, recoveryEligibility: recoveryDecision(observation), observation, c13: 'NOT PASS', e7: 'BLOCKED — HOST CAPABILITY' }, null, 2));
   } else {
     if (!['install', 'observe', 'record-task', 'reconcile-install', 'reconcile-queue', 'accept', 'rollback'].includes(command ?? '')) throw new Error('usage: c13-maintenance.ts preflight|install|observe|record-task|reconcile-install|reconcile-queue|accept|rollback|report [--authorize-live]');
@@ -176,7 +176,7 @@ try {
     await withFileLock(path.join(localState, 'runtime/c13-maintenance.lock'), async () => {
       if (command === 'install') {
         const prior = await json(journalPath).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
-        if (prior && recoveryDecision(await observe(prior)) !== 'SAFE TO RETRY') throw new Error('existing maintenance attempt; observe/reconcile rather than replay');
+        if (prior && recoveryDecision(await observe(prior, 'historical-retry')) !== 'SAFE TO RETRY') throw new Error('existing maintenance attempt; observe/reconcile rather than replay');
         const p = await preflight();
         const j: Journal = { transactionId: crypto.randomUUID(), head: p.head, candidateId: p.candidateId, startedAt: new Date().toISOString(), installUncertain: true, baseline: await baseline(), protectedHash: await protectedHash(), ...(prior ? { history: [...(prior.history ?? []), prior] } : {}) };
         await save(j); // journal is durable before the first installer action

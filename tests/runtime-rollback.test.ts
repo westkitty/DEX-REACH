@@ -50,12 +50,12 @@ async function release(root: string): Promise<void> {
   for (const entry of requiredEntries) await write(path.join(root, entry), `fixture:${entry}`);
 }
 
-async function fixture(): Promise<{
+async function fixture(workerLocation: 'inside' | 'sibling' = 'inside'): Promise<{
   base: string; stateDir: string; agentsDir: string; workerConfigPath: string;
   candidateId: string; previousId: string; candidateRoot: string; previousRoot: string;
   services: RuntimeRollbackService[]; candidatePlists: Record<string, string>;
   previousPlists: Map<string, string>; previousConfig: string; candidateConfig: string;
-  snapshot: () => Promise<string>;
+  snapshot: (workerConfigOverride?: string) => Promise<string>;
 }> {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-rollback-'));
   const stateDir = path.join(base, 'state');
@@ -77,16 +77,22 @@ async function fixture(): Promise<{
     candidatePlists[service.label] = next;
     await write(service.target, old);
   }
-  const workerConfigPath = path.join(stateDir, 'workspace-worker', 'config.json');
+  const workerConfigPath = workerLocation === 'sibling'
+    ? path.join(base, '.dex-reach-worker', 'config.json')
+    : path.join(stateDir, 'workspace-worker', 'config.json');
   const previousConfig = '{"version":1,"nodeId":"macbook-air.local","allowedRoots":["/Users/andrew"],"rootsHash":"old-hash"}\n';
   const candidateConfig = '{"version":1,"nodeId":"macbook-air.local","allowedRoots":["/Users/andrew"],"rootsHash":"new-hash"}\n';
   await write(workerConfigPath, previousConfig);
+  if (workerLocation === 'sibling') {
+    await fs.chmod(path.dirname(workerConfigPath), 0o700);
+    await fs.chmod(workerConfigPath, 0o600);
+  }
   return {
     base, stateDir, agentsDir, workerConfigPath, candidateId, previousId, candidateRoot, previousRoot,
     services, candidatePlists, previousPlists, previousConfig, candidateConfig,
-    snapshot: () => prepareRuntimeRollbackSnapshot({
+    snapshot: (workerConfigOverride = workerConfigPath) => prepareRuntimeRollbackSnapshot({
       stateDir, agentsDir, candidateReleaseId: candidateId, candidateReleaseRoot: candidateRoot,
-      services, candidatePlists, workerConfigPath, candidateWorkerConfig: candidateConfig
+      services, candidatePlists, workerConfigPath: workerConfigOverride, candidateWorkerConfig: candidateConfig
     }).then(value => {
       if (!value) throw new Error('expected a previous runtime snapshot');
       return value;
@@ -111,6 +117,36 @@ test('pre-activation snapshot pins exact old runtime and candidate and excludes 
     assert.equal((await fs.stat(path.dirname(snapshotPath))).mode & 0o777, 0o700);
     assert.equal((await fs.stat(snapshotPath)).mode & 0o777, 0o600);
     assert.doesNotMatch(await fs.readFile(snapshotPath, 'utf8'), /SECRET_VALUE|REFRESH_TOKEN/);
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
+test('exact owner-private sibling worker config is captured and restored without widening targets', async () => {
+  const f = await fixture('sibling');
+  try {
+    const snapshotPath = await f.snapshot();
+    const snapshot = JSON.parse(await fs.readFile(snapshotPath, 'utf8')) as { workerConfig: { path: string } };
+    assert.equal(snapshot.workerConfig.path, f.workerConfigPath);
+    for (const service of f.services) await write(service.target, f.candidatePlists[service.label]!);
+    await write(f.workerConfigPath, f.candidateConfig);
+    const input = { snapshotPath, stateDir: f.stateDir, agentsDir: f.agentsDir,
+      workerConfigPath: f.workerConfigPath, services: f.services };
+    assert.equal(await validateRuntimeRollbackSnapshot(input), f.previousId);
+    assert.equal(await restoreRuntimeRollbackSnapshot(input), f.previousId);
+    assert.equal(await fs.readFile(f.workerConfigPath, 'utf8'), f.previousConfig);
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
+test('worker config guard refuses arbitrary sibling paths and symlinked dedicated directories', async () => {
+  const f = await fixture('sibling');
+  try {
+    const original = f.workerConfigPath;
+    f.workerConfigPath = path.join(f.base, 'unrelated', 'config.json');
+    await write(f.workerConfigPath, f.previousConfig);
+    await assert.rejects(f.snapshot(f.workerConfigPath), /outside the two approved locations/);
+    f.workerConfigPath = original;
+    await fs.rename(path.dirname(original), path.join(f.base, 'saved-worker-dir'));
+    await fs.symlink(path.join(f.base, 'saved-worker-dir'), path.dirname(original), 'dir');
+    await assert.rejects(f.snapshot(), /not owner-private and non-symlinked/);
   } finally { await fs.rm(f.base, { recursive: true, force: true }); }
 });
 

@@ -19,6 +19,11 @@ export function recoveryDecision(o: Observation): Decision {
   if (!o.snapshotValid) return 'REQUIRES OWNER INPUT';
   return 'SAFE TO ROLLBACK';
 }
+/** Historical failed attempts use the newly verified published checkout only for retry eligibility. */
+export function expectedHeadForObservation(journalHead: string, mode: 'active' | 'historical-retry'): string | undefined {
+  return mode === 'historical-retry' ? undefined : journalHead;
+}
+
 export function installedReady(o: Observation): boolean {
   return !o.uncertainOperation && !o.cleanupPending && o.statusFresh && o.complete && o.helperIdle && o.snapshotValid && o.previousIntact && o.candidateIntact && o.definitionsKnown && o.candidateRunning;
 }
