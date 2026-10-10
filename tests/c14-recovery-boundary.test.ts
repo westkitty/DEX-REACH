@@ -375,3 +375,21 @@ test('a tampered private manifest beside a certified capture refuses reconciliat
     await assert.rejects(inspectSyntheticTransaction(w, boundary), /MANIFEST/);
   } finally { await w.cleanup(); }
 });
+test('in-state checkpoint control directory: only real sockets and this holder\'s fenced lock are runtime-only', async () => {
+  const { withFencedLocks } = await import('../scripts/lib/recovery-coverage.js');
+  const net = await import('node:net');
+  const w = await fixture(); const cwd = process.cwd(); let server: import('node:net').Server | undefined; try {
+    const control = path.join(w.source.state, 'checkpoint'); await fs.mkdir(control, { mode: 0o700 });
+    // Listen by relative path: the absolute temporary path exceeds the platform socket-path limit.
+    process.chdir(control); server = net.createServer(); await new Promise<void>(r => server!.listen('gateway.sock', () => r())); process.chdir(cwd);
+    assert.deepEqual((await inspectCoverage(w.source, 'synthetic')).problems, []);
+    const lock = path.join(control, 'holder.lock'); await fs.writeFile(lock, JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: 't' }), { mode: 0o600 });
+    assert.ok((await inspectCoverage(w.source, 'synthetic')).problems.includes('checkpoint-control:TRANSIENT_WRITE_OR_LOCK_PRESENT'));
+    assert.deepEqual((await withFencedLocks(new Set([lock]), () => inspectCoverage(w.source, 'synthetic'))).problems, []);
+    // A lock naming another process is never exempt, even inside a fence.
+    await fs.writeFile(lock, JSON.stringify({ pid: process.pid + 1, createdAt: Date.now(), token: 't' }), { mode: 0o600 });
+    assert.ok((await withFencedLocks(new Set([lock]), () => inspectCoverage(w.source, 'synthetic'))).problems.length);
+    await fs.rm(lock); await fs.writeFile(path.join(control, 'node.sock'), 'not a socket', { mode: 0o600 });
+    assert.ok((await inspectCoverage(w.source, 'synthetic')).problems.includes('UNKNOWN_OWNER_STATE_FAMILY'));
+  } finally { process.chdir(cwd); await new Promise<void>(r => server ? server.close(() => r()) : r()); await w.cleanup(); }
+});

@@ -8,8 +8,18 @@ import type { LinkPolicy } from './recovery-symlinks.js';
 export const SNAPSHOT_WRITERS = ['tasks-results-events', 'receipts', 'coordinator', 'policy-grants-budgets-plans', 'enrollment-revocation', 'oauth', 'runtime-installer', 'activity-audit-trace-checkpoints'] as const;
 export type SnapshotWriter = typeof SNAPSHOT_WRITERS[number];
 export type SnapshotBoundary = Readonly<{ scope: 'synthetic'; transactionId: string; generation: number; manifest: Manifest }>;
-const boundaries = new WeakMap<object, { owner: SyntheticWriterCohort; fingerprint: string }>();
-const fingerprint = (m: Manifest) => hashValue({ entries: m.entries, directories: m.directories, families: m.families, volumes: m.volumes, roots: m.roots, linkPolicy: m.linkPolicy });
+/** One snapshot engine, two boundary owners: the synthetic cohort and the writer-checkpoint holder. */
+export type BoundaryOwner = { readonly workspace: SyntheticWorkspace; validate(boundary: SnapshotBoundary): Promise<void> };
+const boundaries = new WeakMap<object, { owner: BoundaryOwner; fingerprint: string }>();
+/** Internal: mint a boundary object whose only authority is this process-local registration. */
+export function registerBoundary(owner: BoundaryOwner, transactionId: string, generation: number, manifest: Manifest): SnapshotBoundary {
+  const boundary = Object.freeze({ scope: 'synthetic' as const, transactionId, generation, manifest });
+  boundaries.set(boundary, { owner, fingerprint: fingerprint(manifest) }); return boundary;
+}
+export function boundaryFingerprintMatches(boundary: SnapshotBoundary, manifest: Manifest): boolean {
+  const held = boundaries.get(boundary); return !!held && fingerprint(manifest) === held.fingerprint && fingerprint(boundary.manifest) === held.fingerprint;
+}
+export const fingerprint = (m: Manifest) => hashValue({ entries: m.entries, directories: m.directories, families: m.families, volumes: m.volumes, roots: m.roots, linkPolicy: m.linkPolicy });
 /** A test-owned source contract, not a production quiescence command or JSON approval mechanism. */
 export class SyntheticWriterCohort {
   private generation = 0;
@@ -37,8 +47,7 @@ export class SyntheticWriterCohort {
     try {
       const manifest = await inspectCoverage(this.workspace.source, 'synthetic', policy);
       if (!manifest.consistent || manifest.problems.length) throw new Error('SNAPSHOT_UNPROVEN');
-      const boundary = Object.freeze({ scope: 'synthetic' as const, transactionId: crypto.randomUUID(), generation: this.generation, manifest });
-      boundaries.set(boundary, { owner: this, fingerprint: fingerprint(manifest) }); return boundary;
+      return registerBoundary(this, crypto.randomUUID(), this.generation, manifest);
     } catch (error) { this.poisoned = true; throw error; }
   }
   async validate(boundary: SnapshotBoundary): Promise<void> {

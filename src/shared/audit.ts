@@ -3,6 +3,7 @@ import path from 'node:path';
 import { redact } from './security.js';
 import { stateDir } from './local-env.js';
 import type { RequestActor } from './protocol.js';
+import { processCheckpoint } from './checkpoint.js';
 
 export type AuditEvent = {
   at: string;
@@ -41,9 +42,12 @@ export class AuditLog {
   constructor(private readonly file = auditFile()) {}
 
   async append(event: AuditEvent): Promise<void> {
-    await fs.mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
-    const safe = { ...event, args: summarizeContent(redact(event.args)) };
-    await fs.appendFile(this.file, JSON.stringify(safe) + '\n', { encoding: 'utf8', mode: 0o600 });
+    // Counted by an enabled checkpoint participant, so an append after acknowledgement is detected.
+    await processCheckpoint().track(async () => {
+      await fs.mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
+      const safe = { ...event, args: summarizeContent(redact(event.args)) };
+      await fs.appendFile(this.file, JSON.stringify(safe) + '\n', { encoding: 'utf8', mode: 0o600 });
+    });
   }
 
   /** Most recent events, newest last. */

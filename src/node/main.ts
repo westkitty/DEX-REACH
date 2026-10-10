@@ -57,6 +57,7 @@ import { classifyFailure, classifyOperationSafety, defaultAttemptBudget, decideE
 import { reconcileBootTasks } from './boot-recovery.js';
 import type { ProcessExecutionContext } from '../shared/activity.js';
 import { durableCapabilityRefusal, NodeNegotiation } from '../shared/protocol-negotiation.js';
+import { CheckpointAdmissionClosedError, checkpointControlFromEnv, processCheckpoint } from '../shared/checkpoint.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -93,6 +94,8 @@ const activeTasks = await taskStore.loadActiveTasks();
 const bootRecovery = await reconcileBootTasks(taskStore, results);
 await backend.start(config.allowedRoots);
 await sweepExpiredPlans();
+// Writer checkpoint participation is opt-in; without explicit configuration the gate stays IDLE.
+await checkpointControlFromEnv('node', config.nodeId, stateDir());
 console.log(`DEX//REACH node ${config.nodeId} started with ${backend.listTools().length} compatibility tools, ${activeTasks.length} durable active task(s), ${bootRecovery.length} boot reconciliation decision(s) (state dir ${stateDir()})`);
 
 async function currentAccess(): Promise<AccessSnapshot> {
@@ -554,7 +557,8 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     executionStarted = true;
     if (options.defer) {
       publishTaskEvent(task.taskId, 'accepted', 'RUNNING', 'Durable task accepted and execution continues asynchronously.');
-      void executeAdmittedTask(execution);
+      // Already admitted: the continuation is drained by a checkpoint, never refused.
+      void processCheckpoint().track(() => executeAdmittedTask(execution));
       return { type: 'response', id: request.id, ok: true, result: { taskId: task.taskId, nodeId: config.nodeId, operation: request.operation, state: 'RUNNING', durable: true }, traceId: trace.traceId };
     }
     return executeAdmittedTask(execution);
@@ -626,9 +630,9 @@ async function publishStatus(): Promise<void> {
   lastStatusJson = json;
 }
 
-const statusTimer = setInterval(() => void publishStatus().catch(() => undefined), 2000);
+const statusTimer = setInterval(() => void processCheckpoint().skipWhileHeld(publishStatus).catch(() => undefined), 2000);
 statusTimer.unref();
-const planSweepTimer = setInterval(() => void sweepExpiredPlans().catch(() => undefined), 60_000);
+const planSweepTimer = setInterval(() => void processCheckpoint().skipWhileHeld(sweepExpiredPlans).catch(() => undefined), 60_000);
 planSweepTimer.unref();
 
 async function connect(): Promise<void> {
@@ -700,9 +704,13 @@ async function connect(): Promise<void> {
     if ((parsed as { type?: string }).type !== 'request') return;
     negotiation.request();
     try {
-      const response = await handleRequest(parsed as GatewayRequest);
+      const response = await processCheckpoint().admit(() => handleRequest(parsed as GatewayRequest));
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(response));
-    } catch {
+    } catch (error) {
+      if (error instanceof CheckpointAdmissionClosedError) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'response', id: (parsed as GatewayRequest).id, ok: false, error: error.message }));
+        return;
+      }
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'response', id: (parsed as GatewayRequest).id, ok: false, error: 'REQUEST_UNAVAILABLE: execution outcome may be uncertain' }));
     }
   });

@@ -18,6 +18,7 @@ import { classifyClient } from '../shared/access.js';
 import type { RequestActor } from '../shared/protocol.js';
 import { DEX_REACH_VERSION } from '../shared/version.js';
 import { OAuthHealthRecorder } from '../shared/oauth-diagnostics.js';
+import { checkpointControlFromEnv } from '../shared/checkpoint.js';
 
 loadLocalSecrets();
 const config = loadGatewayConfig();
@@ -29,6 +30,12 @@ const audit = new AuditLog();
 const oauth = new ReachOAuthProvider(config.stateDir, config.ownerUser, config.ownerPassword, resourceUrl, issuerUrl);
 const oauthHealth = new OAuthHealthRecorder(config.stateDir);
 const nodeAuth = new NodeAuthStore(config.stateDir);
+// Writer checkpoint participation is opt-in; without explicit configuration the gate stays IDLE.
+if (process.env.DEX_REACH_CHECKPOINT_CONTROL === '1') {
+  const nodeId = process.env.DEX_REACH_CHECKPOINT_NODE_ID;
+  if (!nodeId) throw new Error('DEX_REACH_CHECKPOINT_NODE_ID is required to enable gateway checkpoint participation');
+  await checkpointControlFromEnv('gateway', nodeId, config.stateDir);
+}
 await oauth.initialize();
 await oauthHealth.initialize();
 await nodeAuth.initialize();

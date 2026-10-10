@@ -48,13 +48,28 @@ const mandatory = ['results/manifest.json', 'nodes/macbook-air.local.env', 'node
 export function manifestDigest(m: Omit<Manifest, 'digest'> | Manifest): string { const { digest: _digest, ...body } = m as Manifest; return hashValue(body); }
 
 /** No directories, locks, caches or output files are created. Manifest contains PRIVATE hashes. */
-export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = 'inspection', linkPolicy: LinkPolicy = defaultLinkPolicy()): Promise<Manifest> {
+export type CoverageOptions = { heldLocks?: ReadonlySet<string> };
+/** Locks a checkpoint holder in this process holds while fencing writers; scoped to that fence only. */
+const fenceScopes: Array<ReadonlySet<string>> = [];
+export async function withFencedLocks<T>(locks: ReadonlySet<string>, fn: () => Promise<T>): Promise<T> {
+  fenceScopes.push(locks);
+  try { return await fn(); } finally { fenceScopes.splice(fenceScopes.indexOf(locks), 1); }
+}
+/** Runtime-only checkpoint control endpoints at the state root: sockets and the holder lock, never copied. */
+const CONTROL_DIRECTORY = 'checkpoint';
+export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = 'inspection', linkPolicy: LinkPolicy = defaultLinkPolicy(), options: CoverageOptions = {}): Promise<Manifest> {
   for (const root of Object.values(roots)) await realDirectory(root);
   const startedAt = new Date().toISOString(), entries: Entry[] = [], problems: string[] = [], families: Manifest['families'] = [], directories: DirectoryEntry[] = [];
   const observedDirectories = new Map<string, { inode: number; ctimeMs: number; dev: number; names: string[] }>();
   const volumes = { state: (await fs.lstat(roots.state)).dev, agents: (await fs.lstat(roots.agents)).dev, worker: (await fs.lstat(roots.worker)).dev };
   let consistent = true;
-  const stateNames = (await fs.readdir(roots.state)).sort();
+  // Only locks this process verifiably holds (a checkpoint fence) are excluded; any other lock still blocks.
+  const held = new Set<string>();
+  for (const file of [...(options.heldLocks ?? []), ...fenceScopes.flatMap(scope => [...scope])]) {
+    try { if ((JSON.parse(await fs.readFile(file, 'utf8')) as { pid?: unknown }).pid === process.pid) held.add(path.resolve(file)); } catch { /* Unverifiable locks stay visible. */ }
+  }
+  const listNames = async (directory: string) => (await fs.readdir(directory)).filter(name => !held.has(path.resolve(directory, name))).sort();
+  const stateNames = (await listNames(roots.state)).filter(name => name !== CONTROL_DIRECTORY);
   const policy = recoveryFamilies('macbook-air.local', stateNames);
   const known = new Set(policy.filter(f => f.root === 'state').map(f => f.relative.split('/')[0]));
   const unknownFamily = () => { problems.push('UNKNOWN_OWNER_STATE_FAMILY'); families.push({ id: `unknown-${families.length}`, status: 'UNKNOWN', dependency: 'unmapped owner-state requires explicit coverage policy' }); };
@@ -62,6 +77,14 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
   // Services and worker roots are closed-world too: only the shared LaunchAgents directory may hold non-DEX entries.
   const servicePlists = new Set(labels.map(label => `com.stinkyweasel.dex-reach.${label}.plist`));
   for (const name of await fs.readdir(roots.agents)) if (name.startsWith('com.stinkyweasel.dex-reach.') && !servicePlists.has(name)) unknownFamily();
+  if ((await fs.readdir(roots.state)).includes(CONTROL_DIRECTORY)) {
+    const control = path.join(roots.state, CONTROL_DIRECTORY), st = await fs.lstat(control);
+    if (st.isSymbolicLink() || !st.isDirectory() || (st.mode & 0o077) !== 0) problems.push('checkpoint-control:INVALID_OR_UNSUPPORTED');
+    else for (const name of await listNames(control)) {
+      if (/^(node|gateway)\.sock$/.test(name) && (await fs.lstat(path.join(control, name))).isSocket()) continue;
+      if (/\.lock$|\.recovery$/.test(name)) problems.push('checkpoint-control:TRANSIENT_WRITE_OR_LOCK_PRESENT'); else unknownFamily();
+    }
+  }
   for (const name of await fs.readdir(roots.worker)) {
     // worker.sock is the live IPC endpoint: runtime-only, never copied, but must actually be a socket.
     if (name === 'config.json') continue;
@@ -78,7 +101,7 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
     const dir = path.join(roots.state, parent), st = await fs.lstat(dir).catch(() => null);
     if (!st) continue; // Required file families report MISSING themselves.
     if (st.isSymbolicLink() || !st.isDirectory()) { problems.push(`${parent}:INVALID_OR_UNSUPPORTED`); continue; }
-    const names = (await fs.readdir(dir)).sort();
+    const names = await listNames(dir);
     observedDirectories.set(dir, { inode: st.ino, ctimeMs: st.ctimeMs, dev: st.dev, names });
     directories.push({ root: 'state', relative: parent, mode: st.mode & 0o777, uid: st.uid, gid: st.gid, inode: st.ino, ctimeMs: st.ctimeMs, names });
     for (const name of names) if (!allowed.has(name)) { if (/\.lock$|\.tmp$/.test(name)) problems.push(`${parent}:TRANSIENT_WRITE_OR_LOCK_PRESENT`); else unknownFamily(); }
@@ -97,7 +120,7 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
       }
       if (before.dev !== device) throw new Error('CROSS_VOLUME');
       if (before.isDirectory()) {
-        const names = (await fs.readdir(file)).sort();
+        const names = await listNames(file);
         observedDirectories.set(file, { inode: before.ino, ctimeMs: before.ctimeMs, dev: before.dev, names });
         directories.push({ root: family.root, relative, mode: before.mode & 0o777, uid: before.uid, gid: before.gid, inode: before.ino, ctimeMs: before.ctimeMs, names });
         for (const name of names) {
@@ -145,7 +168,7 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
     if (!entries.some(e => e.root === entry.root && e.relative === entry.link!.resolvedRelative && e.kind !== 'link') && !directories.some(d => d.root === entry.root && d.relative === entry.link!.resolvedRelative)) problems.push('LINK_TARGET_NOT_INDEPENDENTLY_COVERED');
   }
   for (const [file, before] of observedDirectories) {
-    const st = await fs.lstat(file).catch(() => null), names = st?.isDirectory() ? (await fs.readdir(file)).sort() : [];
+    const st = await fs.lstat(file).catch(() => null), names = st?.isDirectory() ? (file === roots.state ? (await listNames(file)).filter(n => n !== CONTROL_DIRECTORY) : await listNames(file)) : [];
     if (!st || st.isSymbolicLink() || st.ino !== before.inode || st.ctimeMs !== before.ctimeMs || st.dev !== before.dev || JSON.stringify(names) !== JSON.stringify(before.names)) { consistent = false; problems.push('DIRECTORY_MEMBERSHIP_CHANGED'); }
   }
   entries.sort((a, b) => `${a.root}/${a.relative}`.localeCompare(`${b.root}/${b.relative}`));
