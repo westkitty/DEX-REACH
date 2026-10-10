@@ -578,6 +578,31 @@ test('heartbeats refresh leases and tickets, and stale ticket fields stay bounde
   });
 });
 
+test('a caller liveness PID is persisted separately from workload identity on a queue ticket', async () => {
+  await withStateDir(async dir => {
+    const repositoryRoot = path.join(dir, 'repo');
+    await fs.mkdir(repositoryRoot, { recursive: true });
+    const held = await acquireWork({ snapshot: HOST, executor: 'human', access: 'mutate', workload: 'medium', repositoryRoot });
+    assert.equal(held.status, 'acquired');
+    const queued = await acquireWork({
+      snapshot: HOST,
+      executor: 'chatgpt',
+      access: 'mutate',
+      workload: 'medium',
+      repositoryRoot,
+      pid: 12_345,
+      pidIsWorkload: false
+    });
+    assert.equal(queued.status, 'queued');
+    if (queued.status !== 'queued') return;
+    const stored = (await readCoordinatorState()).tickets.find(ticket => ticket.id === queued.ticket.id);
+    assert.equal(stored?.pid, 12_345);
+    assert.equal(stored?.pidIsWorkload, false);
+    await cancelTicket(queued.ticket.id);
+    if (held.status === 'acquired') await releaseWork(held.lease.id, { force: true });
+  });
+});
+
 test('a lease is released only by its holder unless the local owner forces it', async () => {
   await withStateDir(async dir => {
     const repo = path.join(dir, 'repo');
