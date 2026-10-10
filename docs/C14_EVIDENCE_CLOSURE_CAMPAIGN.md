@@ -1,5 +1,12 @@
 # C14 evidence-closure campaign record
 
+## Current source note — 2026-10-10 maximum-scope v2 campaign
+
+Current v2 source completion and supplemental evidence limits are recorded in the linked report. Older synthetic/no-historical/no-public-progress descriptions below retain their historical meaning.
+
+Evidence and exact validation/publication boundaries: [c14-compatibility/C14_V2_COMPLETION_REPORT.md](c14-compatibility/C14_V2_COMPLETION_REPORT.md).
+C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 program PARTIAL; C15 BLOCKED.
+
 This is the durable continuation record for the extended C14 campaign. It is
 source-only unless a packet explicitly records an authorized external boundary.
 It never supersedes the installed-runtime metadata in the operational-state

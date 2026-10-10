@@ -1,5 +1,12 @@
 # C14-F mixed-version compatibility and migration safety
 
+## Current source note — 2026-10-10 maximum-scope v2 campaign
+
+The earlier synthetic matrix below remains historical. Genuine compiled revision 5b08354ace35644a2ff9e72e346ff745484eb8ca now passes the actual A-F current/historical matrix plus signed authentication, reconnect and no-fallback control. See C14_V2_HISTORICAL_RESULTS.json.
+
+Evidence and exact validation/publication boundaries: [C14_V2_COMPLETION_REPORT.md](C14_V2_COMPLETION_REPORT.md).
+C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 program PARTIAL; C15 BLOCKED.
+
 ## Verdict
 
 **C14-F: PASS at source and isolated loopback-fixture scope; PARTIAL for installed mixed-version migration.**

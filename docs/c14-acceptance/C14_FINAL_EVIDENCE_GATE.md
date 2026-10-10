@@ -1,5 +1,12 @@
 # C14 final evidence gate
 
+## Current source note — 2026-10-10 maximum-scope v2 campaign
+
+The older frozen candidate and counts below are historical. Production candidate f4efc91643a71a3b163665df072f3832322a855f has real client-visible replay and compiled historical evidence, plus 172 byte-for-byte build artifacts. Performance remains PARTIAL without latency budgets; installed/connector/program gates remain open.
+
+Evidence and exact validation/publication boundaries: [../c14-compatibility/C14_V2_COMPLETION_REPORT.md](../c14-compatibility/C14_V2_COMPLETION_REPORT.md).
+C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 program PARTIAL; C15 BLOCKED.
+
 ## Frozen candidate
 
 Candidate source is `c14-chaos-recovery` at

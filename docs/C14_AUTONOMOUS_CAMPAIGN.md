@@ -1,5 +1,12 @@
 # C14 autonomous campaign ledger
 
+## Current source note — 2026-10-10 maximum-scope v2 campaign
+
+Maximum-scope v2 source campaign progressed from 2571382 to production f4efc91 and test-only 0ea344a. Current continuation belongs to the completion report and existing C14-H/J owners; historical next-packet instructions below do not supersede it.
+
+Evidence and exact validation/publication boundaries: [c14-compatibility/C14_V2_COMPLETION_REPORT.md](c14-compatibility/C14_V2_COMPLETION_REPORT.md).
+C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 program PARTIAL; C15 BLOCKED.
+
 This ledger records source-level campaign state. It does not certify installed runtime, public connector, physical host, or human acceptance.
 
 ## Baseline

@@ -1,0 +1,12 @@
+{
+  "source": "0ea344aa216c2d4dfdcf329f1373519e05b96f6a",
+  "workload": "64 complete SSE replays, concurrency 8, one real OAuth durable task",
+  "samples": 64,
+  "p50Ms": 4.945832999999766,
+  "p95Ms": 262.30287499999986,
+  "p99Ms": 262.462708,
+  "bytes": 92160,
+  "harnessRssDelta": 3017024,
+  "budget": "no project latency budget; distribution only",
+  "scope": "isolated source; no installed profiling"
+}

@@ -1,5 +1,12 @@
 # C14 owner decision packet
 
+## Current source note — 2026-10-10 maximum-scope v2 campaign
+
+Decision 1 below is historical: owner source authority selected completion of accepted ADR-0003, and semantic negotiation, actual SSE and genuine compiled historical interoperability now exist. Remaining decisions concern installed maintenance, actual connector capability, ecosystem/human acceptance, and any future remote reconciliation/task-expiry contract.
+
+Evidence and exact validation/publication boundaries: [../c14-compatibility/C14_V2_COMPLETION_REPORT.md](../c14-compatibility/C14_V2_COMPLETION_REPORT.md).
+C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 program PARTIAL; C15 BLOCKED.
+
 This packet is intentionally decision-shaped. No decision below was applied by
 the executor.
 

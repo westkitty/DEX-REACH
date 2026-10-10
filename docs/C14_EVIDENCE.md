@@ -1,5 +1,12 @@
 # C14 evidence ledger
 
+## Current source note — 2026-10-10 maximum-scope v2 campaign
+
+Current v2 source campaign replaces validation-and-discard progress with authenticated persisted SSE replay, binds responses to current node sockets, repairs authority/cancellation/enrollment races and proves genuine compiled historical A-F interoperability.
+
+Evidence and exact validation/publication boundaries: [c14-compatibility/C14_V2_COMPLETION_REPORT.md](c14-compatibility/C14_V2_COMPLETION_REPORT.md).
+C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 program PARTIAL; C15 BLOCKED.
+
 ## Phase entry exception — 2026-10-09
 
 Owner-approved exception: C14 source development is permitted while C13 remains **NOT PASS** and E7 remains **BLOCKED — HOST CAPABILITY**. No E7 result is waived or represented as passed. This exception permits isolated source development, regression tests, bounded non-destructive simulations, documentation, and scoped C14 branch publication. It does not permit changing C13 to PASS, merging PR #15, modifying `main`, installing or deploying a runtime, physical chaos, credential or connector administration, or C15 execution.

@@ -1,5 +1,12 @@
 # C15 release-readiness preparation
 
+## Current source note — 2026-10-10 maximum-scope v2 campaign
+
+The source architecture decision has been executed under the maximum-scope v2 authority: real SSE and compiled historical A-F are proven. This resolves the old source-only migration-decision row, but does not authorize deployment, remote reconciliation, a public task-expiry policy or installed migration. C15 remains BLOCKED.
+
+Evidence and exact validation/publication boundaries: [c14-compatibility/C14_V2_COMPLETION_REPORT.md](c14-compatibility/C14_V2_COMPLETION_REPORT.md).
+C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 program PARTIAL; C15 BLOCKED.
+
 ## Status
 
 **BLOCKED.** C15 has not started. C14-K passes within source scope, but C14 program acceptance is not established; release, installation, deployment, connector refresh, and human acceptance still require explicit owner authority.
