@@ -1,7 +1,7 @@
 # DEX//REACH Operational State
 
 <!-- operational-state:metadata
-{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":93,"last_updated":"2026-10-10T22:39:34.197974Z","current_baseline":{"identity":"C13 corrected immutable runtime 0.3.2-87a99494ebb3-2f44ae46b11b installed and retained on MacBook-Air.local under transaction 9bf5079f-397e-4cd8-af35-99f1550d3d68. Published source 87a99494ebb3471d3ecc3a79acd630ec18858a92 passed all five hosted checks and full local verification (374 tests). Fresh authenticated same-ID fingerprint E4 PASS; installed lease success/failure/forgery and queue acceptance PASS with zero claims. Previous release/capsules/protected state preserved. E7 BLOCKED HOST CAPABILITY, C13 NOT PASS, C14 preparation only, C15 not started.","state":"c13-runtime-retained-services-restored-node-path-repaired","last_verified":"2026-10-10T22:39:34.197974Z"},"scope_boundaries":["Current maximum-scope C14 authority permits source development, isolated fixtures and c14-chaos-recovery publication with PR16 draft/unmerged. Installed runtime, launchd, owner state, credentials, connector administration, main, PR15, Big Mac, DEX and Gay Cast remain protected. C13/E7 and C15 gates are not waived."],"linked_parent_state":null}
+{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":94,"last_updated":"2026-10-10T23:13:39.968416Z","current_baseline":{"identity":"C13 corrected immutable runtime 0.3.2-87a99494ebb3-2f44ae46b11b installed and retained on MacBook-Air.local under transaction 9bf5079f-397e-4cd8-af35-99f1550d3d68. Published source 87a99494ebb3471d3ecc3a79acd630ec18858a92 passed all five hosted checks and full local verification (374 tests). Fresh authenticated same-ID fingerprint E4 PASS; installed lease success/failure/forgery and queue acceptance PASS with zero claims. Previous release/capsules/protected state preserved. E7 BLOCKED HOST CAPABILITY, C13 NOT PASS, C14 preparation only, C15 not started.","state":"c13-runtime-retained-services-restored-node-path-repaired","last_verified":"2026-10-10T22:39:34.197974Z"},"scope_boundaries":["Current maximum-scope C14 authority permits source development, isolated fixtures and c14-chaos-recovery publication with PR16 draft/unmerged. Installed runtime, launchd, owner state, credentials, connector administration, main, PR15, Big Mac, DEX and Gay Cast remain protected. C13/E7 and C15 gates are not waived."],"linked_parent_state":null}
 -->
 
 ## 1. Project Identity and Scope
@@ -11,6 +11,15 @@ DEX//REACH is a secure AI-native remote-computing control plane. It provides use
 Canonical public repository: `https://github.com/westkitty/DEX-REACH`.
 
 ## 2. Current Baseline
+
+**2026-10-10 — C14 source after service recovery (`81f3a50`, all five hosted checks PASS on exact head).**
+
+- **Node crash fixed:** a `processes.lock` timeout while a `dex.process.run` was running was an unhandled rejection that terminated the node mid-task. It is now observed and reported, and the command continues. A child-process regression test is included. This also explains the earlier "node fixture stopped" scheduler failures.
+- **Offline capture added:** an owner-run `capture-offline` for the STOPPED installation. It proves quiescence (services booted out, no writer, adapter or maintenance process, no coordinator claim), fences every writer lock, requires a consistent closed-world manifest, records the independent expectation, copies, verifies, runs an application restore from the backup bytes, and re-proves the source before certifying, in the evidence chain. It never restarts or retries. 15 regressions. A live negative run with services up refused (`SERVICE_LOADED`) and wrote nothing.
+- **Test race fixed:** the hosted drain-fault test's timing margin was widened; its assertion is unchanged.
+- **Local `npm run verify`:** 701/701 tests, 42 invariants, build, audit (6 moderate) and probe PASS.
+- **Live state:** installed C13 services running, gateway `onlineNodes:2` (macbook-air.local plus the separately enrolled `bigmac`, which was not targeted).
+- **Verdicts:** C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 program PARTIAL; C15 BLOCKED.
 
 **2026-10-10 18:40 EDT — Decision 0(a) executed: C13 services restored (owner-authorized, scope limited to five LaunchAgent interpreter paths).**
 
