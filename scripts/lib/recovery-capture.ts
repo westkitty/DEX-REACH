@@ -6,14 +6,43 @@ import { hashValue } from '../../src/shared/hash.js';
 import { safeRead, realDirectory } from './recovery-reconciliation.js';
 import { assertOwned, rehearseRestore, type SyntheticWorkspace } from './recovery-rehearsal.js';
 import { validateBoundary, type SnapshotBoundary } from './recovery-consistency.js';
-import { verifyCoverage, type Roots } from './recovery-coverage.js';
+import { verifyCoverage, type Manifest, type Roots } from './recovery-coverage.js';
 import { destinationBlockers, type DestinationFacts } from './recovery-destination.js';
 
 export type SyntheticCaptureReceipt = Readonly<{ scope: 'synthetic'; status: 'SYNTHETIC_BACKUP_CERTIFIED'; transactionId: string; manifestDigest: string; artifactDigest: string; applicationRestore: true; installationAuthority: false }>;
 const receipts = new WeakSet<object>();
 const transactions = new WeakMap<SyntheticWorkspace, Map<string, { state: 'COPYING' | 'UNCERTAIN' | 'CERTIFIED'; receipt?: SyntheticCaptureReceipt }>>();
 function ledger(w: SyntheticWorkspace) { let l = transactions.get(w); if (!l) { l = new Map(); transactions.set(w, l); } return l; }
-async function durableWrite(file: string, bytes: Buffer, mode: number) {
+/** The three captured roots inside one transaction directory. */
+export const stagingRoots = (staging: string): Roots => ({ state: path.join(staging, 'state'), agents: path.join(staging, 'agents'), worker: path.join(staging, 'worker') });
+/**
+ * Copy exactly the manifest's directories, files and links from `source` into a new staging directory.
+ * The staging directory is created exclusively; files are written exclusively and fsynced. `beforeFile`
+ * runs before every file so the caller can re-prove its source boundary. Links are recreated from the
+ * manifest's recorded text, never by reading or following the source.
+ */
+export async function materializeManifest(manifest: Manifest, source: Roots, staging: string, beforeFile: () => Promise<void> = async () => {}): Promise<Roots> {
+  const roots = stagingRoots(staging);
+  await fs.mkdir(staging, { mode: 0o700 });
+  for (const r of Object.values(roots)) await fs.mkdir(r, { mode: 0o700 });
+  for (const d of manifest.directories) { const target = path.join(roots[d.root], d.relative); await fs.mkdir(target, { recursive: true, mode: d.mode }); await realDirectory(target); await fs.chmod(target, d.mode); }
+  for (const e of manifest.entries.filter(e => e.kind !== 'link')) {
+    await beforeFile(); await fs.mkdir(path.dirname(path.join(roots[e.root], e.relative)), { recursive: true, mode: 0o700 }); await realDirectory(path.dirname(path.join(roots[e.root], e.relative)));
+    await durableWrite(path.join(roots[e.root], e.relative), await safeRead(source[e.root], e.relative, 512 * 1024 * 1024), e.mode);
+  }
+  for (const e of manifest.entries.filter(e => e.kind === 'link')) { if (!e.link) throw new Error('LINK_MANIFEST'); await realDirectory(path.dirname(path.join(roots[e.root], e.relative))); await fs.symlink(e.link.target, path.join(roots[e.root], e.relative)); }
+  return roots;
+}
+/** Every containing directory, including symlink parents, must be durable before certification. */
+export async function syncDirectories(directory: string): Promise<void> {
+  await realDirectory(directory);
+  for (const name of await fs.readdir(directory)) {
+    const child = path.join(directory, name), st = await fs.lstat(child);
+    if (st.isDirectory() && !st.isSymbolicLink()) await syncDirectories(child);
+  }
+  const handle = await fs.open(directory, 'r'); try { await handle.sync(); } finally { await handle.close(); }
+}
+export async function durableWrite(file: string, bytes: Buffer, mode: number) {
   await realDirectory(path.dirname(file)); const h = await fs.open(file, 'wx', mode);
   try { await h.writeFile(bytes); await h.chmod(mode); await h.sync(); } finally { await h.close(); }
 }
@@ -35,15 +64,7 @@ export async function captureSynthetic(workspace: SyntheticWorkspace, boundary: 
   const staging = path.join(expected, boundary.transactionId);
   const roots: Roots = { state: path.join(staging, 'state'), agents: path.join(staging, 'agents'), worker: path.join(staging, 'worker') };
   try {
-    await fs.mkdir(staging, { mode: 0o700 });
-    for (const r of Object.values(roots)) await fs.mkdir(r, { mode: 0o700 });
-    for (const d of boundary.manifest.directories) { const target = path.join(roots[d.root], d.relative); await fs.mkdir(target, { recursive: true, mode: d.mode }); await realDirectory(target); await fs.chmod(target, d.mode); }
-    for (const e of boundary.manifest.entries.filter(e => e.kind !== 'link')) {
-      await assertOwned(workspace); await fs.mkdir(path.dirname(path.join(roots[e.root], e.relative)), { recursive: true, mode: 0o700 }); await realDirectory(path.dirname(path.join(roots[e.root], e.relative)));
-      await durableWrite(path.join(roots[e.root], e.relative), await safeRead(workspace.source[e.root], e.relative, 512 * 1024 * 1024), e.mode);
-      if (fault === 'interrupt') throw new Error('SYNTHETIC_INTERRUPTED_COPY');
-    }
-    for (const e of boundary.manifest.entries.filter(e => e.kind === 'link')) { if (!e.link) throw new Error('LINK_MANIFEST'); await realDirectory(path.dirname(path.join(roots[e.root], e.relative))); await fs.symlink(e.link.target, path.join(roots[e.root], e.relative)); }
+    await materializeManifest(boundary.manifest, workspace.source, staging, async () => { await assertOwned(workspace); if (fault === 'interrupt') throw new Error('SYNTHETIC_INTERRUPTED_COPY'); });
     await validateBoundary(boundary, workspace); await verifyCoverage(boundary.manifest, roots, boundary.manifest.digest);
     // Existing application restore mechanism is reused; source remains frozen throughout.
     await rehearseRestore(workspace, boundary.manifest, boundary.manifest.digest, roots);
@@ -51,15 +72,6 @@ export async function captureSynthetic(workspace: SyntheticWorkspace, boundary: 
     const receipt: SyntheticCaptureReceipt = Object.freeze({ scope: 'synthetic', status: 'SYNTHETIC_BACKUP_CERTIFIED', transactionId: boundary.transactionId, manifestDigest: boundary.manifest.digest, artifactDigest: hashValue({ transactionId: boundary.transactionId, manifestDigest: boundary.manifest.digest, applicationRestore: true }), applicationRestore: true, installationAuthority: false });
     await durableWrite(path.join(staging, 'manifest.private.json'), Buffer.from(JSON.stringify(boundary.manifest)), 0o600);
     await durableWrite(path.join(staging, 'receipt.private.json'), Buffer.from(JSON.stringify(receipt)), 0o600);
-    // Every containing directory, including symlink parents, must be durable before certification.
-    async function syncDirectories(directory: string): Promise<void> {
-      await realDirectory(directory);
-      for (const name of await fs.readdir(directory)) {
-        const child = path.join(directory, name), st = await fs.lstat(child);
-        if (st.isDirectory() && !st.isSymbolicLink()) await syncDirectories(child);
-      }
-      const handle = await fs.open(directory, 'r'); try { await handle.sync(); } finally { await handle.close(); }
-    }
     await syncDirectories(staging);
     const now = await fs.lstat(expected);
     if (now.ino !== before.ino || now.dev !== before.dev || now.mode !== before.mode || now.uid !== before.uid) throw new Error('DESTINATION_CHANGED');

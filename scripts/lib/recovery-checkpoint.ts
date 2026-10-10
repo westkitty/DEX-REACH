@@ -105,7 +105,8 @@ export type CheckpointConfig = {
 };
 export type CheckpointOutcome = Readonly<{ status: 'CERTIFIED_SYNTHETIC' | 'REFUSED' | 'FAILED_UNCERTAIN'; transactionId: string; reason?: string; manifestDigest?: string; artifactDigest?: string; preservedUnresolvedTasks: number; replayAuthorized: false; installationAuthority: false }>;
 
-async function nestedLocks<T>(files: string[], timeoutMs: number, fn: () => Promise<T>): Promise<T> {
+/** Fence: take the given writer locks nested in order, each bounded; a busy lock refuses, never deadlocks. */
+export async function nestedLocks<T>(files: string[], timeoutMs: number, fn: () => Promise<T>): Promise<T> {
   if (!files.length) return fn();
   const [first, ...rest] = files;
   try { return await withFileLock(first!, () => nestedLocks(rest, timeoutMs, fn), { timeoutMs }); }

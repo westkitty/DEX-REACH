@@ -7,6 +7,11 @@ import { promisify } from 'node:util';
 import { inspectTasks, publicTaskReport, realDirectory } from './lib/recovery-reconciliation.js';
 import { inspectCoverage, publicCoverage } from './lib/recovery-coverage.js';
 import { runtimeTreeSha256 } from './lib/runtime-rollback.js';
+import { captureOffline, hostProbe, offlineQuiescenceBlockers } from './lib/recovery-offline-capture.js';
+import { TransactionEvidenceLog, ExpectationStore } from './lib/recovery-evidence.js';
+import { COMPAT_HOME_PRESERVATION_RULE, defaultLinkPolicy } from './lib/recovery-symlinks.js';
+import { recoveryStoragePlan } from './lib/recovery-storage.js';
+import type { DestinationFacts } from './lib/recovery-destination.js';
 import { C14_ROOT, RETAINED_RELEASE, RETAINED_TREE, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
 
 const runFile = promisify(execFile);
@@ -77,9 +82,45 @@ async function livePreflight() {
   };
   return { ...evaluatePreflight(facts), head, installedTreeVerified: installedIntact, freeBytes, spaceEstimate: 'PLANNING_ONLY_REQUIRES_OWNER_BUDGET', tasks: publicTaskReport(rows), prDraft: pr.isDraft, prBase: pr.baseRefName };
 }
+/**
+ * Owner-run offline capture of the STOPPED installation. Flags are the owner's approval of one exact
+ * destination identity; every fact that can be measured is measured and must match. It never stops,
+ * starts or restarts a service, never installs, and never retries a transaction id.
+ */
+async function offlineCaptureCommand(args: string[]): Promise<number> {
+  const flag = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
+  const known = new Set(['--transaction-id', '--destination', '--approved-device', '--approved-inode', '--approved-volume-uuid', '--evidence-root', '--expectation-root']);
+  for (let i = 0; i < args.length; i++) { if (args[i] === '--preserve-compat-home-links') continue; if (!known.has(args[i]!) || !args[i + 1] || args[i + 1]!.startsWith('--')) throw new Error('USAGE'); i++; }
+  const required = [...known].map(flag);
+  if (required.some(v => !v)) throw new Error('USAGE');
+  const [transactionId, destinationArg, approvedDevice, approvedInode, approvedVolume, evidenceRoot, expectationRoot] = required as string[];
+  // Quiescence first: sizing needs a consistent snapshot, which a running installation cannot give.
+  const probe = hostProbe(501), quiet = await offlineQuiescenceBlockers(probe, liveRoots.state);
+  if (quiet.length) { console.log(JSON.stringify({ status: 'REFUSED', transactionId, reason: quiet[0], blockers: quiet, evidenceWritten: false, retryAuthorized: false, installationAuthority: false, servicesRestarted: false }, null, 2)); return 2; }
+  const root = await realDirectory(path.resolve(destinationArg!)), st = await fs.lstat(root), volume = await fs.statfs(root);
+  // diskutil describes volumes, not directories: resolve the destination's mount point first.
+  const mount = (await run('/bin/df', ['-P', root])).split('\n').at(-1)!.split(/\s+/).slice(5).join(' ');
+  const info = (key: string) => run('/usr/sbin/diskutil', ['info', '-plist', mount]).then(xml => xml.match(new RegExp(`<key>${key}</key>\\s*<(string|true|false)\\s*/?>([^<]*)`))).then(m => !m ? '' : m[1] === 'string' ? m[2]! : m[1]!);
+  const home = os.userInfo().homedir, cloudSynced = [path.join(home, 'Library/Mobile Documents'), path.join(home, 'Library/CloudStorage')].some(c => root === c || root.startsWith(c + path.sep)) || /Dropbox|Google Drive|OneDrive/i.test(root);
+  const linkPolicy = args.includes('--preserve-compat-home-links') ? { version: 1 as const, rules: [COMPAT_HOME_PRESERVATION_RULE] } : defaultLinkPolicy();
+  const destination: DestinationFacts = {
+    root, approvedRoot: root, approved: true, device: st.dev, approvedDevice: Number(approvedDevice), inode: st.ino, approvedInode: Number(approvedInode),
+    mountIdentity: await info('VolumeUUID'), approvedMountIdentity: approvedVolume!, ownerUid: st.uid, expectedUid: 501, mode: st.mode & 0o777,
+    writable: await fs.access(root, fs.constants.W_OK).then(() => true, () => false), cloudSynced, cloudApproved: false,
+    encrypted: await info('FileVault') === 'true', durable: await info('FilesystemType') === 'apfs', freeBytes: volume.bavail * volume.bsize, measured: true,
+    space: recoveryStoragePlan(await inspectCoverage(liveRoots, 'inspection', linkPolicy)), sources: liveRoots, gitRoots: [C14_ROOT, '/Users/andrew/DEX-REACH', '/Users/andrew/DEX']
+  };
+  const forbidden = [...Object.values(liveRoots), root, C14_ROOT];
+  const log = await TransactionEvidenceLog.open(evidenceRoot!, 'macbook-air.local', forbidden);
+  const expectations = await ExpectationStore.open(expectationRoot!, 'macbook-air.local', [...forbidden, log.root]);
+  const outcome = await captureOffline({ nodeId: 'macbook-air.local', transactionId: transactionId!, roots: liveRoots, destination, log, expectations, probe, linkPolicy });
+  console.log(JSON.stringify(outcome, null, 2));
+  return outcome.status === 'OFFLINE_BACKUP_CERTIFIED' ? 0 : outcome.status === 'REFUSED' ? 2 : 3;
+}
 async function main() {
   const command = process.argv[2] ?? 'preflight';
-  if (!['preflight', 'tasks', 'coverage'].includes(command) || process.argv.slice(3).some(a => a !== '--private')) throw new Error('usage: c14-recovery.ts preflight|tasks|coverage [--private for task IDs only]; no installation or backup-write command exists');
+  if (command === 'capture-offline') { await assertLiveTarget(); process.exitCode = await offlineCaptureCommand(process.argv.slice(3)); return; }
+  if (!['preflight', 'tasks', 'coverage'].includes(command) || process.argv.slice(3).some(a => a !== '--private')) throw new Error('usage: c14-recovery.ts preflight|tasks|coverage [--private for task IDs only] | capture-offline (owner-run, services stopped); no installation command exists');
   await assertLiveTarget();
   if (command === 'tasks') { const rows = await liveTaskReport(); console.log(JSON.stringify(process.argv.includes('--private') ? { mode: 'READ_ONLY_PRIVATE', records: rows } : publicTaskReport(rows), null, 2)); }
   else if (command === 'coverage') console.log(JSON.stringify(publicCoverage(await inspectCoverage(liveRoots)), null, 2));
