@@ -9,7 +9,7 @@ import { readEnvFile } from './lib/node-files.js';
 import { atomicWriteFile, withFileLock } from '../src/shared/state-io.js';
 import { errorText, failureOutcome, launchctlWithReconciliation, launchdIsAbsent, launchdIsRunning, launchdServiceIsEnabled } from './lib/launchctl.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
-import { launchdIntervalPlist, launchdOneShotPlist, launchdPlist, servicePath } from './lib/service.js';
+import { launchdIntervalPlist, launchdOneShotPlist, launchdPlist, servicePath, stableNodeBin } from './lib/service.js';
 import { buildRuntimeRelease, installLockFile, runtimeReleaseId } from './lib/runtime-release.js';
 import { prepareRuntimeRollbackSnapshot } from './lib/runtime-rollback.js';
 import { workspaceWorkerConfigFile, workspaceWorkerDir, workspaceWorkerRootsHash } from '../src/shared/workspace-worker.js';
@@ -21,7 +21,8 @@ const agentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
 const localStateDir = stateDir();
 const logsDir = path.join(localStateDir, 'logs');
 const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
-const nodeBin = process.execPath;
+// Stable across Homebrew patch upgrades; the versioned keg path is deleted by `brew upgrade`.
+const nodeBin = await stableNodeBin(process.execPath);
 const transactionIndex = process.argv.indexOf('--transaction-id');
 const transactionId = transactionIndex >= 0 ? process.argv[transactionIndex + 1] : undefined;
 if (transactionIndex >= 0 && (!transactionId || !/^[a-f0-9-]{36}$/.test(transactionId))) throw new Error('invalid install transaction id');
