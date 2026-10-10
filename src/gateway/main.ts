@@ -1,3 +1,4 @@
+import { installTaskStream } from './task-stream.js';
 import { flushTraces } from '../shared/trace.js';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
@@ -107,6 +108,16 @@ const bearer = requireBearerAuth({
   verifier: oauth,
   requiredScopes: ['mcp:tools'],
   resourceMetadataUrl
+});
+
+installTaskStream(app, registry, bearer, req => {
+  const clientId = req.auth?.clientId || 'unknown';
+  const clientName = oauth.getClient(clientId)?.client_name || clientId;
+  return { kind: classifyClient(clientName), clientId, clientName };
+}, async req => {
+  if (!req.auth) throw new Error('missing actor');
+  const current = await oauth.verifyAccessToken(req.auth.token);
+  if (current.clientId !== req.auth.clientId || !current.scopes.includes('mcp:tools')) throw new Error('actor no longer authorized');
 });
 
 type McpSession = { transport: NodeStreamableHTTPServerTransport; mcp: ReturnType<typeof createReachMcpServer>; clientId: string };

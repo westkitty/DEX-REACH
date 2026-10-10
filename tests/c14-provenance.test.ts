@@ -41,8 +41,10 @@ test('only the authenticated current connection can answer pending work', async 
   const server = http.createServer(); const registry = new NodeRegistry(auth, state);
   await registry.initialize(); registry.attach(server); const port = await listen(server);
   const sockets: WebSocket[] = [];
+  const tokens = new Map<string, string>();
   async function connect(id: string) {
-    const token = await auth.enroll(id);
+    const token = tokens.get(id) ?? await auth.enroll(id);
+    tokens.set(id, token);
     const socket = new WebSocket(`ws://127.0.0.1:${port}/node?nodeId=${id}`, { headers: { Authorization: `Bearer ${token}` } });
     sockets.push(socket);
     await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });

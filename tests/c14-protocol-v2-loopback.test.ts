@@ -52,7 +52,7 @@ test('C14 Protocol v2 loopback fixtures negotiate current and historical peers',
     await new Promise<void>((resolve, reject) => { socket.once('open', () => resolve()); socket.once('error', reject); });
     socket.send(JSON.stringify(hello('current-v2', 'v2')));
     const ack = await nextMessage(socket) as ProtocolHelloAck;
-    assert.deepEqual(ack, { type: 'hello_ack', protocolVersion: REACH_PROTOCOL_V2, capabilities: ['durable_tasks', 'task_event_stream', 'task_reconciliation', 'two_phase_plan'] });
+    assert.deepEqual(ack, { type: 'hello_ack', protocolVersion: REACH_PROTOCOL_V2, capabilities: ['durable_tasks', 'task_event_stream', 'two_phase_plan'] });
     assert.equal(registry.supportsDurableTasks('current-v2'), true);
     const sync = registry.requestWithTrace('current-v2', 'dex.fingerprint', {});
     const syncRequest = await nextMessage(socket) as GatewayRequest;

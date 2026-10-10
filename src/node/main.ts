@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import { withFileLock } from '../shared/state-io.js';
+import { requiredCapabilities, requestPaths } from '../shared/capabilities.js';
 import { parseRepoInspection } from '../shared/repo-inspection.js';
 import WebSocket from 'ws';
 import path from 'node:path';
@@ -30,7 +33,7 @@ import {
   type ReachProfile
 } from '../shared/protocol.js';
 import { loadLocalSecrets, stateDir } from '../shared/local-env.js';
-import { authorizeOperation, loadAccessState, reserveOperation, snapshot } from '../shared/access.js';
+import { authorizeOperation, authorizeTaskControl, loadAccessState, reserveOperation, snapshot } from '../shared/access.js';
 import { releaseBudgetConcurrency } from '../shared/budget-usage.js';
 import { createCapabilityRequest } from '../shared/capability-requests.js';
 import type { ReachCapability } from '../shared/capabilities.js';
@@ -47,11 +50,13 @@ import { coordinatedAcquire, coordinatedCancel, coordinatedHeartbeat, coordinate
 import { HEARTBEAT_INTERVAL_MS, redactWorkStatusForShare, type WorkRequest } from '../shared/work-coordinator.js';
 import { encodeAuthorizationProof, expectedProofDefaults, signNodeProof } from '../shared/node-transport-auth.js';
 import { workspaceWorkerEligible, workspaceWorkerExecute, workspaceWorkerRootsHash } from '../shared/workspace-worker.js';
+import { TaskEventLog } from '../shared/task-events.js';
+import { taskStreamPage } from '../shared/task-stream.js';
 import { NodeTaskStore } from './task-store.js';
 import { classifyFailure, classifyOperationSafety, defaultAttemptBudget, decideExistingTask, deriveIdempotencyKey, type SafetyClass } from '../shared/durable-execution.js';
 import { reconcileBootTasks } from './boot-recovery.js';
 import type { ProcessExecutionContext } from '../shared/activity.js';
-import { durableCapabilityRefusal } from '../shared/protocol-negotiation.js';
+import { durableCapabilityRefusal, NodeNegotiation } from '../shared/protocol-negotiation.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -113,15 +118,22 @@ async function handleTaskControl(request: GatewayRequest): Promise<GatewayRespon
   const access = await currentAccess();
   if (access.effectiveMode === 'off') throw new Error('NODE OWNER has disabled remote AI task controls; request refused locally');
   const task = await taskStore.read(control.taskId);
-  if (!task) throw new Error(`task not found: ${control.taskId}`);
+  if (!task || task.actorId !== actorIdFor(request.actor) || task.nodeId !== config.nodeId) throw new Error('task unavailable or unauthorized');
+  if (task.nodeId !== config.nodeId) throw new Error('task node binding mismatch');
+  authorizeTaskControl(await loadAccessState(config.nodeId), request.actor, task.operation, config.profile, task.authority, task.policyHash);
   if (task.actorId !== actorIdFor(request.actor)) throw new Error('task ownership mismatch; the original actor must control this task');
+  if (control.action === 'events') {
+    if (!negotiatedCapabilities.includes('task_event_stream')) throw new Error('task_event_stream unavailable');
+    return { type: 'response', id: request.id, ok: true, result: await taskStreamPage(new TaskEventLog(stateDir()), task.taskId, config.nodeId, task.state, control.cursor) };
+  }
   if (control.action === 'get') return { type: 'response', id: request.id, ok: true, result: task };
   if (control.action === 'result') {
     if (task.state !== 'COMPLETED' || !task.resultRef || !task.resultHash) throw new Error(`task ${task.taskId} has no completed result (${task.state})`);
     return { type: 'response', id: request.id, ok: true, result: { task, result: await results.readValueForTask(task.resultRef, task.taskId, task.resultHash) } };
   }
   if (['COMPLETED', 'FAILED', 'CANCELLED', 'RECONCILED'].includes(task.state)) return { type: 'response', id: request.id, ok: true, result: task };
-  const cancelled = await taskStore.transition(task.taskId, 'CANCELLED', 'Task cancellation requested by its owning actor.');
+  if (task.state === 'RUNNING' || task.state === 'AMBIGUOUS') throw new Error('CANCELLATION_UNPROVEN: execution may continue; task state preserved');
+  const cancelled = await taskStore.transition(task.taskId, 'CANCELLED', 'Task cancelled before execution by its owning actor.', ['ACCEPTED', 'PREPARING']);
   return { type: 'response', id: request.id, ok: true, result: cancelled };
 }
 
@@ -430,7 +442,7 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
 }
 
 async function handleRequest(request: GatewayRequest, options: { defer?: boolean } = {}): Promise<GatewayResponse> {
-  if (request.task?.action === 'get' || request.task?.action === 'result' || request.task?.action === 'cancel') {
+  if (request.task?.action === 'get' || request.task?.action === 'result' || request.task?.action === 'cancel' || request.task?.action === 'events') {
     try { return await handleTaskControl(request); }
     catch (error) { return { type: 'response', id: request.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
   }
@@ -438,7 +450,11 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     if (negotiatedProtocol !== REACH_PROTOCOL_V2 || !negotiatedCapabilities.includes(REACH_DURABLE_TASK_CAPABILITY)) {
       return { type: 'response', id: request.id, ok: false, error: durableCapabilityRefusal(config.nodeId, { version: negotiatedProtocol, capabilities: negotiatedCapabilities }).message };
     }
-    return handleRequest({ ...request, operation: request.task.operation, args: request.task.args, task: undefined }, { defer: true });
+    const start = request.task;
+    try {
+      await fs.mkdir(path.join(stateDir(), 'tasks'), { recursive: true, mode: 0o700 });
+      return await withFileLock(path.join(stateDir(), 'tasks', 'admission.lock'), () => handleRequest({ ...request, operation: start.operation, args: start.args, task: undefined }, { defer: true }));
+    } catch { return { type: 'response', id: request.id, ok: false, error: 'DURABLE_ADMISSION_UNAVAILABLE: no handle was delivered; execution outcome may be uncertain; reconcile using the original idempotency key' }; }
   }
   const started = Date.now();
   const actor = request.actor;
@@ -488,6 +504,10 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     if (duplicate.kind === 'REFUSE_CORRUPT') {
       throw new Error(`task ${duplicate.task.taskId} has incomplete result binding; refusing recovery`);
     }
+    if (options.defer && (duplicate.kind === 'RETURN_RESULT' || duplicate.kind === 'REFUSE_IN_FLIGHT')) {
+      if (duplicate.kind === 'RETURN_RESULT') await results.readValueForTask(duplicate.task.resultRef!, duplicate.task.taskId, duplicate.task.resultHash!);
+      return { type: 'response', id: request.id, ok: true, result: { taskId: duplicate.task.taskId, nodeId: config.nodeId, operation: request.operation, state: duplicate.task.state, durable: true }, traceId: trace.traceId };
+    }
     if (duplicate.kind === 'RETURN_RESULT') {
       const recovered = await results.readValueForTask(duplicate.task.resultRef!, duplicate.task.taskId, duplicate.task.resultHash!);
       return { type: 'response', id: request.id, ok: true, result: recovered, traceId: trace.traceId };
@@ -515,6 +535,7 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     });
     const task = await taskStore.create({
       actorId, nodeId: config.nodeId, operation: request.operation,
+      authority: { capabilities: requiredCapabilities(request.operation, request.args), paths: requestPaths(request.args) },
       idempotencyKey: idempotency.key, payloadSha256: idempotency.payloadHash,
       policyHash: hashValue(reservation.policy), attemptBudget: defaultAttemptBudget(taskSafety),
       safetyClass: taskSafety,
@@ -623,8 +644,9 @@ async function connect(): Promise<void> {
   } else {
     headers.Authorization = `Bearer ${config.token}`;
   }
-  const ws = new WebSocket(url, { headers });
+  const ws = new WebSocket(url, { headers, maxPayload: 1024 * 1024 });
   let opened = false;
+  let negotiation: NodeNegotiation | null = null;
   let lastAliveAt = Date.now();
   ws.on('pong', () => { lastAliveAt = Date.now(); });
 
@@ -650,29 +672,39 @@ async function connect(): Promise<void> {
       tools: backend.listTools(),
       allowedRoots: config.allowedRoots,
       agentVersion: DEX_REACH_VERSION,
-      capabilities: { durable_tasks: true, task_event_stream: true, task_reconciliation: true, two_phase_plan: true },
+      capabilities: { durable_tasks: true, task_event_stream: true, task_reconciliation: false, two_phase_plan: true },
       access: await currentAccess(),
       scheduler: redactWorkStatusForShare(await coordinatedStatus()) as SchedulerSnapshot
     };
+    if (activeSocket !== ws || ws.readyState !== WebSocket.OPEN) return;
+    negotiation = new NodeNegotiation(hello);
     ws.send(JSON.stringify(hello));
     void publishStatus().catch(() => undefined);
     console.log(`DEX//REACH node connected to ${url.origin} using its ${credential}`);
   });
 
   ws.on('message', async data => {
+    if (activeSocket !== ws || ws.readyState !== WebSocket.OPEN || !negotiation) return;
     lastAliveAt = Date.now();
     let parsed: unknown;
     try { parsed = JSON.parse(data.toString()); } catch { return; }
     if (!parsed || typeof parsed !== 'object') return;
     if ((parsed as { type?: string }).type === 'hello_ack') {
-      const ack = parsed as ProtocolHelloAck;
-      negotiatedProtocol = ack.protocolVersion;
-      negotiatedCapabilities = Array.isArray(ack.capabilities) ? ack.capabilities : [];
+      try {
+        const admitted = negotiation.acknowledge(parsed);
+        negotiatedProtocol = admitted.version;
+        negotiatedCapabilities = admitted.capabilities;
+      } catch { ws.close(1008, 'invalid protocol acknowledgement'); }
       return;
     }
     if ((parsed as { type?: string }).type !== 'request') return;
-    const response = await handleRequest(parsed as GatewayRequest);
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(response));
+    negotiation.request();
+    try {
+      const response = await handleRequest(parsed as GatewayRequest);
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(response));
+    } catch {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'response', id: (parsed as GatewayRequest).id, ok: false, error: 'REQUEST_UNAVAILABLE: execution outcome may be uncertain' }));
+    }
   });
 
   const heartbeat = setInterval(() => {
@@ -688,9 +720,12 @@ async function connect(): Promise<void> {
 
   ws.on('close', () => {
     clearInterval(heartbeat);
-    if (activeSocket === ws) activeSocket = null;
-    negotiatedProtocol = REACH_PROTOCOL_V1;
-    negotiatedCapabilities = [];
+    negotiation?.close();
+    if (activeSocket === ws) {
+      activeSocket = null;
+      negotiatedProtocol = REACH_PROTOCOL_V1;
+      negotiatedCapabilities = [];
+    }
     void publishStatus().catch(() => undefined);
     if (stopped) return;
     const delay = reconnectMs;

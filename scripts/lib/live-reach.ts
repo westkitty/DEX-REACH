@@ -36,6 +36,9 @@ export type LiveCallResult = { ok: boolean; text: string; traceId?: string; stru
 
 export type LivePairOptions = {
   repoRoot: string;
+  compiled?: boolean;
+  gatewayRepoRoot?: string;
+  nodeRepoRoot?: string;
   /** Where the isolated state directory is created. Defaults to a fresh mkdtemp. */
   workspace?: string;
   /** Node ids to enroll and start. The first is the one most proofs address. */
@@ -47,6 +50,8 @@ export type LivePairOptions = {
 
 export type LivePair = {
   baseUrl: URL;
+  authorizedFetch(path: string, init?: RequestInit): Promise<Response>;
+  otherActorFetch(path: string): Promise<Response>;
   stateDir: string;
   workspace: string;
   roots: string;
@@ -71,6 +76,7 @@ export type LivePair = {
   approveAuthorizationUrl(url: URL | string): Promise<string>;
   /** Run the literal repository golden gate against this isolated pair without exporting owner credentials. */
   runGoldenVerification(): Promise<string>;
+  restartGateway(): Promise<void>;
   stop(): Promise<void>;
 };
 
@@ -206,11 +212,11 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
   };
 
   const children: ChildProcess[] = [];
-  async function spawnLogged(name: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ child: ChildProcess; logFile: string }> {
+  async function spawnLogged(name: string, args: string[], env: NodeJS.ProcessEnv, sourceRoot = repoRoot): Promise<{ child: ChildProcess; logFile: string }> {
     const logFile = path.join(logs, `${name}.log`);
     const handle = await fs.open(logFile, 'a', 0o600);
-    const child = spawn(process.execPath, [path.join(repoRoot, 'node_modules/tsx/dist/cli.mjs'), ...args], {
-      cwd: repoRoot,
+    const child = spawn(process.execPath, options.compiled ? args.map(a => a.endsWith('.ts') ? path.join(sourceRoot, 'dist', a.replace(/\.ts$/, '.js')) : a) : [path.join(sourceRoot, 'node_modules/tsx/dist/cli.mjs'), ...args], {
+      cwd: sourceRoot,
       env,
       detached: true,
       stdio: ['ignore', handle.fd, handle.fd]
@@ -220,7 +226,7 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
     return { child, logFile };
   }
 
-  const gateway = await spawnLogged('gateway', ['src/gateway/main.ts'], baseEnv);
+  let gateway = await spawnLogged('gateway', ['src/gateway/main.ts'], baseEnv, options.gatewayRepoRoot);
 
   async function health(): Promise<{ ok: boolean; onlineNodes: number }> {
     const response = await fetch(new URL('/healthz', baseUrl));
@@ -252,7 +258,7 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
     async function startNode(nodeId: string): Promise<LiveNode> {
       const envFile = path.join(stateDir, 'nodes', `${nodeId}.env`);
       const values = await readEnvFile(envFile);
-      const started = await spawnLogged(`node-${nodeId}-${Date.now()}`, ['src/node/main.ts'], { ...baseEnv, ...values, DEX_REACH_STATE_DIR: stateDir, DEX_REACH_ENV_FILE: envFile });
+      const started = await spawnLogged(`node-${nodeId}-${Date.now()}`, ['src/node/main.ts'], { ...baseEnv, ...values, DEX_REACH_STATE_DIR: stateDir, DEX_REACH_ENV_FILE: envFile }, options.nodeRepoRoot);
       const live: LiveNode = { nodeId, child: started.child, envFile, logFile: started.logFile };
       nodes.set(nodeId, live);
       return live;
@@ -404,9 +410,41 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
 
     return {
       baseUrl, stateDir, workspace, roots, nodes, client,
+      otherActorFetch: async route => {
+        const otherProvider = new LiveOAuthProvider(`http://127.0.0.1:${await freePort()}/callback`);
+        const otherClient = new Client({ name: 'other-fixture-actor', version: DEX_REACH_VERSION });
+        async function connectOther(): Promise<void> {
+          const transport = new StreamableHTTPClientTransport(new URL('/mcp', baseUrl), { authProvider: otherProvider });
+          try { await otherClient.connect(transport); }
+          catch (error) {
+            if (!(error instanceof UnauthorizedError) || !otherProvider.authorizationUrl) throw error;
+            await transport.finishAuth(await authorize(otherProvider.authorizationUrl));
+            await connectOther();
+          }
+        }
+        try {
+          await connectOther();
+          const url = new URL(route, baseUrl);
+          if (url.origin !== baseUrl.origin) throw new Error('fixture fetch must stay on gateway');
+          return await fetch(url, { headers: { Authorization: `Bearer ${otherProvider.tokens()!.access_token}` } });
+        } finally { await otherClient.close(); }
+      },
+      authorizedFetch: async (route, init) => {
+        const url = new URL(route, baseUrl);
+        if (url.origin !== baseUrl.origin) throw new Error('fixture fetch must stay on loopback gateway');
+        const headers = new Headers(init?.headers);
+        headers.set('Authorization', `Bearer ${provider.tokens()!.access_token}`);
+        return fetch(url, { ...init, headers });
+      },
       call, nodeCli, dexCli,
       onlineNodeCount: async () => (await health()).onlineNodes,
       waitForNodeCount, startNode, stopNode, migrateNodeToAsymmetric, bearerConnectRefused,
+      restartGateway: async () => {
+        await killGroup(gateway.child);
+        gateway = await spawnLogged('gateway-restarted', ['src/gateway/main.ts'], baseEnv, options.gatewayRepoRoot);
+        await waitFor('restarted gateway', timeoutMs, async () => (await health()).ok);
+        await waitForNodeCount(nodes.size);
+      },
       approveAuthorizationUrl, runGoldenVerification, stop
     };
   } catch (error) {

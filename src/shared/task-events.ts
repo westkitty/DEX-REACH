@@ -91,6 +91,6 @@ export class TaskEventLog {
         return validEvent(value) && (!taskId || value.taskId === taskId) ? [value] : [];
       } catch { return []; }
     });
-    return events.slice(-Math.max(1, Math.min(limit, 500)));
+    return events.slice(-Math.max(1, Math.min(limit, 2000)));
   }
 }

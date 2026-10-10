@@ -33,6 +33,7 @@ type Pending = {
   resolve: (value: NodeRequestResult) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  responding?: boolean;
 };
 
 export class NodeRegistry {
@@ -61,7 +62,7 @@ export class NodeRegistry {
   async sweepRevoked(): Promise<number> {
     let dropped = 0;
     for (const [nodeId, record] of this.nodes) {
-      if (!(await this.nodeAuth.isRevoked(nodeId))) continue;
+      if (!(await this.nodeAuth.isRevoked(nodeId)) || this.nodes.get(nodeId) !== record) continue;
       this.revoked.add(nodeId);
       this.rejectConnection(record.socket, 'node revoked; execution outcome may be uncertain');
       record.socket.close(4001, 'node revoked');
@@ -142,9 +143,12 @@ export class NodeRegistry {
     task?: DurableTaskRequest
   ): Promise<NodeRequestResult> {
     const record = this.requireNode(nodeId);
+    if (await this.nodeAuth.isRevoked(nodeId)) throw new Error(`node is revoked: ${nodeId}`);
+    if (this.requireNode(nodeId) !== record) throw new Error('node connection changed before dispatch; request was not sent');
     if (task && !supportsNegotiatedCapability(record.negotiated, REACH_DURABLE_TASK_CAPABILITY)) {
       throw durableCapabilityRefusal(nodeId, record.negotiated);
     }
+    if (this.pending.size >= 2048) throw new Error('gateway pending request limit reached');
     const id = crypto.randomUUID();
     const request: GatewayRequest = {
       type: 'request',
@@ -238,6 +242,7 @@ export class NodeRegistry {
         if (hello.nodeId !== expectedNodeId || hello.protocolVersion !== REACH_PROTOCOL_VERSION || this.revoked.has(hello.nodeId)) {
           return ws.close(1008, 'invalid node identity or protocol');
         }
+        if (!Array.isArray(hello.tools) || !Array.isArray(hello.allowedRoots) || !hello.fingerprint || typeof hello.agentVersion !== 'string') return ws.close(1008, 'malformed hello');
         let negotiated: NegotiatedProtocol;
         try {
           negotiated = negotiateProtocol(hello, { gatewayProtocols: this.options.supportedProtocols, gatewayCapabilities: this.options.capabilities });
@@ -258,7 +263,7 @@ export class NodeRegistry {
       const record = this.nodes.get(expectedNodeId);
       if (!record || record.socket !== ws || ws.readyState !== WebSocket.OPEN || this.revoked.has(expectedNodeId)) return;
       record.lastSeenAt = Date.now();
-      if (typed.type === 'response') void this.finishResponse(message as GatewayResponse, expectedNodeId, ws);
+      if (typed.type === 'response') void this.finishResponse(message as GatewayResponse, expectedNodeId, ws).catch(() => ws.close(1008, 'node authorization unavailable'));
       if (typed.type === 'task_event') this.acceptTaskEvent(message as TaskProgressEvent);
       if (typed.type === 'status' && record) {
         const status = message as NodeStatus;
@@ -287,7 +292,9 @@ export class NodeRegistry {
     if (typeof response.id !== 'string' || typeof response.ok !== 'boolean') return;
     const pending = this.pending.get(response.id);
     if (!pending || pending.nodeId !== nodeId || pending.socket !== socket) return;
-    if (await this.nodeAuth.isRevoked(nodeId)) return;
+    if (pending.responding) return;
+    pending.responding = true;
+    if (await this.nodeAuth.isRevoked(nodeId)) { this.rejectConnection(socket, 'node revoked; execution outcome may be uncertain'); return; }
     // Recheck after credential-store I/O: timeout, replacement or revocation may have won.
     if (this.pending.get(response.id) !== pending || this.nodes.get(nodeId)?.socket !== socket
       || socket.readyState !== WebSocket.OPEN || this.revoked.has(nodeId)) return;
