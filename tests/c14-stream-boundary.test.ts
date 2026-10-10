@@ -9,7 +9,7 @@ const actor={kind:'other' as const,clientId:'fixture',clientName:'fixture'};
 test('stream normalizes malicious timestamps, isolates identity and bounds subscribers', async()=>{
   const app=express();let forged=false;let terminal=true;
   const registry={requestWithTrace:async()=>({result:{taskId,nodeId:forged?'other':'node-a',terminal,gap:false,
-    events:terminal?[{eventId:'tev_'+'a'.repeat(24),taskId,at:'Thu, 01 Jan 1970 00:00:00 GMT (PRIVATE_USER_TEXT)',state:'COMPLETED',summary:'PRIVATE_USER_TEXT'}]:[]}})} as unknown as NodeRegistry;
+    events:terminal?[{eventId:'tev_'+'a'.repeat(24),taskId,kind:'transition',at:'Thu, 01 Jan 1970 00:00:00 GMT (PRIVATE_USER_TEXT)',state:'COMPLETED',summary:'PRIVATE_USER_TEXT'}]:[]}})} as unknown as NodeRegistry;
   installTaskStream(app,registry,(_req,_res,next)=>next(),()=>actor,async()=>{});
   const server=http.createServer(app);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const url=`http://127.0.0.1:${(server.address() as {port:number}).port}/api/v2/tasks/${taskId}/events?node_id=node-a`;
@@ -23,4 +23,30 @@ test('stream normalizes malicious timestamps, isolates identity and bounds subsc
     controllers.forEach(c=>c.abort());await new Promise(resolve=>setTimeout(resolve,300));
     terminal=true;assert.equal((await fetch(url)).status,200);
   }finally{controllers.forEach(c=>c.abort());server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+test('stream waits for writable drain and rechecks revoked subscriber before another page', async()=>{
+  const app=express();let calls=0;let writes=0;let revoked=false;let release:()=>void=()=>{};
+  app.use((_req,res,next)=>{
+    const original=res.write.bind(res);
+    res.write=((...args: Parameters<typeof res.write>)=>{
+      writes++;
+      const result=original(...args);
+      if(writes===1){release=()=>res.emit('drain');return false;}
+      return result;
+    }) as typeof res.write;
+    next();
+  });
+  const events=Array.from({length:100},(_,i)=>({eventId:`tev_${i.toString(16).padStart(24,'0')}`,taskId,kind:'transition',at:new Date().toISOString(),state:'RUNNING',summary:'private'}));
+  const registry={requestWithTrace:async()=>{calls++;return {result:{taskId,nodeId:'node-a',terminal:false,gap:false,events}};}} as unknown as NodeRegistry;
+  installTaskStream(app,registry,(_req,_res,next)=>next(),()=>actor,async()=>{if(revoked)throw new Error('revoked');});
+  const server=http.createServer(app);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{
+    const response=await fetch(`http://127.0.0.1:${(server.address() as {port:number}).port}/api/v2/tasks/${taskId}/events?node_id=node-a`);
+    await new Promise(resolve=>setTimeout(resolve,100));
+    assert.equal(writes,1,'blocked writable must not accumulate replay frames');assert.equal(calls,1);
+    revoked=true;release();
+    const body=await response.text();assert.equal((body.match(/event: task/g)||[]).length,100);
+    assert.equal(calls,1,'revoked subscriber must not fetch another page');assert.doesNotMatch(body,/private/);
+  }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });

@@ -52,8 +52,9 @@ export function installTaskStream(app: express.Express, registry: NodeRegistry, 
         for (const event of page.events) {
           // Do not forward arbitrary node-supplied fields or text to the public client.
           if (!/^tev_[0-9a-f]{24}$/.test(event.eventId) || event.taskId !== taskId || !Number.isFinite(Date.parse(event.at))
+            || !['accepted','updated','transition','archived','control'].includes(event.kind)
             || !['ACCEPTED','PREPARING','RUNNING','INPUT_REQUIRED','AMBIGUOUS','COMPLETED','FAILED','CANCELLED','RECONCILED'].includes(event.state)) throw new Error('invalid event');
-          const data = { taskId, nodeId, eventId: event.eventId, at: new Date(event.at).toISOString(), state: event.state, summary: `Task state: ${event.state}.` };
+          const data = { taskId, nodeId, eventId: event.eventId, kind: event.kind, at: new Date(event.at).toISOString(), state: event.state, summary: `Task state: ${event.state}.` };
           if (!await write(`id: ${event.eventId}\nevent: task\ndata: ${JSON.stringify(data)}\n\n`)) { closed = true; break; }
           cursor = event.eventId;
         }
