@@ -1,5 +1,5 @@
 import { boundedAdmissionMs, MAX_ADMISSION_MS } from '../shared/request-deadlines.js';
-import { acquireTaskAdmission } from './task-admission.js';
+import { acquireTaskAdmission, waitingStatusWriter } from './task-admission.js';
 import { persistTaskFailure } from './task-failure.js';
 import fs from 'node:fs/promises';
 import { withFileLock } from '../shared/state-io.js';
@@ -569,10 +569,7 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     await taskStore.transition(taskId, 'PREPARING', 'Task admitted on the selected node.');
     const runExecution = async (): Promise<GatewayResponse> => {
       leaseId = await acquireTaskAdmission(coordinatorRequest(taskId!, task.attemptNumber, request.operation, taskSafety!),
-        async status => {
-          if ((await taskStore.read(taskId!))?.state !== 'PREPARING') throw new Error('COORDINATOR_TASK_CANCELLED: task no longer waiting');
-          await taskStore.update(taskId!, { status });
-        },
+        waitingStatusWriter(taskStore, taskId!),
         options.defer ? performance.now() + MAX_ADMISSION_MS : options.admissionDeadline ?? performance.now() + MAX_ADMISSION_MS);
       // Waiting grants neither authority nor exemption from owner changes. Recheck before RUNNING.
       reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args,

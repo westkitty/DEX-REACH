@@ -1,6 +1,7 @@
 import { coordinatedAcquire, coordinatedCancel, coordinatedRelease } from '../coordinator/client.js';
 import type { WorkRequest } from '../shared/work-coordinator.js';
 import { MAX_ADMISSION_MS } from '../shared/request-deadlines.js';
+import type { NodeTaskStore } from './task-store.js';
 const defaults = {
  acquire: coordinatedAcquire, cancel: coordinatedCancel, release: coordinatedRelease,
  now: () => performance.now(), sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, Math.max(0, Math.min(250, Number.isFinite(ms) ? ms : 0))))
@@ -34,4 +35,18 @@ export async function acquireTaskAdmission(request: WorkRequest, status: (text: 
   if (ticketId) await hooks.cancel(ticketId); // Failure is visible; never claim successful cleanup without readback.
   throw error;
  }
+}
+/**
+ * Admission polls every 250 ms. Each persisted status rewrites the task store and appends a task event, so
+ * persisting every poll floods the bounded event journal and evicts other tasks' history. Persist only a
+ * changed reason; still confirm the task is waiting on every poll so cancellation is never missed.
+ */
+export function waitingStatusWriter(store: Pick<NodeTaskStore, 'read' | 'update'>, taskId: string): (status: string) => Promise<void> {
+ let persisted: string | undefined;
+ return async status => {
+  if ((await store.read(taskId))?.state !== 'PREPARING') throw new Error('COORDINATOR_TASK_CANCELLED: task no longer waiting');
+  if (status === persisted) return;
+  await store.update(taskId, { status });
+  persisted = status;
+ };
 }
