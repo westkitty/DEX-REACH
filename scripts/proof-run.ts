@@ -48,12 +48,13 @@ const { appendReceipt, listReceipts, verifyReceipt, verifyReceiptChain } = await
 const { newTraceId, newSpanId, recordSpan, readTrace } = await import('../src/shared/trace.js');
 const { exportEvidenceBundle, verifyEvidenceBundle, serializeEvidenceBundle } = await import('../src/shared/evidence.js');
 const { snapshotCapacity } = await import('../src/shared/work-coordinator.js');
-const { substantiveSlotsFor } = await import('../src/shared/machine-capacity.js');
+const { substantiveSlotsFor, observeProcessRows, classifyObservedWorkloads } = await import('../src/shared/machine-capacity.js');
 const { remoteCompatibilityTools, remoteBlockedCompatibilityTools } = await import('../src/shared/operations.js');
 const { DEX_RELEASE_INVARIANTS } = await import('../src/shared/invariants.js');
 const { startLivePair } = await import('./lib/live-reach.js');
 
 const observations: ProofObservation[] = [];
+let admissionDiagnostic: (() => Promise<string>) | null = null;
 
 /**
  * Run one proof. A thrown error is a failed proof, not a crashed run: the other eighteen items are
@@ -66,7 +67,10 @@ async function prove(id: string, fn: () => Promise<string[]>): Promise<void> {
     observations.push({ id, status: 'pass', detail: 'Established in this run.', observed });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    observations.push({ id, status: 'fail', detail: `Not established: ${message}`, observed: [] });
+    // An admission timeout names a count, not the competitor. Record what the node itself would classify
+    // as uncoordinated right after the failure, so the evidence is diagnosable. This never changes a verdict.
+    const diagnostic = /COORDINATOR_WAIT_TIMEOUT/.test(message) && admissionDiagnostic ? await admissionDiagnostic().catch(() => 'unobservable') : null;
+    observations.push({ id, status: 'fail', detail: `Not established: ${message}`, observed: diagnostic ? [`uncoordinated workloads from the node's view, sampled after the failure: ${diagnostic}`] : [] });
   }
 }
 
@@ -741,6 +745,21 @@ async function main(): Promise<void> {
   if (!skipLive) {
     try {
       livePair = await startLivePair({ repoRoot, workspace: path.join(workspace, 'live'), nodeIds: ['proof-node-a'], profile: 'workspace-safe' });
+      const proofPair = livePair;
+      admissionDiagnostic = async () => {
+        const nodePid = [...proofPair.nodes.values()][0]?.child.pid, rows = await observeProcessRows();
+        if (!nodePid || !rows) return 'unobservable';
+        const seen = classifyObservedWorkloads(rows, { selfPid: nodePid }).uncoordinatedDetails ?? [];
+        // An interpreter label alone ('node') cannot tell a stray build from an adapter child, so name the
+        // entry script's basename too, bounded to a safe identifier. No other arguments are reported.
+        const entry = (pid: number) => {
+          const tokens = rows.find(row => row.pid === pid)?.command.trim().split(/\s+/) ?? [];
+          const script = tokens.slice(1).find(token => !token.startsWith('-'));
+          const base = script ? path.basename(script) : '';
+          return /^[A-Za-z0-9._-]{1,48}$/.test(base) ? ` ${base}` : '';
+        };
+        return seen.length ? seen.map(w => `${w.processLabel}${entry(w.pid)} (cpu ${w.cpu}%, mem ${w.mem}%, by ${w.matchedBy})`).join('; ') : 'none';
+      };
       liveEnvironment = { available: true, reason: `a gateway and a node agent are running as separate processes on ${livePair.baseUrl.origin}` };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
