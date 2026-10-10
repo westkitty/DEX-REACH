@@ -35,7 +35,7 @@ export function freshTask(tasks: ReachTaskRecord[], since: string, nodeId: strin
   const completed = matches.filter(t => t.state === 'COMPLETED');
   if (completed.length !== 1) throw new Error('REQUIRES OWNER INPUT: exactly one completed fresh fingerprint task required; connector readback must bind its actor');
   const task = completed[0]!;
-  if (!TASK_ID_PATTERN.test(task.taskId) || task.attemptNumber !== 1 || !task.resultRef || !task.resultHash || task.mutationLevel !== 'NONE') throw new Error('fresh task has not completed safely with a persisted result');
+  if (!TASK_ID_PATTERN.test(task.taskId) || task.attemptNumber !== 1 || !task.resultRef || !task.resultHash || task.mutationLevel !== 'NONE' || task.failureClass === 'AMBIGUOUS_EFFECT') throw new Error('fresh task has not completed safely with a persisted result');
   return task;
 }
 

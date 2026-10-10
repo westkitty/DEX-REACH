@@ -71,7 +71,7 @@ test('missing task, historical handle, incomplete task and ambiguous fresh selec
   const since = '2026-10-09T12:00:00Z';
   assert.throws(() => freshTask([], since, task.nodeId));
   assert.throws(() => freshTask([{ ...task, createdAtUtc: '2026-10-08T00:00:00Z' }], since, task.nodeId));
-  for (const change of [{ state: 'RUNNING' }, { resultRef: undefined }, { taskId: 'expired-handle' }, { attemptNumber: 2 }, { nodeId: 'another-node' }]) assert.throws(() => freshTask([{ ...task, ...change } as ReachTaskRecord], since, task.nodeId));
+  for (const change of [{ state: 'RUNNING' }, { failureClass: 'AMBIGUOUS_EFFECT' }, { mutationLevel: 'STATE_MUTATION' }, { resultHash: undefined }, { resultRef: undefined }, { taskId: 'expired-handle' }, { attemptNumber: 2 }, { nodeId: 'another-node' }]) assert.throws(() => freshTask([{ ...task, ...change } as ReachTaskRecord], since, task.nodeId));
   assert.throws(() => freshTask([task, { ...task, taskId: 'rtsk_1a11dd2033f_bafe187416836f1b920ed7d2d4f9fc80' }], since, task.nodeId));
   assert.equal(freshTask([task], since, task.nodeId).taskId, task.taskId);
   const oldFailed = { ...task, taskId: 'rtsk_1a11dd2033f_bafe187416836f1b920ed7d2d4f9fc81', state: 'FAILED', resultRef: undefined, resultHash: undefined } as ReachTaskRecord;

@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { coordinatorSocketPath } from '../src/shared/work-coordinator.js';
-import { bindCoordinatorCaller, coordinatedEvents, coordinatedRelease, coordinatedStatus } from '../src/coordinator/client.js';
+import { bindCoordinatorCaller, coordinatedAcquire, coordinatedEvents, coordinatedRelease, coordinatedStatus } from '../src/coordinator/client.js';
 
 async function socketCall(socketPath: string, request: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -67,10 +67,15 @@ test('coordinator daemon owns an account-private socket and rejects malformed fr
     // caller PID so stale-ticket recovery can observe its death instead of the daemon PID.
     const { acquireWork, cancelTicket, readCoordinatorState, releaseWork } = await import('../src/shared/work-coordinator.js');
     // Actual daemon socket release must carry the living requester's PID, not the daemon's.
-    const completedLease = await acquireWork({ executor: 'other', access: 'read', workload: 'light', snapshot: host() });
+    const completedLease = await coordinatedAcquire({ executor: 'other', access: 'read', workload: 'light' }, { requireDaemon: true });
     assert.equal(completedLease.status, 'acquired');
     if (completedLease.status === 'acquired') {
       assert.equal(completedLease.lease.pid, process.pid);
+      const forged = await socketCall(socketPath, JSON.stringify({ version: 1, command: 'release', payload: { id: completedLease.lease.id, options: { pid: process.pid } } })) as any;
+      assert.equal(forged.value.released, false);
+      const wrongProof = await socketCall(socketPath, JSON.stringify({ version: 1, command: 'release', payload: { id: completedLease.lease.id, options: { pid: process.pid, callerProof: '0'.repeat(64) } } })) as any;
+      assert.equal(wrongProof.value.released, false);
+      assert.ok((await readCoordinatorState()).leases.some(lease => lease.id === completedLease.lease.id));
       const wrongCaller = await coordinatedRelease(completedLease.lease.id, { pid: process.pid + 1 });
       assert.equal(wrongCaller.released, false);
       const released = await coordinatedRelease(completedLease.lease.id);
@@ -248,5 +253,32 @@ test('invalidation fences a pending sample and acquisition does not join it', as
     finish(host()); await status;
     const next = await execute(statusRequest) as import('../src/shared/work-coordinator.js').WorkStatus;
     assert.equal(calls, 3); assert.equal(next.capacity.livePressure.memory, 'warning');
+  });
+});
+
+
+test('caller proof survives daemon handler restart and rejects PID-only impersonation', async () => {
+  const { createCoordinatorHandler } = await import('../src/coordinator/main.js');
+  const crypto = await import('node:crypto');
+  const { readCoordinatorState } = await import('../src/shared/work-coordinator.js');
+  await withHandlerState(async () => {
+    const proof = crypto.randomBytes(32).toString('hex');
+    const callerProofHash = crypto.createHash('sha256').update(proof).digest('hex');
+    const first = createCoordinatorHandler(async () => host());
+    for (const invalid of [['a'.repeat(64)], {}, 12, 'bad']) {
+      await assert.rejects(first({ version: 1, command: 'acquire', payload: { request: { executor: 'other', access: 'read', workload: 'light', callerProofHash: invalid } } }), /invalid caller release proof digest/);
+    }
+    assert.equal((await readCoordinatorState()).leases.length, 0);
+    const admission = await first({ version: 1, command: 'acquire', payload: { request: { executor: 'other', access: 'read', workload: 'light', pid: process.pid, callerProofHash } } }) as any;
+    assert.equal(admission.status, 'acquired');
+    const unrelated = await first({ version: 1, command: 'acquire', payload: { request: { executor: 'other', access: 'read', workload: 'light', pid: process.pid, callerProofHash } } }) as any;
+    assert.equal(unrelated.status, 'acquired');
+    const restarted = createCoordinatorHandler(async () => host());
+    const release = (callerProof?: string) => restarted({ version: 1, command: 'release', payload: { id: admission.lease.id, options: { pid: process.pid, callerProof } } }) as Promise<any>;
+    assert.equal((await release()).released, false);
+    assert.equal((await release(callerProofHash)).released, false); // public digest is not the proof
+    assert.equal((await release(proof)).released, true);
+    assert.deepEqual((await readCoordinatorState()).leases.map(l => l.id), [unrelated.lease.id]);
+    assert.equal((await restarted({ version: 1, command: 'release', payload: { id: unrelated.lease.id, options: { force: true } } }) as any).released, true);
   });
 });

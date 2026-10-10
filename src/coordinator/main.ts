@@ -99,8 +99,8 @@ export function createCoordinatorHandler(sample = snapshotCapacity, elapsed = ()
     }
     if (request.command === 'release') {
       if (typeof payload.id !== 'string' || payload.id.length > 128) throw new Error('release requires a valid id');
-      const options = payload.options && typeof payload.options === 'object' ? payload.options as { pid?: number; force?: boolean } : {};
-      const result = await releaseWork(payload.id, options); invalidateObservation(); return result;
+      const options = payload.options && typeof payload.options === 'object' ? payload.options as { pid?: number; force?: boolean; callerProof?: string } : {};
+      const result = await releaseWork(payload.id, { ...options, requireCallerProof: true }); invalidateObservation(); return result;
     }
     if (typeof payload.id !== 'string' || payload.id.length > 128) throw new Error('cancel requires a valid id');
     const result = await cancelTicket(payload.id); invalidateObservation(); return result;

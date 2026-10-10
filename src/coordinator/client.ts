@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import net from 'node:net';
 import {
   acquireWork,
@@ -14,6 +15,9 @@ import {
   type WorkEventWindow
 } from '../shared/work-coordinator.js';
 
+// Kept only in this caller process; persisted coordination state contains its digest.
+const callerProof = crypto.randomBytes(32).toString('hex');
+const callerProofHash = crypto.createHash('sha256').update(callerProof).digest('hex');
 const PROTOCOL_VERSION = 1;
 const MAX_FRAME_BYTES = 16 * 1024;
 
@@ -89,7 +93,7 @@ export function bindCoordinatorCaller(request: WorkRequest, callerPid = process.
 
 /** Production callers prefer the single-writer daemon. Direct mode is bootstrap/test-only. */
 export async function coordinatedAcquire(request: WorkRequest, options: { requireDaemon?: boolean } = {}): Promise<AdmissionResult> {
-  const bound = bindCoordinatorCaller(request);
+  const bound = { ...bindCoordinatorCaller(request), callerProofHash };
   const value = await callDaemon('acquire', { request: bound as unknown as Record<string, unknown> }, options.requireDaemon);
   return value === null ? acquireWork(bound) : object<AdmissionResult>(value);
 }
@@ -98,8 +102,8 @@ export async function coordinatedRelease(id: string, options: { pid?: number; fo
   // The daemon must validate the node caller PID, not its own daemon PID.
   // Without this, a completed task can strand a live-node lease indefinitely.
   const callerPid = options.pid ?? process.pid;
-  const value = await callDaemon('release', { id, options: { pid: callerPid, force: options.force } }, options.requireDaemon);
-  return value === null ? releaseWork(id, { ...options, pid: callerPid }) : object<ReleaseResult>(value);
+  const value = await callDaemon('release', { id, options: { pid: callerPid, force: options.force, callerProof } }, options.requireDaemon);
+  return value === null ? releaseWork(id, { ...options, pid: callerPid, callerProof }) : object<ReleaseResult>(value);
 }
 
 export async function coordinatedHeartbeat(id: string): Promise<boolean> {
