@@ -7,7 +7,9 @@ import { reconcileBootTasks } from '../src/node/boot-recovery.js';
 import { NodeTaskStore } from '../src/node/task-store.js';
 import { ResultStore } from '../src/node/result-store.js';
 import { decideExistingTask } from '../src/shared/durable-execution.js';
+import { machineStateDir, stateDir } from '../src/shared/local-env.js';
 import { TaskEventLog } from '../src/shared/task-events.js';
+import { coordinatorDir, coordinatorSocketPath, historyFile, leasesDir, queueDir } from '../src/shared/work-coordinator.js';
 
 const hash = 'a'.repeat(64);
 
@@ -56,6 +58,26 @@ test('C14-C binds durable results to both task identity and persisted hash', asy
     assert.equal(afterStableRepeat?.updatedAtUtc, beforeStableRepeat?.updatedAtUtc, 'repeated ambiguous recovery must not rewrite unchanged status');
     assert.equal(eventsAfterStableRepeat.length, eventsBeforeStableRepeat.length, 'repeated ambiguous recovery must not append duplicate status events');
   } finally {
+    await fs.rm(state, { recursive: true, force: true });
+  }
+});
+
+test('C14-E temporary state redirects every persistent path away from owner state', async () => {
+  const state = await tempState();
+  const previous = process.env.DEX_REACH_STATE_DIR;
+  process.env.DEX_REACH_STATE_DIR = state;
+  try {
+    const owner = path.resolve(os.homedir(), '.dex-reach');
+    const persistent = [stateDir(), machineStateDir(), coordinatorDir(), leasesDir(), queueDir(), historyFile(), path.join(state, 'tasks'), path.join(state, 'results')].map(candidate => path.resolve(candidate));
+    for (const candidate of persistent) {
+      const relative = path.relative(state, candidate);
+      assert.ok(relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative)), candidate);
+      assert.ok(candidate !== owner && !candidate.startsWith(owner + path.sep), candidate);
+    }
+    assert.ok(!coordinatorSocketPath().startsWith(owner + path.sep));
+  } finally {
+    if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR;
+    else process.env.DEX_REACH_STATE_DIR = previous;
     await fs.rm(state, { recursive: true, force: true });
   }
 });

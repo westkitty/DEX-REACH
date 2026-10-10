@@ -7,10 +7,11 @@ import { NodeTaskStore, taskStoreFile } from '../src/node/task-store.js';
 import { ResultStore } from '../src/node/result-store.js';
 import { reconcileBootTasks } from '../src/node/boot-recovery.js';
 import { decideExistingTask, type ExistingTaskBinding } from '../src/shared/durable-execution.js';
+import { machineStateDir, stateDir } from '../src/shared/local-env.js';
 import { TaskEventLog, taskEventFile } from '../src/shared/task-events.js';
 import {
-  acquireWork, cancelTicket, coordinatorSocketPath, historyFile, readCoordinatorState,
-  readWorkEvents, releaseWork, type CapacitySnapshot
+  acquireWork, cancelTicket, coordinatorDir, coordinatorSocketPath, historyFile, leasesDir, queueDir,
+  readCoordinatorState, readWorkEvents, releaseWork, type CapacitySnapshot
 } from '../src/shared/work-coordinator.js';
 
 type Op = { count: number; failures: number; samples: number[] };
@@ -80,6 +81,43 @@ async function treeBytes(root: string): Promise<number> {
 }
 async function present(file: string): Promise<boolean> {
   try { await fs.access(file); return true; } catch { return false; }
+}
+function within(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
+}
+async function fingerprint(file: string): Promise<{ exists: boolean; size: number; sha256: string | null }> {
+  try {
+    const bytes = await fs.readFile(file);
+    return { exists: true, size: bytes.byteLength, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { exists: false, size: 0, sha256: null };
+    throw error;
+  }
+}
+function isolationPaths(state: string): { root: string; persistent: string[]; socket: string; ownerRoot: string } {
+  return {
+    root: path.resolve(state),
+    persistent: [
+      stateDir(), machineStateDir(), path.join(state, 'fixture-repo'), taskStoreFile(state),
+      path.join(state, 'results'), taskEventFile(state), coordinatorDir(), leasesDir(), queueDir(), historyFile()
+    ].map(candidate => path.resolve(candidate)),
+    socket: coordinatorSocketPath(),
+    ownerRoot: path.resolve(os.homedir(), '.dex-reach')
+  };
+}
+async function assertIsolation(state: string): Promise<ReturnType<typeof isolationPaths>> {
+  const paths = isolationPaths(state);
+  if (paths.persistent.some(candidate => !within(paths.root, candidate))) {
+    throw new Error('C14-E isolation preflight failed: persistent path escaped temporary state: ' + JSON.stringify(paths));
+  }
+  if (paths.persistent.some(candidate => within(paths.ownerRoot, candidate))) {
+    throw new Error('C14-E isolation preflight failed: owner state path selected: ' + JSON.stringify(paths));
+  }
+  if (within(paths.ownerRoot, paths.socket)) {
+    throw new Error('C14-E isolation preflight failed: owner socket selected: ' + paths.socket);
+  }
+  return paths;
 }
 
 class StressRun {
@@ -332,6 +370,10 @@ async function main(): Promise<void> {
   const state = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-c14-stress-'));
   const previousState = process.env.DEX_REACH_STATE_DIR;
   process.env.DEX_REACH_STATE_DIR = state;
+  let isolation: ReturnType<typeof isolationPaths>;
+  try { isolation = await assertIsolation(state); }
+  catch (error) { await fs.rm(state, { recursive: true, force: true }); throw error; }
+  const ownerHistoryBefore = await fingerprint(path.join(isolation.ownerRoot, 'coordinator', 'history', 'events.jsonl'));
   await fs.mkdir(path.join(state, 'fixture-repo'), { recursive: true });
   const run = new StressRun(state, durationSeconds * 1000, maxOperations, concurrency, maxRssBytes);
   const initial = { totalMemoryBytes: totalMemory, freeMemoryBytes: os.freemem(), loadAverage: os.loadavg() };
@@ -365,6 +407,7 @@ async function main(): Promise<void> {
     status: errorMessage || run.failures ? 'FAILED' : cleanup ? 'PASS' : 'PARTIAL',
     generatedAtUtc: new Date().toISOString(), startedAtUtc: run.startedUtc,
     source: { branch: process.env.GIT_BRANCH ?? 'c14-chaos-recovery', commit: process.env.GIT_COMMIT ?? 'unknown' },
+    isolation: { ...isolation, ownerHistoryBefore, ownerHistoryAfter: await fingerprint(path.join(isolation.ownerRoot, 'coordinator', 'history', 'events.jsonl')) },
     environment: { platform: process.platform, arch: process.arch, node: process.version, cpuCount: os.cpus().length, totalMemoryBytes: totalMemory, initialFreeMemoryBytes: initial.freeMemoryBytes, initialLoadAverage: initial.loadAverage },
     limits: { durationSeconds, maxOperations, concurrency, maxRssBytes, sampleIntervalMs: SAMPLE_INTERVAL_MS, resultTtlMs: RESULT_TTL_MS },
     run: { elapsedMs: performance.now() - run.startedAt, stopReason: errorMessage ?? run.stopReason, completedCycles: run.cycles, failedCycles: run.failures, sequence: run.sequence, normalTasks: run.normal.length, failedTasks: run.failed.length, ambiguousTasks: run.ambiguous.length },
