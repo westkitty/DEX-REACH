@@ -1,3 +1,4 @@
+import { readQuarantine } from '../shared/task-quarantine.js';
 import { listProcessActivities, type ProcessActivity } from '../shared/activity.js';
 import { coordinatedStatus } from '../coordinator/client.js';
 import { decideBootRecovery, type BootRecoveryDecision } from '../shared/task-recovery.js';
@@ -42,7 +43,10 @@ export async function reconcileBootTasks(taskStore: NodeTaskStore, results: Resu
   catch { transportConnected = false; }
 
   const reports: BootRecoveryReport[] = [];
+  const quarantined = await readQuarantine(taskStore.rootDir);
   for (const task of tasks) {
+    // Owner-quarantined: preserved byte-for-byte. No status note, no transition, no replay.
+    if (quarantined.has(task.taskId)) { reports.push({ taskId: task.taskId, decision: { kind: 'INPUT_REQUIRED', reason: 'Owner-quarantined historical task: effect unknown, replay forbidden, record preserved unchanged.' } }); continue; }
     const activity = matchingActivity(task, activities);
     const lease = matchingLease(task, coordinator);
     const ticket = matchingTicket(task, coordinator);

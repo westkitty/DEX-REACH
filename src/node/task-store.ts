@@ -1,3 +1,4 @@
+import { assertNotQuarantined } from '../shared/task-quarantine.js';
 import { REACH_CAPABILITIES } from '../shared/capabilities.js';
 import type { TaskAuthority } from '../shared/access.js';
 import crypto from 'node:crypto';
@@ -410,6 +411,7 @@ export class NodeTaskStore implements TaskStore {
 
   async update(taskId: string, update: TaskUpdate): Promise<ReachTaskRecord> {
     assertTaskId(taskId);
+    await assertNotQuarantined(this.dir, taskId);
     if (update.status === undefined && update.resultRef === undefined && update.resultHash === undefined && update.failureClass === undefined) throw new Error('task update requires state, status, or outcome metadata');
     if (update.status !== undefined && update.status.length > 240) throw new Error('task status is too long');
     const updated = await this.mutate(document => {
@@ -446,6 +448,7 @@ export class NodeTaskStore implements TaskStore {
 
   async transition(taskId: string, state: TaskState, status?: string, expectedStates?: readonly TaskState[]): Promise<ReachTaskRecord> {
     assertTaskId(taskId);
+    await assertNotQuarantined(this.dir, taskId);
     if (!TASK_STATES.includes(state)) throw new Error(`invalid task state: ${state}`);
     const transitioned = await this.mutate(document => {
       const record = document.records[taskId];
