@@ -49,3 +49,18 @@ This ledger records source-level campaign state. It does not certify installed r
 ## Next executable packet
 
 C14-K fresh source validation and acceptance matrix. Do not install, deploy, merge, or touch the owner runtime.
+
+## C14-K — final source validation and acceptance
+
+- Status: **PASS within source scope; C14 program NOT COMPLETE (PARTIAL).**
+- Evidence: `docs/c14-acceptance/C14_K_SOURCE_ACCEPTANCE.md`.
+- Comprehensive validation: 385/385 tests, typecheck, 42 invariants, build, backend probe, dependency audit threshold, and diff check passed. Audit still reports six moderate advisories; no fix was applied.
+- Protected state: installed runtime, owner state, credentials, main, PR #15, connector, and physical systems unchanged.
+- Remaining unknowns: hosted CI current-head result, physical/installed chaos, DEX ecosystem conformance, dashboard/installed observability, second blind evaluator, missing master-plan DOCX, and genuine ADR-0003 v2 interoperability.
+
+## Campaign closure boundary
+
+The authorized source campaign is complete at its measured boundary. C14 itself
+is not declared complete. The next safe action is an owner-authorized decision
+and execution packet for the remaining installed/physical and ecosystem gates;
+otherwise preserve this ledger and do not begin C15.

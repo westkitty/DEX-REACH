@@ -2,7 +2,7 @@
 
 ## Status
 
-**BLOCKED.** C15 has not started. C15 requires C14 program acceptance, which is not established, and it requires explicit owner authority for release, installation, deployment, connector refresh, and human acceptance.
+**BLOCKED.** C15 has not started. C14-K passes within source scope, but C14 program acceptance is not established; release, installation, deployment, connector refresh, and human acceptance still require explicit owner authority.
 
 ## Conditions before C15 execution
 
@@ -23,9 +23,9 @@
 
 | Item | State | Evidence needed |
 | --- | --- | --- |
-| C14 program status | BLOCKED | C14-K matrix with every exit requirement resolved |
+| C14 program status | PARTIAL / NOT COMPLETE | C14-K source matrix; installed, physical, ecosystem, migration, and human gates remain |
 | Release version and SHA | UNKNOWN | Owner-approved release candidate |
-| CI and audit | UNKNOWN | Exact-head hosted checks and `npm audit --omit=dev --audit-level=high` |
+| CI and audit | PARTIAL | Audit exited 0 with six moderate advisories; exact-head hosted checks remain UNKNOWN |
 | Clean build/provenance | PARTIAL | Source clean-build exists; release provenance still required |
 | Immutable install/rollback | BLOCKED | Owner maintenance authority and fresh installed proof |
 | Public connector | BLOCKED | Owning connector refresh and real-client acceptance |
