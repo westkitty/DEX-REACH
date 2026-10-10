@@ -779,7 +779,9 @@ export async function cancelTicket(ticketId: string): Promise<boolean> {
 export async function workStatus(options: { snapshot?: CapacitySnapshot } = {}): Promise<WorkStatus> {
   await ensureLayout();
   const snapshot = options.snapshot ?? (await snapshotCapacity());
-  const state = await pruneExpired(await readCoordinatorState());
+  // Reclaiming removes lease/ticket files and records events: the same mutation acquire performs, so it
+  // takes the same lock. Otherwise a status read races admission and escapes a checkpoint fence.
+  const state = await withFileLock(coordinatorLockFile(), async () => pruneExpired(await readCoordinatorState()), { timeoutMs: 15_000 });
   const decision = decideAdmission(state, snapshot, { access: 'mutate', workload: 'medium' });
   return {
     capacity: decision.capacity,

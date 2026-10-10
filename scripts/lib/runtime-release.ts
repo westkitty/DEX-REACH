@@ -6,6 +6,9 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+/** Held by install and rollback for their whole run; checkpoint fences hold it so no maintenance starts mid-capture. */
+export function installLockFile(stateDir: string): string { return path.join(stateDir, 'runtime', 'install.lock'); }
+
 const REQUIRED_RUNTIME_ENTRIES = [
   'dist/src/coordinator/main.js',
   'dist/src/worker/main.js',

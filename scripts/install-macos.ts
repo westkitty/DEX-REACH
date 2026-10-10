@@ -10,7 +10,7 @@ import { atomicWriteFile, withFileLock } from '../src/shared/state-io.js';
 import { errorText, failureOutcome, launchctlWithReconciliation, launchdIsAbsent, launchdIsRunning, launchdServiceIsEnabled } from './lib/launchctl.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
 import { launchdIntervalPlist, launchdOneShotPlist, launchdPlist, servicePath } from './lib/service.js';
-import { buildRuntimeRelease, runtimeReleaseId } from './lib/runtime-release.js';
+import { buildRuntimeRelease, installLockFile, runtimeReleaseId } from './lib/runtime-release.js';
 import { prepareRuntimeRollbackSnapshot } from './lib/runtime-rollback.js';
 import { workspaceWorkerConfigFile, workspaceWorkerDir, workspaceWorkerRootsHash } from '../src/shared/workspace-worker.js';
 
@@ -249,4 +249,4 @@ console.log(`Reload status: ${installStatus}`);
 console.log('The helper waits briefly so a DEX-hosted install can return before replacing its own transport.');
 }
 
-await withFileLock(path.join(localStateDir, 'runtime', 'install.lock'), install, { timeoutMs: 1000 });
+await withFileLock(installLockFile(localStateDir), install, { timeoutMs: 1000 });

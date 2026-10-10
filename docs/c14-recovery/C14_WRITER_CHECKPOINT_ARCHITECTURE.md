@@ -19,7 +19,7 @@ Source of truth: `WRITER_OWNERSHIP` in `scripts/lib/recovery-checkpoint.ts`; `ow
 | --- | --- | --- | --- | --- |
 | tasks-results-events | node (request + deferred execution), CLIs | `tasks/admission.lock`, `store.lock`, `events.jsonl.lock`, `results/results.lock`; atomic replace | node participant drain + lock fence | — |
 | receipts | node | `receipts/<node>.lock`; signed append | node participant + lock fence | — |
-| coordinator | coordinator daemon, node heartbeats | `coordinator.lock`, `history/events.lock`; atomic lease/ticket files | lock fence; any lease or ticket refuses admission | — |
+| coordinator | coordinator daemon, node heartbeats, status readers | `coordinator.lock`, `history/events.lock`, `capacity-profile.lock`; atomic lease/ticket files | lock fence; any lease or ticket refuses admission | — |
 | policy-grants-budgets-plans | node, CLIs | access, budget, capability-request, policy-assertion, secrets locks; access-before-budget order | node participant + lock fence | plan claim files (exclusive create, no shared lock) |
 | enrollment-revocation | gateway, CLIs | `node-auth.json.lock` + in-process exclusive queue, `revoked-nodes.json.lock` | gateway participant + lock fence | — |
 | oauth | gateway | in-memory state, `persistQueue`, atomic replace; no lock | gateway participant (persistence **deferred** while held) | — |
@@ -61,7 +61,7 @@ IDLE by default: `processCheckpoint()` returns a frozen object whose methods are
 
 - **Not activated.** Participation is not enabled in any installed process. Doing so needs an approved LaunchAgent environment change plus restart. Not authorized.
 - **Capture is synthetic only.** `liveCapture()` still refuses, and all ten live boundary gates remain false.
-- **Coordinator daemon** has no participant. It is fenced by its locks, and any live lease or ticket refuses admission.
+- **Coordinator daemon** has no participant. It is fenced by its locks, and any live lease or ticket refuses admission. Two writes previously escaped that fence and were repaired: capacity health (`capacity-profile.lock` was not fenced), and `workStatus` reclaiming expired leases and tickets without `coordinator.lock`, so a status read could delete coordinator files while another holder owned the lock. During a checkpoint, status reads now wait (bounded at 15 s) instead of mutating. Regressions: `tests/c14-coordinator-fence.test.ts`.
 - **Installer and rollback scripts** have no admission lock. Quiescence is process absence plus content comparison.
 - **Plan claims and asynchronous trace flushes** are detected, not prevented.
 - **Cross-volume destinations** still fail closed on volume identity.

@@ -20,6 +20,7 @@ import { captureSynthetic } from './recovery-capture.js';
 import { inspectTasks } from './recovery-reconciliation.js';
 import type { DestinationFacts } from './recovery-destination.js';
 import type { LinkPolicy } from './recovery-symlinks.js';
+import { installLockFile } from './runtime-release.js';
 import { artifactDigest, type ExpectationStore, type TransactionEvidenceLog } from './recovery-evidence.js';
 
 /**
@@ -31,11 +32,11 @@ export type WriterOwnership = { group: WriterGroup; participants: ParticipantRol
 export const WRITER_OWNERSHIP: readonly WriterOwnership[] = [
   { group: 'tasks-results-events', participants: ['node'], locks: (s) => [path.join(s, 'tasks', 'admission.lock'), taskStoreLockFile(s), taskEventLockFile(s), path.join(s, 'results', 'results.lock')], undetectable: [] },
   { group: 'receipts', participants: ['node'], locks: (s, n) => [path.join(s, 'receipts', `${n}.lock`)], undetectable: [] },
-  { group: 'coordinator', participants: [], locks: (s) => [path.join(s, 'coordinator', 'coordinator.lock'), path.join(s, 'coordinator', 'history', 'events.lock')], undetectable: [] },
+  { group: 'coordinator', participants: [], locks: (s) => [path.join(s, 'coordinator', 'coordinator.lock'), path.join(s, 'coordinator', 'history', 'events.lock'), path.join(s, 'coordinator', 'capacity-profile.lock')], undetectable: [] },
   { group: 'policy-grants-budgets-plans', participants: ['node'], locks: (s, n) => [accessLockFile(n, s), budgetLockFile(n, s), capabilityRequestLockFile(n, s), `${policyAssertionFile(n, s)}.lock`, path.join(s, 'nodes', `${n}.secrets.json.lock`)], undetectable: ['plan claim files use exclusive create without a shared lock; changes are detected, not prevented'] },
   { group: 'enrollment-revocation', participants: ['gateway'], locks: (s) => [path.join(s, 'node-auth.json.lock'), path.join(s, 'revoked-nodes.json.lock')], undetectable: [] },
   { group: 'oauth', participants: ['gateway'], locks: () => [], undetectable: [] },
-  { group: 'runtime-installer', participants: [], locks: () => [], processAbsence: /scripts\/(?:install-macos|rollback-macos|reload-launchagents|uninstall-macos)\.(?:ts|js)(?:\s|$)/m, undetectable: ['installer journals have no admission lock; quiescence is installer-process absence plus unchanged content'] },
+  { group: 'runtime-installer', participants: [], locks: (s) => [installLockFile(s)], processAbsence: /scripts\/(?:install-macos|rollback-macos|reload-launchagents|uninstall-macos)\.(?:ts|js)(?:\s|$)/m, undetectable: ['install and rollback are fenced by install.lock; the detached launchd reload helper and uninstall take no lock, so their quiescence is process absence plus unchanged content'] },
   { group: 'activity-audit-trace-checkpoints', participants: ['node', 'gateway'], locks: (s) => [path.join(s, 'activity', 'processes.lock')], undetectable: ['asynchronous trace span flushes and per-trace locks are detected by content comparison, not prevented'] }
 ];
 /** Every documented group must be owned exactly once; an unknown or duplicated owner refuses. */
