@@ -6,6 +6,17 @@ import { installTaskStream } from '../src/gateway/task-stream.js';
 import type { NodeRegistry } from '../src/gateway/registry.js';
 const taskId='rtsk_19999999999_0123456789abcdef';
 const actor={kind:'other' as const,clientId:'fixture',clientName:'fixture'};
+test('stream ingress limits request churn before authorization with bounded limiter identity', async()=>{
+  const app=express();let authorized=0;
+  installTaskStream(app,{} as NodeRegistry,(_req,_res,next)=>{authorized++;next();},()=>actor,async()=>{});
+  const server=http.createServer(app);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const url=`http://127.0.0.1:${(server.address() as {port:number}).port}/api/v2/tasks/invalid/events?node_id=node-a`;
+  try{
+    for(let i=0;i<300;i++){const response=await fetch(url);assert.equal(response.status,400);await response.text();}
+    const refused=await fetch(url,{headers:{'X-Forwarded-For':'198.51.100.42'}});
+    assert.equal(refused.status,429);assert.equal(authorized,300);
+  }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
 test('stream normalizes malicious timestamps, isolates identity and bounds subscribers', async()=>{
   const app=express();let forged=false;let terminal=true;
   const registry={requestWithTrace:async()=>({result:{taskId,nodeId:forged?'other':'node-a',terminal,gap:false,

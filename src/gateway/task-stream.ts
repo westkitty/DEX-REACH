@@ -1,4 +1,5 @@
 import type express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import type { NodeRegistry } from './registry.js';
 import type { RequestActor } from '../shared/protocol.js';
 import type { TaskStreamPage } from '../shared/task-stream.js';
@@ -8,7 +9,12 @@ export function installTaskStream(app: express.Express, registry: NodeRegistry, 
   actorFor: (req: express.Request) => RequestActor,
   verify: (req: express.Request) => Promise<void>): void {
   let subscribers = 0;
-  app.get('/api/v2/tasks/:taskId/events', bearer, async (req, res) => {
+  // Match the OAuth admission budget. One gateway-wide key also bounds limiter state,
+  // and admission runs before bearer verification to bound unauthenticated churn.
+  app.get('/api/v2/tasks/:taskId/events', rateLimit({
+    windowMs: 60_000, limit: 300, keyGenerator: () => 'task-stream-ingress',
+    standardHeaders: 'draft-8', legacyHeaders: false
+  }), bearer, async (req, res) => {
     const nodeId = req.query.node_id;
     const taskId = req.params.taskId;
     const cursorHeader = req.headers['last-event-id'];
