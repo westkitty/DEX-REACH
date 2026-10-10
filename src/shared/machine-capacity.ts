@@ -415,15 +415,24 @@ const DEX_SERVICE_PATTERNS: readonly RegExp[] = [
   /src\/node\/main\.(ts|js)/
 ];
 
-/**
- * Electron/Chromium helpers inherit their host application's command line, including strings such
- * as `codex-sandbox`. They are part of a desktop application's UI process tree, not independent
- * coding sessions. Keep this constrained to documented helper process types so a CLI command with
- * an unrelated `--type` flag remains eligible for ordinary workload classification.
- */
-
+/** Service identity follows the actual entrypoint through Node loaders and the known tsx launcher.
+ * Loader values, eval strings and later command arguments never establish service identity. */
 export function isDexServiceCommand(command: string): boolean {
-  const script = /^\S*(?:node|nodejs|tsx|bun)\s+(?:--[\w-]+\s+)*(.+?\.(?:ts|js))(?=\s|$)/.exec(command.trim())?.[1];
+  const tokens = command.trim().split(/\s+/);
+  if (!/^(?:node|nodejs|tsx|bun)$/.test(path.basename(tokens.shift() ?? ''))) return false;
+  const entrypoint = (): string | undefined => {
+    while (tokens.length) {
+      const token = tokens.shift()!;
+      if (/^(?:-e|--eval|-p|--print)(?:=|$)/.test(token)) return undefined;
+      if (VALUE_FLAGS.has(token)) { tokens.shift(); continue; }
+      if (token.startsWith('-') && token !== '--') continue;
+      if (token === '--') return tokens.shift();
+      return token;
+    }
+    return undefined;
+  };
+  let script = entrypoint();
+  if (script && /(?:^|\/)node_modules\/tsx\/dist\/cli\.mjs$/.test(script)) script = entrypoint();
   return !!script && DEX_SERVICE_PATTERNS.some(pattern => pattern.test(script) && /main\.(?:ts|js)$/.test(script));
 }
 

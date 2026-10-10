@@ -82,3 +82,17 @@ test('duplicate historical event IDs fail closed rather than bypass the count ce
   assert.equal(await fs.readFile(taskEventFile(dir),'utf8'),raw);
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
+
+test('real tsx loader and launcher service entrypoints are recognized without trusting unrelated arguments',()=>{
+ const services=[
+  'node --require /fixture/node_modules/tsx/dist/preflight.cjs --import file:///fixture/node_modules/tsx/dist/loader.mjs src/gateway/main.ts',
+  'node /fixture/node_modules/tsx/dist/cli.mjs src/gateway/main.ts'
+ ];
+ for(const command of services){assert.equal(isDexServiceCommand(command),true);assert.equal(observe(`100 1 50 4 00:01:00 ${command}\n`).uncoordinatedHeavy,0);}
+ for(const command of [
+  'node --require src/gateway/main.ts /fixture/build.js',
+  'node --import src/gateway/main.ts /fixture/build.js',
+  'node -e console.log(1) src/gateway/main.ts',
+  'node /fixture/node_modules/tsx/dist/cli.mjs /fixture/build.ts --name src/gateway/main.ts'
+ ])assert.equal(isDexServiceCommand(command),false);
+});

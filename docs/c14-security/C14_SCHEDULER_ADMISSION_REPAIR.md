@@ -8,7 +8,9 @@ CodeQL resource-exhaustion receipt for future source behavior; it does not rewri
 
 ## Classification and admission
 
-Executable/leading-script identity replaces arbitrary argument matching. Idle resident agents and
+Executable/leading-script identity replaces arbitrary argument matching. The service parser follows
+Node loader value flags and the known tsx launcher to the actual service entrypoint; eval strings,
+loader values and later arguments cannot establish an exclusion. Idle resident agents and
 desktop applications do not consume a substantive slot merely for memory residency. Active desktop
 helpers group with their app; agent/tool descendants group with their workload ancestor; independent
 sessions remain separate. Active unknown executables still compete. Helper flags and service-path
@@ -81,19 +83,21 @@ These are distributions/medians for this workload, not universal latency or peak
 
 | Operation | Before | Candidate |
 | --- | ---: | ---: |
-| Classify 2,000 rows | 3.738 ms | 3.946 ms |
-| Admission decision | 0.194 us | 0.186 us |
-| Cached status | 8.990 ms | 9.018 ms |
-| Physical host sample | 45.207 ms | 39.269 ms |
-| Ticket enqueue/cancel | 32.842 ms | 29.157 ms |
-| Append to 2,000-event journal | 11.135 ms | 12.813 ms |
-| Dispatch 256 pending requests | 20.196 ms | 19.198 ms |
-| Settle 256 pending requests | 12.473 ms | 10.608 ms |
+| Classify 2,000 rows | 3.736 ms | 4.990 ms |
+| Admission decision | 0.181 us | 0.185 us |
+| Cached status | 9.990 ms | 9.656 ms |
+| Physical host sample | 34.031 ms | 34.929 ms |
+| Ticket enqueue/cancel | 33.709 ms | 32.961 ms |
+| Append to 2,000-event journal | 11.831 ms | 14.861 ms |
+| Dispatch 256 pending requests | 25.645 ms | 20.234 ms |
+| Settle 256 pending requests | 13.580 ms | 10.984 ms |
 
 Both pending maps returned to zero. A 10,000-event input retained 2,000 entries: 294,061 versus
 294,319 serialized bytes. Journal disk size was 294,120 versus 294,138 bytes. Pending heap/RSS deltas
-were 561,384/294,912 versus 275,312/131,072 bytes for one batch, not peak bounds. Long-session heap
+were 580,152/360,448 versus 414,160/49,088 bytes for one batch, not peak bounds. Long-session heap
 deltas were negative under garbage collection and cannot establish an allocation improvement.
+Before the tsx correction, a quiet sample measured classification 3.738/3.946 ms and journal append
+11.135/12.813 ms. The final parser and retention incur measured costs; there is no latency-budget claim.
 An earlier concurrent sample showed approximately 10 versus 20 ms journal appends; there is no claim
 of a consistent retention speedup. Structural entry/byte limits, rather than garbage-collection noise,
 establish bounded retained evidence. A separate run concurrent with full validation recorded before/candidate classification 4.177/5.700 ms,
@@ -104,7 +108,7 @@ or improvement. No installed profiling was performed.
 
 ## Validation and publication
 
-Final `npm run verify` exited 0: typecheck, 42/42 invariants, 664/664 tests (zero failures,
+Final `npm run verify` exited 0: typecheck, 42/42 invariants, 665/665 tests (zero failures,
 cancellations or skips), build, audit at the unchanged high threshold (six moderate advisories), and
 26-tool backend probe. `git diff --check` passed. The preceding focused corrections passed 12/12
 integration/authority tests, 10/10 retention/authority tests, and the final actual-process fault fixture
@@ -132,3 +136,27 @@ No installed runtime, service, LaunchAgent, live coordinator lease, task/result,
 backup, connector, deployment or release mutation occurred. No PR merge occurred. C13 NOT PASS;
 E7 HOST CAPABILITY BLOCKED; C14 PROGRAM PARTIAL pending separately authorized installed acceptance;
 C15 BLOCKED. Installation and fresh exact-node runtime acceptance remain owner actions.
+
+
+## Hosted corrective pass
+
+Source commit `388f3bebd856af15160353191a1e03753f3a5247` was pushed with exact remote parity.
+Hosted validate, analyze, reproducible-build and CodeQL succeeded; runtime-proof failed the typed
+workspace-safe write with one observed competing workload. This failure remains historical.
+An isolated actual process-table probe reproduced tsx service launch shapes containing Node
+`--require`/`--import` loaders and the tsx CLI wrapper. The previous service parser missed both;
+a new regression failed before correcting actual-entrypoint parsing. The exact process counted by
+the failed hosted run was not retained, so its identity is inferred, not independently established.
+No sensor bypass or slot/pressure relaxation was used for this correction.
+
+A subsequent focused batch passed 38/39 but timed out waiting for an active-task restart to reconnect;
+its child output was previously discarded, so the exact cause is unverified. The fixture now retains
+bounded child diagnostics and detects an exited node immediately. The isolated restart rerun passed
+1/1. This does not erase the failed batch or establish that every scheduling condition is proven.
+The corrected exact-source comprehensive and hosted results are recorded after completion below.
+
+
+The corrected candidate passed final `npm run verify` with 665/665 tests, 42 invariants, typecheck,
+build, the unchanged high-threshold audit (six moderate advisories), 26-tool probe and whitespace
+checks. Independent targeted read-only review found no blocker in the actual-entrypoint correction.
+Publication and exact-head hosted readback remain separate gates.

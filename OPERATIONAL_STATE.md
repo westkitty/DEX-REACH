@@ -684,3 +684,12 @@ advisories), the 26-tool probe and whitespace checks. Exact-head hosted results 
 publication/readback. No installed runtime or owner state was
 mutated. Read-only inspection observed 19 unresolved nonterminal tasks, unchanged by this campaign.
 C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 PROGRAM PARTIAL pending installed acceptance; C15 BLOCKED.
+
+
+The first published scheduler source revision `388f3bebd856af15160353191a1e03753f3a5247` passed
+hosted validate, analyze, reproducible-build and CodeQL, but failed runtime-proof on a typed write
+with one observed competing workload. The bounded correction recognizes actual tsx Node-loader
+and launcher service entrypoints while preserving misleading-argument refusals. Its final local
+verification passes 665/665 tests, 42 invariants, typecheck, build, unchanged high-threshold audit
+(six moderate advisories), 26-tool probe and whitespace checks. Hosted verification of the correction
+remains pending; installed behavior and the 19 historical unresolved records remain untouched.

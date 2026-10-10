@@ -37,13 +37,17 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  const coordinator=net.createServer(socket=>handleCoordinatorSocket(socket,admissionHandler));
  const socketPath=coordinatorSocketPath();await new Promise<void>(r=>coordinator.listen(socketPath,r));await fs.chmod(socketPath,0o600);
  await updateAccessState('scheduler-fixture',s=>({...s,mode:'on'}),stateDir);
- const launch=()=>spawn(process.execPath,['--import','tsx','src/node/main.ts'],{cwd:repo,detached:true,stdio:'ignore',env:{...process.env,DEX_REACH_STATE_DIR:stateDir,DEX_REACH_ENV_FILE:path.join(dir,'absent.env'),DEX_WORKSPACE_WORKER_DIR:path.join(dir,'worker'),DEX_REACH_NODE_ID:'scheduler-fixture',DEX_REACH_NODE_TOKEN:token,DEX_REACH_GATEWAY_WS:`ws://127.0.0.1:${port}/node`,DEX_REACH_ALLOWED_ROOTS:roots,DEX_REACH_PROFILE:'development'}});
+ let lastNodeLog='';
+ const launch=()=>{lastNodeLog='';const spawned=spawn(process.execPath,['--import','tsx','src/node/main.ts'],{cwd:repo,detached:true,stdio:['ignore','pipe','pipe'],env:{...process.env,DEX_REACH_STATE_DIR:stateDir,DEX_REACH_ENV_FILE:path.join(dir,'absent.env'),DEX_WORKSPACE_WORKER_DIR:path.join(dir,'worker'),DEX_REACH_NODE_ID:'scheduler-fixture',DEX_REACH_NODE_TOKEN:token,DEX_REACH_GATEWAY_WS:`ws://127.0.0.1:${port}/node`,DEX_REACH_ALLOWED_ROOTS:roots,DEX_REACH_PROFILE:'development'}});
+ const capture=(data:Buffer)=>{lastNodeLog=(lastNodeLog+data.toString()).slice(-20000);};
+ spawned.stdout!.on('data',capture);spawned.stderr!.on('data',capture);return spawned;};
  let child=launch();const store=new NodeTaskStore(stateDir);
+ const ready=async()=>{if(child.exitCode!==null || child.signalCode!==null)throw new Error(`node fixture stopped: ${lastNodeLog}`);return registry.listNodes().length===1 && registry.supportsDurableTasks('scheduler-fixture');};
  const call=(operation:string,args:Record<string,unknown>,ms=2000)=>registry.requestWithTrace('scheduler-fixture',operation,args,actor,undefined,ms);
  const control=(action:'get'|'result'|'cancel',taskId:string,who=actor)=>registry.requestWithTrace('scheduler-fixture','dex.task',{},who,undefined,2000,{action,taskId});
  const start=(key:string,command:string)=>registry.requestWithTrace('scheduler-fixture','dex.task',{},actor,undefined,2000,{action:'start',operation:'dex.process.run',args:{command,cwd:roots,idempotencyKey:key}});
  try{
- await until(async()=>registry.listNodes().length===1 && registry.supportsDurableTasks('scheduler-fixture'));
+ await until(ready);
  // Idle resident desktop is not an independent workload. Actual native operation runs.
  await call('dex.process.run',{command:'printf healthy > healthy.txt',cwd:roots,idempotencyKey:'healthy'});
  assert.equal(await fs.readFile(path.join(roots,'healthy.txt'),'utf8'),'healthy');
@@ -91,7 +95,7 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  (registry as unknown as {nodes:Map<string,{socket:import('ws').default}>}).nodes.get('scheduler-fixture')!.socket.close();
  await fs.writeFile(path.join(roots,'release.txt'),'release');
  await until(async()=>(await store.read(running.taskId))?.state==='COMPLETED');
- await until(async()=>registry.listNodes().length===1 && registry.supportsDurableTasks('scheduler-fixture'));
+ await until(ready);
  await start('disconnect','printf started >> started.txt; while ! test -f release.txt; do sleep 0.1; done; printf effect >> disconnected.txt');
  assert.equal(await fs.readFile(path.join(roots,'disconnected.txt'),'utf8'),'effect');
  // A synchronous response is lost after execution starts. The task survives; same-key retrieval never replays.
@@ -102,7 +106,7 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  assert.match((await lost)!.message,/uncertain|disconnect|connection/i);
  await fs.writeFile(path.join(roots,'sync-release.txt'),'release');
  await until(async()=>(await store.list()).filter(t=>t.state==='COMPLETED').length>=4);
- await until(async()=>registry.listNodes().length===1 && registry.supportsDurableTasks('scheduler-fixture'));
+ await until(ready);
  await call('dex.process.run',lostArgs);assert.equal(await fs.readFile(path.join(roots,'sync-oracle.txt'),'utf8'),'sync-effect');
  // Lose the durable acknowledgement itself, then recover its original key without another effect.
  const ackArgs={command:'printf ack-effect >> ack-oracle.txt',cwd:roots,idempotencyKey:'lost-ack'};
@@ -132,14 +136,14 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  const interrupted=(await start('queued-restart','printf forbidden >> restart-oracle.txt')).result as {taskId:string};
  await until(async()=>(await readCoordinatorState()).tickets.some(t=>t.taskId===interrupted.taskId));
  await stop(child);await until(async()=>registry.listNodes().length===0);child=launch();
- await until(async()=>registry.listNodes().length===1 && registry.supportsDurableTasks('scheduler-fixture'));
+ await until(ready);
  assert.equal((await store.read(interrupted.taskId))?.state,'PREPARING');
  await start('queued-restart','printf forbidden >> restart-oracle.txt');
  assert.equal(await fs.access(path.join(roots,'restart-oracle.txt')).then(()=>true,()=>false),false);
  await control('cancel',interrupted.taskId);table=table.split('\n')[0]+'\n';
  // Restart retains completed identity and task-bound result without a second effect.
  await stop(child);await until(async()=>registry.listNodes().length===0);child=launch();
- await until(async()=>registry.listNodes().length===1 && registry.supportsDurableTasks('scheduler-fixture'));
+ await until(ready);
  await control('result',running.taskId);assert.equal(await fs.readFile(path.join(roots,'disconnected.txt'),'utf8'),'effect');
  assert.equal((await store.list()).filter(t=>t.taskId===running.taskId).length,1);
  // Interrupt RUNNING execution. Restart retains uncertainty and refuses identical-key replay.
@@ -147,7 +151,7 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  const active=(await start('active-restart',activeCommand)).result as {taskId:string};
  await until(async()=>fs.access(path.join(roots,'active-restart.txt')).then(()=>true,()=>false));
  await stop(child);await until(async()=>registry.listNodes().length===0);child=launch();
- await until(async()=>registry.listNodes().length===1 && registry.supportsDurableTasks('scheduler-fixture'));
+ await until(ready);
  assert.equal((await store.read(active.taskId))?.state,'AMBIGUOUS');
  await assert.rejects(start('active-restart',activeCommand),/AMBIGUOUS/);
  assert.equal(await fs.readFile(path.join(roots,'active-restart.txt'),'utf8'),'started');
