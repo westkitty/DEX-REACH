@@ -10,12 +10,20 @@ This ledger records source-level campaign state. It does not certify installed r
 - Campaign starting HEAD: `bae8492d2e960f15b2684e0f3645b2206877b8b1`
 - Protected state: installed C13 runtime unchanged; C13 NOT PASS; E7 BLOCKED — HOST CAPABILITY; C15 not started
 
+## Extended campaign authority correction
+
+The canonical master plan has now been located outside this worktree at
+`/Users/andrew/Dex_Reach/DEX_Control_System_Master_Plan.docx` and its SHA-256
+matches the supplied handoff. It was inspected read-only and was not copied or
+published. See [C14 master-plan traceability](c14-acceptance/C14_MASTER_PLAN_TRACEABILITY.md)
+and the durable [closure campaign record](C14_EVIDENCE_CLOSURE_CAMPAIGN.md).
+
 ## C14-G — cold-start recovery
 
 - Status: PASS for isolated source reconstruction; PARTIAL for independent evaluation.
 - Evidence: `docs/c14-recovery/C14_G_COLD_START_REPORT.md`, `docs/c14-recovery/C14_G_RUNBOOK.md`
 - Fresh worktree: detached `bae8492`; `npm ci` PASS; typecheck PASS; build PASS; 42 invariants PASS; focused 10/10 PASS; clean-build 160 artifacts byte-for-byte PASS.
-- Limitation: second blind evaluator unavailable; original master-plan DOCX remains missing.
+- Limitation: second blind evaluator unavailable at the original packet; the canonical master-plan DOCX was later recovered and hash-verified in the extended campaign.
 - Documentation repair: historical `docs/C14_PREPARATION.md` now has an explicit current-state note.
 
 ## Next executable packet
@@ -56,7 +64,7 @@ C14-K fresh source validation and acceptance matrix. Do not install, deploy, mer
 - Evidence: `docs/c14-acceptance/C14_K_SOURCE_ACCEPTANCE.md`.
 - Comprehensive validation: 385/385 tests, typecheck, 42 invariants, build, backend probe, dependency audit threshold, and diff check passed. Audit still reports six moderate advisories; no fix was applied.
 - Protected state: installed runtime, owner state, credentials, main, PR #15, connector, and physical systems unchanged.
-- Remaining unknowns: hosted CI current-head result, physical/installed chaos, DEX ecosystem conformance, dashboard/installed observability, second blind evaluator, missing master-plan DOCX, and genuine ADR-0003 v2 interoperability.
+- Remaining unknowns: hosted CI current-head result, physical/installed chaos, DEX ecosystem conformance, dashboard/installed observability, independent second evaluator, and genuine ADR-0003 v2 interoperability.
 
 ## Campaign closure boundary
 

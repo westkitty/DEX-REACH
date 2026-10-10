@@ -13,7 +13,8 @@ install, and the comprehensive suite passed 385/385 tests.
 **C14 program acceptance: NOT COMPLETE (PARTIAL).** The master-plan source was
 not available for independent nine-category reconciliation, several physical or
 ecosystem gates remain unverified, and ADR-0003 Protocol v2 migration is not
-implemented by the current Protocol v1 source.
+implemented by the current Protocol v1 source. The canonical master-plan DOCX
+is now recovered and hash-verified, but it was not copied into this repository.
 
 ## Nine-category matrix
 
@@ -27,7 +28,7 @@ implemented by the current Protocol v1 source.
 | 6. Bounded long-session and resource lifecycle | Corrected C14-E isolated sustained confirmation: 661.1 s, 3,611 cycles, concurrency 2, zero failures, cleanup verified | PASS at source-only scope | Historical pre-repair C14-E remains PARTIAL; no installed runtime claim |
 | 7. Security, privacy, and trust boundaries | C14-I matrix plus access, secrets, receipts, traces, policy, coordinator and control-room regressions | PASS at current REACH source scope | PAIR PRIVATE/SEALED, DROPZONE, WITNESS runtime conformance is UNVERIFIED |
 | 8. Mixed-version compatibility and migration | C14-F2 5/5 matrix tests; current Protocol v1 capability contract and explicit legacy refusal/fallback | PASS for current source contract; PARTIAL for ADR v1/v2 migration | Genuine ADR-defined Protocol v2 wire interoperability is unsupported and needs a release decision |
-| 9. Cold-start, reconstructability, and observability | C14-G fresh `npm ci`, typecheck, build, 42 invariants, 10/10 focused tests, 160-artifact clean-build; C14-J gap record | PASS for source reconstruction; PARTIAL for independent evaluation | Master-plan DOCX missing; second blind evaluator, installed revision display, and some observability proof unavailable |
+| 9. Cold-start, reconstructability, and observability | C14-G fresh `npm ci`, typecheck, build, 42 invariants, 10/10 focused tests, 160-artifact clean-build; C14-J gap record; recovered-plan traceability | PASS for source reconstruction; PARTIAL for independent evaluation | Second blind evaluator, installed revision display, and some observability proof unavailable |
 
 ## Final validation record
 
