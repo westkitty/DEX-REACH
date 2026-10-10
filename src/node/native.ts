@@ -186,6 +186,10 @@ export async function nativeProcess(
     const activityPromise = child.pid
       ? startProcessActivity({ kind: 'native-process', pid: child.pid, operation: 'dex.process.run', command, cwd, ...context })
       : Promise.resolve(null);
+    // Observed immediately: a lock timeout here while the command is still running was an unhandled
+    // rejection that terminated the node mid-task. The command continues without an activity record,
+    // which recovery already treats as UNKNOWN, never as proof the process ended.
+    activityPromise.catch(error => console.error(`DEX//REACH process activity not recorded: ${error instanceof Error ? error.message : 'unknown error'}`));
   });
 }
 
