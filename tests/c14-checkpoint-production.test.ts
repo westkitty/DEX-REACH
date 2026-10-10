@@ -174,7 +174,9 @@ test('a participant restarted with a new identity during the checkpoint invalida
 });
 test('a failure partway through an in-flight operation is a drain fault and refuses', async () => {
   const x = await world(); try {
-    const op = x.node.call('partial-failure', { delayMs: 500 }); await sleep(200);
+    // The failure must land inside the 3 s drain window, after admission closes. At 500 ms a slow hosted
+    // runner could finish it before prepare, a fault outside the window that is correctly certified.
+    const op = x.node.call('partial-failure', { delayMs: 1500 }); await sleep(200);
     const o = await x.holder.value('run'); const r = await op;
     assert.equal(r.ok, false); assert.equal(o.status, 'REFUSED'); assert.match(o.reason, /WRITER_FAULT_DURING_DRAIN:node/);
   } finally { await x.close(); }
