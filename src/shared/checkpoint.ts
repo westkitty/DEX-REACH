@@ -42,6 +42,16 @@ export function processCheckpoint(): CheckpointGate { return processGate; }
 
 type Hold = { txn: string; nonce: string; until: number; generationAtClose: number; faultsAtClose: number; timer: NodeJS.Timeout; connection?: object };
 export type SignedMessage = { payload: Record<string, unknown>; signature: string };
+/**
+ * Participant-owned ceilings. A holder may ask for shorter windows, never longer ones: timers armed
+ * from a peer's request are bounded by these constants, not by other peer-supplied values.
+ */
+export const CHECKPOINT_MAX_HOLD_MS = 15 * 60_000;
+export const CHECKPOINT_MAX_DRAIN_MS = 60_000;
+function boundedDuration(value: unknown, minimum: number, maximum: number): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error('CHECKPOINT_REQUEST_INVALID');
+  return value;
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const NONCE = /^[a-f0-9]{64}$/;
 
@@ -106,13 +116,16 @@ export class CheckpointParticipant implements CheckpointGate {
 
   /** CLOSE ADMISSION, DRAIN IN-FLIGHT, ACKNOWLEDGE. A drain timeout reopens admission and refuses. */
   async prepare(input: { txn: string; nonce: string; holdMs: number; drainMs: number }, connection?: object): Promise<SignedMessage> {
-    if (!UUID.test(input.txn) || !NONCE.test(input.nonce) || !Number.isSafeInteger(input.holdMs) || input.holdMs < 1 || input.holdMs > 15 * 60_000 || !Number.isSafeInteger(input.drainMs) || input.drainMs < 0 || input.drainMs > input.holdMs) throw new Error('CHECKPOINT_REQUEST_INVALID');
+    if (!UUID.test(input.txn) || !NONCE.test(input.nonce)) throw new Error('CHECKPOINT_REQUEST_INVALID');
+    const holdMs = boundedDuration(input.holdMs, 1, CHECKPOINT_MAX_HOLD_MS);
+    const drainMs = boundedDuration(input.drainMs, 0, CHECKPOINT_MAX_DRAIN_MS);
+    if (drainMs > holdMs) throw new Error('CHECKPOINT_REQUEST_INVALID');
     if (this.held()) return this.sign({ type: 'refused', ...this.identity(), txn: input.txn, nonce: input.nonce, reason: 'CHECKPOINT_ALREADY_HELD' });
-    const until = Date.now() + input.holdMs;
-    const timer = setTimeout(() => this.releaseHold(), input.holdMs); timer.unref();
+    const until = Date.now() + holdMs;
+    const timer = setTimeout(() => this.releaseHold(), holdMs); timer.unref();
     this.hold = { txn: input.txn, nonce: input.nonce, until, generationAtClose: this.generation, faultsAtClose: this.faults, timer, connection };
     const drained = this.inFlight === 0 || await new Promise<boolean>(resolve => {
-      const deadline = setTimeout(() => resolve(false), input.drainMs); deadline.unref();
+      const deadline = setTimeout(() => resolve(false), drainMs); deadline.unref();
       this.drainWaiters.push(() => { clearTimeout(deadline); resolve(true); });
     });
     const hold = this.hold;

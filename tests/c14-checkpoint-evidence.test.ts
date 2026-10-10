@@ -208,3 +208,19 @@ test('checkpoint refusal reasons are fixed codes, never raw error text', async (
   assert.equal(refusalCode(new SyntaxError('Unexpected token s in JSON at position 0: "secret-value"')), 'CHECKPOINT_FAILED');
   assert.equal(refusalCode('x'), 'CHECKPOINT_FAILED');
 });
+test('CodeQL js/resource-exhaustion #10: a peer cannot choose a long drain timer; the participant owns the ceiling', async () => {
+  const { CHECKPOINT_MAX_DRAIN_MS, CHECKPOINT_MAX_HOLD_MS } = await import('../src/shared/checkpoint.js');
+  assert.ok(CHECKPOINT_MAX_DRAIN_MS <= 60_000 && CHECKPOINT_MAX_HOLD_MS <= 15 * 60_000);
+  const p = new CheckpointParticipant('node', nodeId, NODE_PARTICIPANT_GROUPS, { path: '/synthetic', dev: 1, ino: 2 });
+  let release!: () => void; const busy = p.admit(() => new Promise<void>(r => { release = r; }));
+  const nonce = 'd'.repeat(64);
+  // Previously accepted: a 10-minute peer-chosen drain timer, admission closed for its duration.
+  const outcome = await Promise.race([p.prepare({ txn: crypto.randomUUID(), nonce, holdMs: 15 * 60_000, drainMs: 10 * 60_000 }).then(() => 'ARMED', e => (e as Error).message), new Promise(r => setTimeout(() => r('ARMED_AND_WAITING'), 200))]);
+  assert.equal(outcome, 'CHECKPOINT_REQUEST_INVALID');
+  assert.equal(await p.admit(async () => 'open'), 'open'); // admission never closed
+  await assert.rejects(p.prepare({ txn: crypto.randomUUID(), nonce, holdMs: CHECKPOINT_MAX_HOLD_MS + 1, drainMs: 0 }), /CHECKPOINT_REQUEST_INVALID/);
+  for (const drainMs of [-1, 1.5, Number.NaN, CHECKPOINT_MAX_DRAIN_MS + 1]) await assert.rejects(p.prepare({ txn: crypto.randomUUID(), nonce, holdMs: CHECKPOINT_MAX_HOLD_MS, drainMs } as never), /CHECKPOINT_REQUEST_INVALID/);
+  release(); await busy;
+  // The legitimate maximum still works.
+  assert.equal((await p.prepare({ txn: crypto.randomUUID(), nonce, holdMs: 1_000, drainMs: CHECKPOINT_MAX_DRAIN_MS > 1_000 ? 1_000 : CHECKPOINT_MAX_DRAIN_MS })).payload.type, 'ack');
+});
