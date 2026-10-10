@@ -319,7 +319,7 @@ test('accepted links resolve to exactly the target the kernel resolves', async (
     await fs.symlink('../alias/bin/../bin/cli.js', path.join(nm, '.bin/via-alias-dotdot'));
     for (const name of ['.bin/cli', '.bin/via-alias', '.bin/via-alias-dotdot', 'alias']) {
       const r = await inspectLink(w.source.state, `${base}/${name}`, defaultLinkPolicy());
-      assert.equal(path.join(await fs.realpath(w.source.state), r.resolvedRelative), await fs.realpath(path.join(nm, name)), name);
+      assert.equal(path.join(await fs.realpath(w.source.state), r.resolvedRelative!), await fs.realpath(path.join(nm, name)), name);
     }
   } finally { await w.cleanup(); }
 });
