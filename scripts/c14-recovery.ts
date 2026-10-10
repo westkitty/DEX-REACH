@@ -8,6 +8,8 @@ import { inspectTasks, publicTaskReport, realDirectory } from './lib/recovery-re
 import { inspectCoverage, publicCoverage } from './lib/recovery-coverage.js';
 import { runtimeTreeSha256 } from './lib/runtime-rollback.js';
 import { captureOffline, hostProbe, offlineQuiescenceBlockers } from './lib/recovery-offline-capture.js';
+import { readCapturePointer, readWindowAuthorization, verifyWindowEvidence, WINDOW } from './lib/c14-window-evidence.js';
+import { appendQuarantine, type QuarantinedTaskIdentity } from '../src/shared/task-quarantine.js';
 import { TransactionEvidenceLog, ExpectationStore } from './lib/recovery-evidence.js';
 import { COMPAT_HOME_PRESERVATION_RULE, defaultLinkPolicy } from './lib/recovery-symlinks.js';
 import { recoveryStoragePlan } from './lib/recovery-storage.js';
@@ -70,17 +72,29 @@ async function livePreflight() {
   for (const name of ['leases', 'queue']) { try { const dir = path.join(liveRoots.state, 'coordinator', name); await realDirectory(dir); claimsCount += (await fs.readdir(dir)).length; } catch { claimsKnown = false; } }
   const stat = await fs.statfs(liveRoots.state), freeBytes = stat.bavail * stat.bsize;
   const pkg = JSON.parse(await fs.readFile(path.join(C14_ROOT, 'package.json'), 'utf8'));
+  const store = JSON.parse(await fs.readFile(path.join(liveRoots.state, 'tasks', 'store.json'), 'utf8')) as { records: Record<string, QuarantinedTaskIdentity> };
+  const authorization = await readWindowAuthorization();
+  const window = await verifyWindowEvidence({ head, sourceRoot: C14_ROOT, nodeId: 'macbook-air.local', roots: liveRoots, tasks: rows, storeRecords: store.records, authorization, captureTransactionId: await readCapturePointer() });
+  const ciChecks = aggregateCheckRuns(pr.statusCheckRollup);
+  // The exact-head synthetic capture/restore suites run inside the hosted validate job.
+  const syntheticAtHead = pr.headRefOid === head && ciChecks.validate === 'SUCCESS';
+  const approved = !!authorization && authorization.approvedSha === head;
   const facts: PreflightFacts = {
     hostname: os.hostname(), model: 'MacBookAir10,1', platform: os.platform(), arch: os.arch(), user: os.userInfo().username, uid: process.geteuid!(), home: os.homedir(), root: C14_ROOT, branch, head, remoteHead, dirty,
-    candidateVersion: pkg.version, ciHead: pr.headRefOid, ciChecks: aggregateCheckRuns(pr.statusCheckRollup),
-    installedIntact, installedRelease: RETAINED_RELEASE, servicesVerified, backupCertified: false,
-    baseline: { previousReleaseId: RETAINED_RELEASE, previousDigest: RETAINED_TREE, observedDigest, previousExists: installedIntact, provenance: 'journal-bound', legacyProvenanceApproved: false, transactionId: '', state: 'uncertain', fresh: false, serviceReleaseIds, configVerified: false, inventoryVerified: false, helperIdle: helperIdle && !recoveryActive, rollbackActive: recoveryActive },
-    restoreProof: { scope: 'synthetic', sourceSha: '', passed: false }, taskCount: rows.length, taskUnresolved: rows.length, claimsKnown, claimsCount, ownerPreservationVerified: false, freeBytes, spaceMeasured: false,
-    // Conservative planning placeholder, explicitly not a measured live-backup budget.
-    space: { candidateBytes: 512 * 1024 ** 2, dependencyBytes: 0, retainedBytes: 0, backupBytes: 1024 ** 3, restoreBytes: 1024 ** 3, stagingBytes: 512 * 1024 ** 2, reserveBytes: 2 * 1024 ** 3 },
-    exactLegacyPairingVerified: false, credentialsCompatible: false, requiredHostCapabilityAvailable: false, maintenanceAuthorized: false
+    candidateVersion: pkg.version, ciHead: pr.headRefOid, ciChecks,
+    ...(approved ? { approvedSha: authorization!.approvedSha, approvedVersion: authorization!.approvedVersion } : {}),
+    installedIntact, installedRelease: RETAINED_RELEASE, servicesVerified, backupCertified: window.backupCertified,
+    baseline: { previousReleaseId: RETAINED_RELEASE, previousDigest: RETAINED_TREE, observedDigest, previousExists: installedIntact, provenance: 'journal-bound', legacyProvenanceApproved: approved && authorization!.retainC13, transactionId: window.backupCertified ? window.captureTransactionId! : '', state: window.backupCertified ? 'prepared' : 'uncertain', fresh: window.backupCertified, serviceReleaseIds, configVerified: window.provenance?.configDigest === window.provenance?.expectedConfigDigest && !!window.provenance, inventoryVerified: window.ownerPreservationVerified, helperIdle: helperIdle && !recoveryActive, rollbackActive: recoveryActive, ...(window.provenance ? { provenanceDetails: window.provenance } : {}) },
+    restoreProof: { scope: 'synthetic', sourceSha: syntheticAtHead ? head : '', passed: syntheticAtHead },
+    taskCount: rows.length, taskUnresolved: window.unresolved, taskQuarantined: window.quarantined, claimsKnown, claimsCount, ownerPreservationVerified: window.ownerPreservationVerified, freeBytes,
+    spaceMeasured: window.spaceMeasured,
+    space: window.space ?? { candidateBytes: 512 * 1024 ** 2, dependencyBytes: 0, retainedBytes: 0, backupBytes: 1024 ** 3, restoreBytes: 1024 ** 3, stagingBytes: 512 * 1024 ** 2, reserveBytes: 2 * 1024 ** 3 },
+    exactLegacyPairingVerified: window.exactLegacyPairingVerified, credentialsCompatible: window.exactLegacyPairingVerified,
+    // E7 (hosted connector interruption) is unavailable; only the owner-approved local/runtime-only scope is admissible.
+    requiredHostCapabilityAvailable: approved && authorization!.releaseScope === 'local-runtime-only',
+    maintenanceAuthorized: approved && authorization!.maintenanceWindow, releaseScope: 'local-runtime-only', boundary: window.boundary
   };
-  return { ...evaluatePreflight(facts), head, installedTreeVerified: installedIntact, freeBytes, spaceEstimate: 'PLANNING_ONLY_REQUIRES_OWNER_BUDGET', tasks: publicTaskReport(rows), prDraft: pr.isDraft, prBase: pr.baseRefName };
+  return { ...evaluatePreflight(facts), head, installedTreeVerified: installedIntact, freeBytes, spaceEstimate: window.spaceMeasured ? 'MEASURED_FROM_CERTIFIED_CAPTURE' : 'PLANNING_ONLY_REQUIRES_OWNER_BUDGET', windowBlockers: window.blockers, quarantined: window.quarantined, tasks: publicTaskReport(rows), prDraft: pr.isDraft, prBase: pr.baseRefName };
 }
 /**
  * Owner-run offline capture of the STOPPED installation. Flags are the owner's approval of one exact
@@ -113,13 +127,36 @@ async function offlineCaptureCommand(args: string[]): Promise<number> {
   const forbidden = [...Object.values(liveRoots), root, C14_ROOT];
   const log = await TransactionEvidenceLog.open(evidenceRoot!, 'macbook-air.local', forbidden);
   const expectations = await ExpectationStore.open(expectationRoot!, 'macbook-air.local', [...forbidden, log.root]);
-  const outcome = await captureOffline({ nodeId: 'macbook-air.local', transactionId: transactionId!, roots: liveRoots, destination, log, expectations, probe, linkPolicy });
+  const sourceSha = await run('/usr/bin/git', ['rev-parse', 'HEAD']);
+  if (await run('/usr/bin/git', ['status', '--porcelain'])) throw new Error('SOURCE_DIRTY');
+  const outcome = await captureOffline({ nodeId: 'macbook-air.local', transactionId: transactionId!, sourceSha, roots: liveRoots, destination, log, expectations, probe, linkPolicy });
+  // The window pointer only names the transaction; the preflight re-verifies everything it would imply.
+  if (outcome.status === 'OFFLINE_BACKUP_CERTIFIED' && root === WINDOW.destination && log.root === WINDOW.evidence && expectations.root === WINDOW.expectations) {
+    const handle = await fs.open(WINDOW.capture, 'wx', 0o600);
+    try { await handle.writeFile(JSON.stringify({ version: 1, transactionId: outcome.transactionId }) + '\n'); await handle.sync(); } finally { await handle.close(); }
+  }
   console.log(JSON.stringify(outcome, null, 2));
   return outcome.status === 'OFFLINE_BACKUP_CERTIFIED' ? 0 : outcome.status === 'REFUSED' ? 2 : 3;
+}
+/**
+ * Owner-authorized quarantine of unresolved historical tasks. Only records that currently classify as
+ * AMBIGUOUS_EFFECT or INSUFFICIENT_EVIDENCE with no live activity, lease or ticket are acknowledged.
+ * Nothing is replayed, transitioned or resolved; the task records are not touched.
+ */
+async function quarantineCommand(): Promise<number> {
+  const authorization = await readWindowAuthorization();
+  if (!authorization?.historicalTaskQuarantine) throw new Error('QUARANTINE_NOT_AUTHORIZED');
+  const rows = await liveTaskReport();
+  const store = JSON.parse(await fs.readFile(path.join(liveRoots.state, 'tasks', 'store.json'), 'utf8')) as { records: Record<string, QuarantinedTaskIdentity> };
+  const eligible = rows.filter(r => (r.classification === 'AMBIGUOUS_EFFECT' || r.classification === 'INSUFFICIENT_EVIDENCE') && !r.evidence.activity && !r.evidence.lease && !r.evidence.ticket && store.records[r.taskId]);
+  const written = await appendQuarantine(liveRoots.state, eligible.map(r => ({ task: store.records[r.taskId]!, classification: r.classification })), { kind: 'owner-authorization', grantedAt: authorization.grantedAt, scope: 'Preserve historical task records; effect unknown; never replay, erase history or claim effects are known.' });
+  console.log(JSON.stringify({ mode: 'APPEND_ONLY_QUARANTINE', quarantined: written.length, ineligible: rows.length - eligible.length, effect: 'UNKNOWN', replayAuthorized: false, taskRecordsModified: false }, null, 2));
+  return rows.length === eligible.length ? 0 : 2;
 }
 async function main() {
   const command = process.argv[2] ?? 'preflight';
   if (command === 'capture-offline') { await assertLiveTarget(); process.exitCode = await offlineCaptureCommand(process.argv.slice(3)); return; }
+  if (command === 'quarantine' && process.argv.length === 3) { await assertLiveTarget(); process.exitCode = await quarantineCommand(); return; }
   if (!['preflight', 'tasks', 'coverage'].includes(command) || process.argv.slice(3).some(a => a !== '--private')) throw new Error('usage: c14-recovery.ts preflight|tasks|coverage [--private for task IDs only] | capture-offline (owner-run, services stopped); no installation command exists');
   await assertLiveTarget();
   if (command === 'tasks') { const rows = await liveTaskReport(); console.log(JSON.stringify(process.argv.includes('--private') ? { mode: 'READ_ONLY_PRIVATE', records: rows } : publicTaskReport(rows), null, 2)); }

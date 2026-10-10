@@ -1,3 +1,4 @@
+import { isVerifiedWindowEvidence } from './c14-window-evidence.js';
 export const C14_ROOT = '/Users/andrew/dex-reach-c13-worker-repair';
 export const RETAINED_RELEASE = '0.3.2-87a99494ebb3-2f44ae46b11b';
 export const RETAINED_TREE = 'fcb78a6b99db10aac565a1b2b4af90faf142ef5bd5162523a662febeafd36b12';
@@ -13,9 +14,15 @@ export function retainedProvenanceBlockers(p?: RetainedProvenance): string[] {
   return issues;
 }
 export type RecoveryBoundaryEvidence = Readonly<{ scope: 'live' | 'synthetic'; version: 1; symlinkPolicy: boolean; knownFamilies: boolean; consistency: boolean; manifestTrust: boolean; destination: boolean; durableBackup: boolean; restore: boolean; taskDisposition: boolean; provenance: boolean; candidateIdentity: boolean }>;
-/** Production receipt/owner-authorization adapter intentionally unavailable. JSON is never authority. */
-export function validateLiveBoundaryEvidence(_e?: RecoveryBoundaryEvidence): Record<string, boolean> {
-  return Object.fromEntries(['SYMLINK_POLICY', 'KNOWN_FAMILIES', 'SNAPSHOT_CONSISTENCY', 'INDEPENDENT_MANIFEST_TRUST', 'BACKUP_DESTINATION', 'BACKUP_DURABILITY', 'APPLICATION_RESTORE', 'TASK_DISPOSITION', 'RETAINED_PROVENANCE', 'CANDIDATE_RELEASE_IDENTITY'].map(k => [k, false]));
+const BOUNDARY_GATES = [['SYMLINK_POLICY', 'symlinkPolicy'], ['KNOWN_FAMILIES', 'knownFamilies'], ['SNAPSHOT_CONSISTENCY', 'consistency'], ['INDEPENDENT_MANIFEST_TRUST', 'manifestTrust'], ['BACKUP_DESTINATION', 'destination'], ['BACKUP_DURABILITY', 'durableBackup'], ['APPLICATION_RESTORE', 'restore'], ['TASK_DISPOSITION', 'taskDisposition'], ['RETAINED_PROVENANCE', 'provenance'], ['CANDIDATE_RELEASE_IDENTITY', 'candidateIdentity']] as const;
+/**
+ * Live boundary gates pass only for evidence minted by verifyWindowEvidence after it re-verified the
+ * certified capture chain, its independent expectation, the destination, quarantine and provenance.
+ * Supplied JSON or synthetic objects never pass, whatever their fields say.
+ */
+export function validateLiveBoundaryEvidence(e?: RecoveryBoundaryEvidence): Record<string, boolean> {
+  const genuine = !!e && e.scope === 'live' && isVerifiedWindowEvidence(e);
+  return Object.fromEntries(BOUNDARY_GATES.map(([gate, field]) => [gate, genuine && e![field] === true]));
 }
 export type Baseline = { previousReleaseId: string; previousDigest: string; observedDigest: string; previousExists: boolean; provenance: 'manifest-verified' | 'journal-bound' | 'unknown'; legacyProvenanceApproved: boolean; transactionId: string; state: 'prepared' | 'partial' | 'uncertain'; fresh: boolean; serviceReleaseIds: string[]; configVerified: boolean; inventoryVerified: boolean; helperIdle: boolean; rollbackActive: boolean; provenanceDetails?: RetainedProvenance };
 export function baselineBlockers(b: Baseline): string[] {
@@ -50,7 +57,7 @@ export function aggregateCheckRuns(rows: unknown): Record<string, string> {
   }
   return seen;
 }
-export type PreflightFacts = { hostname: string; model: string; platform: string; arch: string; user: string; uid: number; home: string; root: string; branch: string; head: string; remoteHead: string; dirty: boolean; approvedSha?: string; candidateVersion: string; approvedVersion?: string; ciHead?: string; ciChecks: Record<string, string>; installedIntact: boolean; installedRelease: string; servicesVerified: boolean; backupCertified: boolean; baseline: Baseline; restoreProof: { scope: 'synthetic' | 'installed'; sourceSha: string; passed: boolean }; taskCount: number; taskUnresolved: number; claimsKnown: boolean; claimsCount: number; ownerPreservationVerified: boolean; freeBytes: number; spaceMeasured: boolean; space: SpacePlan; exactLegacyPairingVerified: boolean; credentialsCompatible: boolean; requiredHostCapabilityAvailable: boolean; maintenanceAuthorized: boolean; boundary?: RecoveryBoundaryEvidence };
+export type PreflightFacts = { hostname: string; model: string; platform: string; arch: string; user: string; uid: number; home: string; root: string; branch: string; head: string; remoteHead: string; dirty: boolean; approvedSha?: string; candidateVersion: string; approvedVersion?: string; ciHead?: string; ciChecks: Record<string, string>; installedIntact: boolean; installedRelease: string; servicesVerified: boolean; backupCertified: boolean; baseline: Baseline; restoreProof: { scope: 'synthetic' | 'installed'; sourceSha: string; passed: boolean }; taskCount: number; taskUnresolved: number; taskQuarantined?: number; releaseScope?: 'local-runtime-only'; claimsKnown: boolean; claimsCount: number; ownerPreservationVerified: boolean; freeBytes: number; spaceMeasured: boolean; space: SpacePlan; exactLegacyPairingVerified: boolean; credentialsCompatible: boolean; requiredHostCapabilityAvailable: boolean; maintenanceAuthorized: boolean; boundary?: RecoveryBoundaryEvidence };
 export function evaluatePreflight(f: PreflightFacts) {
   const checks: Record<string, boolean> = {
     EXACT_HOST: f.hostname === 'MacBook-Air.local' && f.model === 'MacBookAir10,1' && f.platform === 'darwin' && f.arch === 'arm64',
@@ -66,7 +73,8 @@ export function evaluatePreflight(f: PreflightFacts) {
     BACKUP_COVERAGE: f.backupCertified,
     RECOVERY_BASELINE: baselineBlockers(f.baseline).length === 0,
     SYNTHETIC_RESTORE: f.restoreProof.scope === 'synthetic' && f.restoreProof.passed && f.restoreProof.sourceSha === f.head,
-    NONTERMINAL_TASKS: Number.isInteger(f.taskCount) && f.taskCount >= 0 && f.taskUnresolved === 0 && f.taskCount === 0,
+    // Every nonterminal record is either absent or owner-quarantined with a still-matching entry.
+    NONTERMINAL_TASKS: Number.isInteger(f.taskCount) && f.taskCount >= 0 && f.taskUnresolved === 0 && f.taskCount === (f.taskQuarantined ?? 0),
     COORDINATOR_CLAIMS: f.claimsKnown && f.claimsCount === 0,
     OWNER_PRESERVATION: f.ownerPreservationVerified,
     FREE_SPACE: false,
@@ -77,5 +85,5 @@ export function evaluatePreflight(f: PreflightFacts) {
   };
   try { checks.FREE_SPACE = f.spaceMeasured && Number.isSafeInteger(f.freeBytes) && f.freeBytes >= requiredFreeBytes(f.space); } catch { /* Invalid estimates refuse. */ }
   const blockers = Object.entries(checks).filter(([, pass]) => !pass).map(([name]) => name);
-  return { mode: 'READ_ONLY', installationExecuted: false, installationCommandAvailable: false, status: blockers.length ? 'BLOCKED' : 'PREREQUISITES_PASS_NO_INSTALLATION', checks, blockers, recoveryBlockers: baselineBlockers(f.baseline), syntheticIsInstalledProof: false, states: { source: checks.CLEAN_SOURCE && checks.HOSTED_CHECKS ? 'SOURCE_VALIDATED' : 'SOURCE_UNVERIFIED', backup: 'PRIVATE_BACKUP_UNVERIFIED', rollback: 'ROLLBACK_BASELINE_UNVERIFIED', installation: blockers.length ? 'INSTALLATION_BLOCKED' : 'INSTALLATION_PREREQUISITES_PASS' } };
+  return { mode: 'READ_ONLY', installationExecuted: false, installationCommandAvailable: false, status: blockers.length ? 'BLOCKED' : 'PREREQUISITES_PASS_NO_INSTALLATION', releaseScope: f.releaseScope ?? 'unscoped', e7Verified: false, checks, blockers, recoveryBlockers: baselineBlockers(f.baseline), syntheticIsInstalledProof: false, states: { source: checks.CLEAN_SOURCE && checks.HOSTED_CHECKS ? 'SOURCE_VALIDATED' : 'SOURCE_UNVERIFIED', backup: checks.BACKUP_COVERAGE ? 'PRIVATE_BACKUP_CERTIFIED' : 'PRIVATE_BACKUP_UNVERIFIED', rollback: checks.RECOVERY_BASELINE ? 'ROLLBACK_BASELINE_VERIFIED' : 'ROLLBACK_BASELINE_UNVERIFIED', installation: blockers.length ? 'INSTALLATION_BLOCKED' : 'INSTALLATION_PREREQUISITES_PASS' } };
 }
