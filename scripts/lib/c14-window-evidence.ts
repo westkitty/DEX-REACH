@@ -146,7 +146,8 @@ export async function verifyWindowEvidence(input: {
     const releasePrefix = `runtime/releases/${r.release}/`;
     const releaseEntries = manifest.entries.filter(e => e.root === 'state' && e.relative.startsWith(releasePrefix));
     const configEntries = manifest.entries.filter(e => e.root === 'agents' || e.root === 'worker');
-    const policyEntries = manifest.entries.filter(e => e.root === 'state' && new RegExp(`^nodes/${input.nodeId.replace(/\./g, '\\.')}\\.(access\\.json|env|transport\\.ed25519(\\.pub)?\\.pem)$`).test(e.relative));
+    const policyNames = new Set(['access.json', 'env', 'transport.ed25519.pem', 'transport.ed25519.pub.pem'].map(suffix => `nodes/${input.nodeId}.${suffix}`));
+    const policyEntries = manifest.entries.filter(e => e.root === 'state' && policyNames.has(e.relative));
     const provenance: RetainedProvenance = {
       sourceSha: journal.head === r.source && journal.candidateId === r.release && journal.decision === 'RETAIN CANDIDATE' ? r.source : `UNMATCHED:${String(journal.head)}`,
       installTransaction: String(journal.transactionId),
