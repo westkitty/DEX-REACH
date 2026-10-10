@@ -22,6 +22,9 @@ const localStateDir = stateDir();
 const logsDir = path.join(localStateDir, 'logs');
 const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
 const nodeBin = process.execPath;
+const transactionIndex = process.argv.indexOf('--transaction-id');
+const transactionId = transactionIndex >= 0 ? process.argv[transactionIndex + 1] : undefined;
+if (transactionIndex >= 0 && (!transactionId || !/^[a-f0-9-]{36}$/.test(transactionId))) throw new Error('invalid install transaction id');
 const installStatus = path.join(localStateDir, 'install-macos.status.json');
 
 async function install(): Promise<void> {
@@ -29,6 +32,8 @@ await fs.mkdir(agentsDir, { recursive: true });
 await fs.mkdir(logsDir, { recursive: true, mode: 0o700 });
 
 const releaseId = await runtimeReleaseId(root, DEX_REACH_VERSION);
+const expectedIndex = process.argv.indexOf('--expected-release-id');
+if (expectedIndex >= 0 && process.argv[expectedIndex + 1] !== releaseId) throw new Error('expected candidate source revision changed before install');
 const runtimeRoot = await buildRuntimeRelease(root, localStateDir, releaseId, nodeBin);
 const sourceNodeBin = path.join(root, 'node_modules', '.bin');
 const inheritedPath = (process.env.PATH || '').split(path.delimiter)
@@ -196,6 +201,7 @@ const helperArgs = [
   helperEntry,
   '--domain', domain,
   '--status', installStatus,
+  ...(transactionId ? ['--transaction-id', transactionId, '--runtime-root', runtimeRoot] : []),
   '--delay-ms', '3000',
   '--health-url', healthUrl,
   '--cleanup-plist', helperTarget
@@ -213,7 +219,7 @@ await execFileAsync('/usr/bin/plutil', ['-lint', helperTarget]);
 
 const scheduledAt = new Date().toISOString();
 await atomicWriteFile(installStatus, JSON.stringify({
-  version: DEX_REACH_VERSION,
+  version: DEX_REACH_VERSION, transactionId,
   state: 'scheduled',
   scheduledAt,
   domain,
@@ -230,7 +236,7 @@ try {
   });
 } catch (error) {
   await atomicWriteFile(installStatus, JSON.stringify({
-    version: DEX_REACH_VERSION, state: 'failed', outcome: failureOutcome(error), scheduledAt, failedAt: new Date().toISOString(),
+    version: DEX_REACH_VERSION, transactionId, state: 'failed', outcome: failureOutcome(error), scheduledAt, failedAt: new Date().toISOString(),
     domain, helperLabel, runtimeRoot, error: errorText(error),
     services: [...services.map(service => ({ label: service.label, target: service.target })), { label: canaryLabel, target: canaryTarget }]
   }, null, 2) + '\n');

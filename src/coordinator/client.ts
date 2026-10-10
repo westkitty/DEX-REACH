@@ -45,8 +45,11 @@ async function socketPresent(): Promise<boolean> {
   }
 }
 
-async function callDaemon(command: Command, payload?: Record<string, unknown>): Promise<unknown | null> {
-  if (!(await socketPresent())) return null;
+async function callDaemon(command: Command, payload?: Record<string, unknown>, requireDaemon = false): Promise<unknown | null> {
+  if (!(await socketPresent())) {
+    if (requireDaemon) throw new CoordinatorUnavailableError('coordinator daemon required; refusing direct fallback');
+    return null;
+  }
   const request = JSON.stringify({ version: PROTOCOL_VERSION, command, ...(payload ? { payload } : {}) } satisfies WireRequest) + '\n';
   if (Buffer.byteLength(request) > MAX_FRAME_BYTES) throw new CoordinatorUnavailableError('coordinator request exceeds the local protocol limit');
   return new Promise<unknown>((resolve, reject) => {
@@ -85,14 +88,14 @@ export function bindCoordinatorCaller(request: WorkRequest, callerPid = process.
 }
 
 /** Production callers prefer the single-writer daemon. Direct mode is bootstrap/test-only. */
-export async function coordinatedAcquire(request: WorkRequest): Promise<AdmissionResult> {
+export async function coordinatedAcquire(request: WorkRequest, options: { requireDaemon?: boolean } = {}): Promise<AdmissionResult> {
   const bound = bindCoordinatorCaller(request);
-  const value = await callDaemon('acquire', { request: bound as unknown as Record<string, unknown> });
+  const value = await callDaemon('acquire', { request: bound as unknown as Record<string, unknown> }, options.requireDaemon);
   return value === null ? acquireWork(bound) : object<AdmissionResult>(value);
 }
 
-export async function coordinatedRelease(id: string, options: { pid?: number; force?: boolean } = {}): Promise<ReleaseResult> {
-  const value = await callDaemon('release', { id, options });
+export async function coordinatedRelease(id: string, options: { pid?: number; force?: boolean; requireDaemon?: boolean } = {}): Promise<ReleaseResult> {
+  const value = await callDaemon('release', { id, options: { pid: options.pid, force: options.force } }, options.requireDaemon);
   return value === null ? releaseWork(id, options) : object<ReleaseResult>(value);
 }
 
@@ -101,13 +104,13 @@ export async function coordinatedHeartbeat(id: string): Promise<boolean> {
   return value === null ? heartbeat(id) : Boolean(value);
 }
 
-export async function coordinatedCancel(id: string): Promise<boolean> {
-  const value = await callDaemon('cancel', { id });
+export async function coordinatedCancel(id: string, options: { requireDaemon?: boolean } = {}): Promise<boolean> {
+  const value = await callDaemon('cancel', { id }, options.requireDaemon);
   return value === null ? cancelTicket(id) : Boolean(value);
 }
 
-export async function coordinatedStatus(): Promise<WorkStatus> {
-  const value = await callDaemon('status');
+export async function coordinatedStatus(options: { requireDaemon?: boolean } = {}): Promise<WorkStatus> {
+  const value = await callDaemon('status', undefined, options.requireDaemon);
   return value === null ? workStatus() : object<WorkStatus>(value);
 }
 

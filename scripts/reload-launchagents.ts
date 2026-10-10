@@ -33,6 +33,8 @@ function serviceArgs(): Service[] {
   return out;
 }
 
+const transactionId = optionalArg('--transaction-id');
+const runtimeRoot = optionalArg('--runtime-root');
 const domain = requiredArg('--domain');
 const statusFile = requiredArg('--status');
 const cleanupPlist = optionalArg('--cleanup-plist');
@@ -46,7 +48,7 @@ if (!Number.isFinite(delayMs) || delayMs < 500 || delayMs > 30_000) throw new Er
 
 const startedAt = new Date().toISOString();
 await atomicWriteFile(statusFile, JSON.stringify({
-  version: DEX_REACH_VERSION,
+  version: DEX_REACH_VERSION, transactionId, runtimeRoot,
   state: 'waiting',
   startedAt,
   domain,
@@ -133,7 +135,7 @@ try {
   }
 
   await atomicWriteFile(statusFile, JSON.stringify({
-    version: DEX_REACH_VERSION,
+    version: DEX_REACH_VERSION, transactionId, runtimeRoot,
     state: 'complete',
     startedAt,
     completedAt: new Date().toISOString(),
@@ -142,7 +144,7 @@ try {
   }, null, 2) + '\n');
 } catch (error) {
   await atomicWriteFile(statusFile, JSON.stringify({
-    version: DEX_REACH_VERSION,
+    version: DEX_REACH_VERSION, transactionId, runtimeRoot,
     state: 'failed',
     startedAt,
     failedAt: new Date().toISOString(),
