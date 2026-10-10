@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | C14 program status | PARTIAL / NOT COMPLETE | C14-K source matrix; installed, physical, ecosystem, migration, and human gates remain |
 | Release version and SHA | UNKNOWN | Owner-approved release candidate |
-| CI and audit | PARTIAL | Audit exited 0 with six moderate advisories; exact-head hosted checks remain UNKNOWN |
+| CI and audit | PASS for source head | PR #16 runs `38024604247` and CodeQL `38024604152` passed on exact head `7161f95`; audit still has six moderate advisories |
 | Clean build/provenance | PARTIAL | Source clean-build exists; release provenance still required |
 | Immutable install/rollback | BLOCKED | Owner maintenance authority and fresh installed proof |
 | Public connector | BLOCKED | Owning connector refresh and real-client acceptance |

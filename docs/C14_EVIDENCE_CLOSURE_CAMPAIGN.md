@@ -22,9 +22,9 @@ header.
 | Dimension | Current state | Evidence |
 | --- | --- | --- |
 | INSTALLED_RUNTIME | Historical C13 candidate preserved; not changed | `OPERATIONAL_STATE.md` metadata header and C13 recovery evidence |
-| CURRENT_SOURCE | `c14-chaos-recovery`, source work continuing | Git HEAD and this record |
+| CURRENT_SOURCE | `c14-chaos-recovery`, source at `7161f95536f7ca787f1772f5afdd66c3e274f351` | Git HEAD and this record |
 | LOCAL_VALIDATION | Prior 385/385 suite and native gates PASS; fresh final rerun pending only after source changes | `docs/c14-acceptance/C14_K_SOURCE_ACCEPTANCE.md` |
-| HOSTED_CI | No C14 branch run at baseline; draft-PR path authorized for one attempt | `docs/c14-acceptance/C14_HOSTED_CI_EVIDENCE.md` when created |
+| HOSTED_CI | PASS on exact head through draft PR #16; no merge performed | `docs/c14-acceptance/C14_HOSTED_CI_EVIDENCE.md` |
 | PROGRAM_ACCEPTANCE | PARTIAL / NOT COMPLETE | recovered-plan traceability and final gate |
 | RELEASE_AUTHORITY | Not granted | `docs/C15_READINESS_PREPARATION.md` |
 
@@ -34,12 +34,12 @@ header.
 | --- | --- | --- |
 | A — state and authority reconciliation | PASS | Current metadata preserves installed identity; source/runtime distinction documented |
 | B — master-plan recovery | PASS | `docs/c14-acceptance/C14_MASTER_PLAN_TRACEABILITY.md`; exact hash verified |
-| C — hosted GitHub CI | IN PROGRESS | One draft source PR may be created against verified dependency ancestry |
-| D — independent cold-start evaluation | IN PROGRESS | Separate evaluator attempt, otherwise UNVERIFIED |
-| E — DEX ecosystem conformance | IN PROGRESS | Read-only contract inspection and synthetic fixtures only |
-| F — isolated chaos/observability | IN PROGRESS | Do not repeat completed long stress; test only remaining safe gaps |
-| G — adversarial C14 acceptance | PENDING | Fresh final validation after material source changes |
-| H — owner decisions/C15 handoff | PENDING | Decision packet after evidence is frozen |
+| C — hosted GitHub CI | PASS | Draft PR #16; validation run `38024604247` and CodeQL `38024604152` passed exact head |
+| D — independent cold-start evaluation | UNVERIFIED | Separate context completed without an evidence-based reconstruction; no independence claim |
+| E — DEX ecosystem conformance | PARTIAL / IMPLEMENTED_UNVERIFIED | `docs/c14-acceptance/C14_ECOSYSTEM_CONFORMANCE.md`; no REACH product consumer exists |
+| F — isolated chaos/observability | PARTIAL | Existing safe fixtures pass; dedicated durable node/worker interruption and installed observability remain open |
+| G — adversarial C14 acceptance | PASS source / PARTIAL program | `docs/c14-acceptance/C14_FINAL_EVIDENCE_GATE.md` |
+| H — owner decisions/C15 handoff | READY FOR OWNER DECISION | `docs/c14-acceptance/C14_OWNER_DECISION_PACKET.md`; C15 remains blocked |
 
 ## Protected scope
 

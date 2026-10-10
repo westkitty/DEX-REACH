@@ -64,7 +64,7 @@ C14-K fresh source validation and acceptance matrix. Do not install, deploy, mer
 - Evidence: `docs/c14-acceptance/C14_K_SOURCE_ACCEPTANCE.md`.
 - Comprehensive validation: 385/385 tests, typecheck, 42 invariants, build, backend probe, dependency audit threshold, and diff check passed. Audit still reports six moderate advisories; no fix was applied.
 - Protected state: installed runtime, owner state, credentials, main, PR #15, connector, and physical systems unchanged.
-- Remaining unknowns: hosted CI current-head result, physical/installed chaos, DEX ecosystem conformance, dashboard/installed observability, independent second evaluator, and genuine ADR-0003 v2 interoperability.
+- Remaining unknowns: physical/installed chaos, DEX ecosystem conformance, dashboard/installed observability, independent second evaluator, and genuine ADR-0003 v2 interoperability. Hosted CI is recorded for the prior source-equivalent head `7161f95`; the final delta is documentation-only and will receive a fresh exact-head check.
 
 ## Campaign closure boundary
 
@@ -72,3 +72,14 @@ The authorized source campaign is complete at its measured boundary. C14 itself
 is not declared complete. The next safe action is an owner-authorized decision
 and execution packet for the remaining installed/physical and ecosystem gates;
 otherwise preserve this ledger and do not begin C15.
+
+## Extended campaign packet closure
+
+- Packet A: PASS; installed metadata remains separate from source state.
+- Packet B: PASS; canonical DOCX recovered and hash-verified outside the worktree.
+- Packet C: PASS; draft PR #16 targets `c13-worker-repair`; DEX validation run `38024604247` and CodeQL run `38024604152` passed on exact head `7161f95536f7ca787f1772f5afdd66c3e274f351`.
+- Packet D: UNVERIFIED; the separate evaluator context did not return an evidence-based reconstruction.
+- Packet E: PARTIAL / IMPLEMENTED_UNVERIFIED; DEX contracts are mapped read-only, but no REACH product-adapter consumer exists.
+- Packet F: PARTIAL; safe source fixtures and observability reconciliation pass, while dedicated durable process interruption and installed observability remain open.
+- Packet G: PASS for source acceptance within tested scope; PARTIAL for C14 program acceptance.
+- Packet H: READY FOR OWNER DECISION; see `docs/c14-acceptance/C14_OWNER_DECISION_PACKET.md`. C15 remains blocked.
