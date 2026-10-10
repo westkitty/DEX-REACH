@@ -50,8 +50,18 @@ test('gateway loss and subscriber disconnect preserve one running external effec
   const pair=await startLivePair({repoRoot,nodeIds:['chaos-node'],profile:'development'});
   try{
     await pair.dexCli(['enable','--node','chaos-node']);
-    const args={node_id:'chaos-node',action:'start',operation:'dex.process.run',mode:'durable',arguments:{command:'sleep 2; printf effect >> oracle.txt',cwd:pair.roots,idempotencyKey:'once-only'}};
-    const results=await Promise.all([pair.call('reach_task',args),pair.call('reach_task',args)]);
+    const args={node_id:'chaos-node',action:'start',operation:'dex.process.run',mode:'durable',arguments:{command:'touch running.txt; for i in $(seq 1 600); do if test -f release.txt; then printf effect >> oracle.txt; exit 0; fi; sleep 0.1; done; exit 1',cwd:pair.roots,idempotencyKey:'once-only'}};
+    // Admission is bounded: under full-suite contention a caller may receive uncertainty.
+    // Reconcile by retrying the identical key, never by creating a replacement task.
+    const admit=async()=>{
+      for(let attempt=0;attempt<6;attempt++){
+        const result=await pair.call('reach_task',args);
+        if(result.ok)return result;
+        assert.match(result.text,/DURABLE_ADMISSION_UNAVAILABLE/);
+      }
+      throw new Error('same-key admission did not recover within six bounded attempts');
+    };
+    const results=await Promise.all([admit(),admit()]);
     results.forEach(r=>assert.equal(r.ok,true,r.text));
     const ids=results.map(r=>r.text.match(/rtsk_[0-9a-f]+_[0-9a-f]+/)?.[0]);assert.ok(ids[0]);assert.equal(ids[0],ids[1]);
     const route=`/api/v2/tasks/${ids[0]}/events?node_id=chaos-node`;
@@ -61,10 +71,16 @@ test('gateway loss and subscriber disconnect preserve one running external effec
     const firstText=new TextDecoder().decode(first.value);assert.match(firstText,/ACCEPTED/);
     const cursor=firstText.match(/id: (tev_[0-9a-f]{24})/)?.[1];assert.ok(cursor);
     abort.abort();await reader.cancel().catch(()=>{});
+    for(let attempt=0;attempt<150;attempt++){
+      if(await fs.access(path.join(pair.roots,'running.txt')).then(()=>true,()=>false))break;
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    await fs.access(path.join(pair.roots,'running.txt'));
     const cancelled=await pair.call('reach_task',{node_id:'chaos-node',action:'cancel',task_id:ids[0]});
     assert.equal(cancelled.ok,false,cancelled.text);assert.match(cancelled.text,/CANCELLATION_UNPROVEN/);
     await pair.restartGateway();
     const resumed=await pair.authorizedFetch(route,{headers:{'Last-Event-ID':cursor}});assert.equal(resumed.status,200);
+    await fs.writeFile(path.join(pair.roots,'release.txt'),'release');
     assert.match(await resumed.text(),/COMPLETED/);
     assert.equal(await fs.readFile(path.join(pair.roots,'oracle.txt'),'utf8'),'effect');
     const records=await new NodeTaskStore(pair.stateDir).list();
