@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { inspectLink, defaultLinkPolicy, type LinkPolicy } from './recovery-symlinks.js';
 import { hashValue } from '../../src/shared/hash.js';
 import { realDirectory, safeRead } from './recovery-reconciliation.js';
 
@@ -8,7 +9,7 @@ export type Roots = { state: string; agents: string; worker: string };
 export type Coverage = 'INCLUDED' | 'EXCLUDED_BY_POLICY' | 'MISSING' | 'UNKNOWN' | 'UNREADABLE' | 'DERIVED_ONLY';
 export type Family = { id: string; root: keyof Roots; relative: string; required: boolean; sensitive: boolean; derived?: boolean; dependency: string };
 /** Owner-state families are explicit, including signing keys and authority-bearing optional policies. */
-export function recoveryFamilies(nodeId: string): Family[] {
+export function recoveryFamilies(nodeId: string, preservation: string[] = []): Family[] {
   if (nodeId !== 'macbook-air.local') throw new Error('WRONG_NODE');
   const state = (id: string, relative: string, dependency: string, required = true, sensitive = true, derived = false): Family => ({ id, root: 'state', relative, dependency, required, sensitive, derived });
   return [
@@ -29,43 +30,79 @@ export function recoveryFamilies(nodeId: string): Family[] {
     state('oauth-health', 'oauth-health.json', 'derived OAuth diagnostic', false, true, true),
     state('logs', 'logs', 'diagnostics', false, true, true), state('traces', 'traces', 'causal evidence', false),
     { id: 'services', root: 'agents', relative: '', required: true, sensitive: true, dependency: 'five LaunchAgents' },
-    { id: 'worker', root: 'worker', relative: 'config.json', required: true, sensitive: true, dependency: 'exact node and roots' }
+    { id: 'worker', root: 'worker', relative: 'config.json', required: true, sensitive: true, dependency: 'exact node and roots' },
+    ...preservation.filter(n => /^macos-hardening-rollback-[A-Za-z0-9]{6}$/.test(n)).sort().map((n, i) => state(`historical-preservation-${i}`, n, 'five historical service definitions retained without rewriting'))
   ];
 }
-export type Entry = { family: string; root: keyof Roots; relative: string; bytes: number; mode: number; uid: number; gid: number; sha256: string; schema?: number; mtimeMs: number; sensitive: boolean };
-export type DirectoryEntry = { root: keyof Roots; relative: string; mode: number; uid: number; gid: number; names: string[] };
-export type Manifest = { version: 1; scope: 'inspection' | 'synthetic'; nodeId: string; startedAt: string; endedAt: string; roots: Roots; directories: DirectoryEntry[]; volumes: Record<keyof Roots, number>; families: Array<{ id: string; status: Coverage; dependency: string }>; entries: Entry[]; totalBytes: number; consistent: boolean; problems: string[]; digest: string };
+export function familyRegistry(names: string[] = []) {
+  const writers: Record<string, string> = { tasks: 'src/node/task-store.ts', events: 'src/shared/task-events.ts', results: 'src/node/result-store.ts', receipts: 'src/shared/receipts.ts', enrollment: 'src/shared/access.ts + budget-policy.ts + budget-usage.ts + node-transport-auth.ts', 'node-auth': 'src/gateway/node-auth.ts', revocations: 'src/shared/revoked-nodes.ts', oauth: 'src/gateway/auth.ts', plans: 'src/shared/plans.ts', coordinator: 'src/shared/work-coordinator.ts', runtime: 'scripts/lib/runtime-release.ts + runtime-rollback.ts + install-macos.ts', services: 'scripts/install-macos.ts', worker: 'scripts/install-macos.ts', checkpoints: 'src/node/native.ts', compatibility: 'src/node/adapters/desktop-commander.ts', secrets: 'scripts/bootstrap.ts', 'install-status': 'scripts/install-macos.ts', canary: 'scripts/oauth-canary.ts', 'canary-status': 'scripts/oauth-canary.ts', 'oauth-health': 'src/shared/oauth-diagnostics.ts', logs: 'service stdout/stderr via installer-defined launchd paths', 'install-rollback': 'historical installer rollback preservation', recovery: 'src/node/task-recovery integration and historical owner evidence', activity: 'src/shared/activity.ts', traces: 'src/shared/trace.ts', audit: 'src/shared/audit.ts' };
+  return { version: 1, families: recoveryFamilies('macbook-air.local', names).map(f => ({ ...f, category: f.id.startsWith('historical-preservation-') || ['recovery', 'install-rollback'].includes(f.id) ? 'HISTORICAL_PRESERVATION' : f.id === 'compatibility' ? 'REBUILDABLE' : f.derived ? 'DERIVED' : !f.required ? 'OPTIONAL' : 'AUTHORITATIVE', writer: writers[f.id] ?? (f.id.startsWith('historical-preservation-') ? 'historical macOS service-preservation artifact; five plist inventory observed read-only' : 'owner/installer diagnostic or configuration writer; explicit path policy'), requiredContents: f.id === 'services' || f.id.startsWith('historical-preservation-') ? labels.map(l => `com.stinkyweasel.dex-reach.${l}.plist`) : mandatory.filter(p => p === f.relative || p.startsWith(f.relative + '/')), absenceNormal: !f.required, schemaHandling: 'canonical authority JSON; immutable-release dependencies, checkpoint payloads and compatibility-home contents are opaque integrity-bound bytes', retention: 'preserve; no pruning authority', backup: f.derived ? 'included as derived evidence' : 'include if present; required families must be complete' })) };
+}
+export type Entry = { family: string; root: keyof Roots; relative: string; bytes: number; mode: number; uid: number; gid: number; sha256: string; schema?: number; mtimeMs: number; sensitive: boolean; kind?: 'file' | 'link'; inode?: number; ctimeMs?: number; link?: Awaited<ReturnType<typeof inspectLink>> };
+export type DirectoryEntry = { root: keyof Roots; relative: string; mode: number; uid: number; gid: number; inode: number; ctimeMs: number; names: string[] };
+export type Manifest = { version: 1; scope: 'inspection' | 'synthetic'; nodeId: string; startedAt: string; endedAt: string; roots: Roots; linkPolicy: LinkPolicy; directories: DirectoryEntry[]; volumes: Record<keyof Roots, number>; families: Array<{ id: string; status: Coverage; dependency: string }>; entries: Entry[]; totalBytes: number; consistent: boolean; problems: string[]; digest: string };
+const opaquePayload = (family: string, relative: string) => family === 'runtime' && /^runtime\/releases\/[a-z0-9][a-z0-9._-]{0,119}\//.test(relative) || family === 'compatibility' || family === 'checkpoints' && /^checkpoints\/[^/]+\/untracked\//.test(relative);
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
 const labels = ['coordinator', 'worker', 'gateway', 'node', 'oauth-canary'];
 const mandatory = ['results/manifest.json', 'nodes/macbook-air.local.env', 'nodes/macbook-air.local.access.json', 'nodes/macbook-air.local.transport.ed25519.pem', 'nodes/macbook-air.local.transport.ed25519.pub.pem', 'receipts/macbook-air.local.jsonl', 'receipts/macbook-air.local.ed25519.pem', 'receipts/macbook-air.local.ed25519.pub.pem'];
 export function manifestDigest(m: Omit<Manifest, 'digest'> | Manifest): string { const { digest: _digest, ...body } = m as Manifest; return hashValue(body); }
 
 /** No directories, locks, caches or output files are created. Manifest contains PRIVATE hashes. */
-export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = 'inspection'): Promise<Manifest> {
+export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = 'inspection', linkPolicy: LinkPolicy = defaultLinkPolicy()): Promise<Manifest> {
   for (const root of Object.values(roots)) await realDirectory(root);
   const startedAt = new Date().toISOString(), entries: Entry[] = [], problems: string[] = [], families: Manifest['families'] = [], directories: DirectoryEntry[] = [];
-  const observedDirectories = new Map<string, { inode: number; dev: number; names: string[] }>();
+  const observedDirectories = new Map<string, { inode: number; ctimeMs: number; dev: number; names: string[] }>();
   const volumes = { state: (await fs.lstat(roots.state)).dev, agents: (await fs.lstat(roots.agents)).dev, worker: (await fs.lstat(roots.worker)).dev };
   let consistent = true;
-  const known = new Set(recoveryFamilies('macbook-air.local').filter(f => f.root === 'state').map(f => f.relative.split('/')[0]));
   const stateNames = (await fs.readdir(roots.state)).sort();
-  for (const name of stateNames) if (!known.has(name)) { problems.push('UNKNOWN_OWNER_STATE_FAMILY'); families.push({ id: `unknown-${families.length}`, status: 'UNKNOWN', dependency: 'unmapped owner-state requires explicit coverage policy' }); }
+  const policy = recoveryFamilies('macbook-air.local', stateNames);
+  const known = new Set(policy.filter(f => f.root === 'state').map(f => f.relative.split('/')[0]));
+  const unknownFamily = () => { problems.push('UNKNOWN_OWNER_STATE_FAMILY'); families.push({ id: `unknown-${families.length}`, status: 'UNKNOWN', dependency: 'unmapped owner-state requires explicit coverage policy' }); };
+  for (const name of stateNames) if (!known.has(name)) unknownFamily();
+  // Services and worker roots are closed-world too: only the shared LaunchAgents directory may hold non-DEX entries.
+  const servicePlists = new Set(labels.map(label => `com.stinkyweasel.dex-reach.${label}.plist`));
+  for (const name of await fs.readdir(roots.agents)) if (name.startsWith('com.stinkyweasel.dex-reach.') && !servicePlists.has(name)) unknownFamily();
+  for (const name of await fs.readdir(roots.worker)) {
+    // worker.sock is the live IPC endpoint: runtime-only, never copied, but must actually be a socket.
+    if (name === 'config.json') continue;
+    if (name === 'worker.sock' && (await fs.lstat(path.join(roots.worker, name))).isSocket()) continue;
+    unknownFamily();
+  }
   const rootStat = await fs.lstat(roots.state);
-  observedDirectories.set(roots.state, { inode: rootStat.ino, dev: rootStat.dev, names: stateNames });
-  directories.push({ root: 'state', relative: '', mode: rootStat.mode & 0o777, uid: rootStat.uid, gid: rootStat.gid, names: stateNames });
-  for (const family of recoveryFamilies('macbook-air.local')) {
+  observedDirectories.set(roots.state, { inode: rootStat.ino, ctimeMs: rootStat.ctimeMs, dev: rootStat.dev, names: stateNames });
+  directories.push({ root: 'state', relative: '', mode: rootStat.mode & 0o777, uid: rootStat.uid, gid: rootStat.gid, inode: rootStat.ino, ctimeMs: rootStat.ctimeMs, names: stateNames });
+  // A directory holding file-level families (tasks/) is closed-world: unmapped siblings cannot hide beside them.
+  const fileParents = new Map<string, Set<string>>();
+  for (const f of policy) if (f.root === 'state' && f.relative.includes('/')) { const parent = path.dirname(f.relative); fileParents.set(parent, (fileParents.get(parent) ?? new Set()).add(path.basename(f.relative))); }
+  for (const [parent, allowed] of fileParents) {
+    const dir = path.join(roots.state, parent), st = await fs.lstat(dir).catch(() => null);
+    if (!st) continue; // Required file families report MISSING themselves.
+    if (st.isSymbolicLink() || !st.isDirectory()) { problems.push(`${parent}:INVALID_OR_UNSUPPORTED`); continue; }
+    const names = (await fs.readdir(dir)).sort();
+    observedDirectories.set(dir, { inode: st.ino, ctimeMs: st.ctimeMs, dev: st.dev, names });
+    directories.push({ root: 'state', relative: parent, mode: st.mode & 0o777, uid: st.uid, gid: st.gid, inode: st.ino, ctimeMs: st.ctimeMs, names });
+    for (const name of names) if (!allowed.has(name)) { if (/\.lock$|\.tmp$/.test(name)) problems.push(`${parent}:TRANSIENT_WRITE_OR_LOCK_PRESENT`); else unknownFamily(); }
+  }
+  for (const family of policy) {
     let status: Coverage = family.derived ? 'DERIVED_ONLY' : 'INCLUDED';
     const base = roots[family.root], device = (await fs.lstat(base)).dev;
+    let rootSeen = false;
     async function visit(relative: string): Promise<void> {
       const file = path.join(base, relative), before = await fs.lstat(file);
-      if (before.isSymbolicLink()) throw new Error('SYMLINK');
+      if (relative === family.relative) rootSeen = true;
+      if (before.isSymbolicLink()) {
+        const link = await inspectLink(base, relative, linkPolicy);
+        entries.push({ family: family.id, root: family.root, relative, kind: 'link', link, bytes: Buffer.byteLength(link.target), mode: before.mode & 0o777, uid: before.uid, gid: before.gid, sha256: sha(Buffer.from(link.target)), mtimeMs: before.mtimeMs, ctimeMs: before.ctimeMs, inode: before.ino, sensitive: true });
+        return;
+      }
       if (before.dev !== device) throw new Error('CROSS_VOLUME');
       if (before.isDirectory()) {
         const names = (await fs.readdir(file)).sort();
-        observedDirectories.set(file, { inode: before.ino, dev: before.dev, names });
-        directories.push({ root: family.root, relative, mode: before.mode & 0o777, uid: before.uid, gid: before.gid, names });
+        observedDirectories.set(file, { inode: before.ino, ctimeMs: before.ctimeMs, dev: before.dev, names });
+        directories.push({ root: family.root, relative, mode: before.mode & 0o777, uid: before.uid, gid: before.gid, inode: before.ino, ctimeMs: before.ctimeMs, names });
         for (const name of names) {
-          if (/\.lock$|\.tmp$/.test(name)) { problems.push(`${family.id}:TRANSIENT_WRITE_OR_LOCK_PRESENT`); continue; }
+          const childRelative = relative ? `${relative}/${name}` : name;
+          if (!opaquePayload(family.id, childRelative) && /\.lock$|\.tmp$/.test(name)) { problems.push(`${family.id}:TRANSIENT_WRITE_OR_LOCK_PRESENT`); continue; }
           await visit(relative ? `${relative}/${name}` : name);
         }
         return;
@@ -74,18 +111,20 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
       const bytes = await safeRead(base, relative, 512 * 1024 * 1024), after = await fs.lstat(file);
       if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ino !== after.ino) { consistent = false; problems.push(`${family.id}:CHANGED_DURING_INSPECTION`); }
       let schema: number | undefined;
-      if (relative.endsWith('.json')) {
+      if (relative.endsWith('.json') && !opaquePayload(family.id, relative)) {
         const value = JSON.parse(bytes.toString()); schema = value.schemaVersion ?? (typeof value.version === 'number' ? value.version : undefined);
         if (schema !== undefined && (!Number.isInteger(schema) || schema < 1)) throw new Error('SCHEMA');
       }
-      entries.push({ family: family.id, root: family.root, relative, bytes: bytes.length, mode: before.mode & 0o777, uid: before.uid, gid: before.gid, sha256: sha(bytes), ...(schema !== undefined ? { schema } : {}), mtimeMs: before.mtimeMs, sensitive: family.sensitive });
+      entries.push({ family: family.id, root: family.root, relative, bytes: bytes.length, mode: before.mode & 0o777, uid: before.uid, gid: before.gid, sha256: sha(bytes), ...(schema !== undefined ? { schema } : {}), mtimeMs: before.mtimeMs, sensitive: family.sensitive, kind: 'file', inode: before.ino, ctimeMs: before.ctimeMs });
     }
     try {
       if (family.id === 'services') for (const label of labels) await visit(`com.stinkyweasel.dex-reach.${label}.plist`);
       else await visit(family.relative);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      status = code === 'ENOENT' ? (family.required ? 'MISSING' : 'EXCLUDED_BY_POLICY') : 'UNREADABLE';
+      // Only an absent family root is a policy exclusion; anything vanishing mid-walk truncated the inventory.
+      status = code === 'ENOENT' && !rootSeen ? (family.required ? 'MISSING' : 'EXCLUDED_BY_POLICY') : 'UNREADABLE';
+      if (code === 'ENOENT' && rootSeen) consistent = false;
       if (status !== 'EXCLUDED_BY_POLICY') problems.push(`${family.id}:${code ?? 'INVALID_OR_UNSUPPORTED'}`);
     }
     if (family.required && status === 'INCLUDED' && !entries.some(e => e.family === family.id)) { status = 'MISSING'; problems.push(`${family.id}:EMPTY_REQUIRED_FAMILY`); }
@@ -94,22 +133,32 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
   // A live read is not a coordinated snapshot. Require unchanged files at the end as well.
   for (const entry of entries) {
     const st = await fs.lstat(path.join(roots[entry.root], entry.relative)).catch(() => null);
-    if (!st || st.size !== entry.bytes || st.mtimeMs !== entry.mtimeMs) { consistent = false; problems.push(`${entry.family}:SNAPSHOT_CHANGED`); }
+    if (!st || (entry.kind !== 'link' && st.size !== entry.bytes) || st.mtimeMs !== entry.mtimeMs || st.ctimeMs !== entry.ctimeMs || st.ino !== entry.inode) { consistent = false; problems.push(`${entry.family}:SNAPSHOT_CHANGED`); }
+  }
+  for (const entry of entries) {
+    try {
+      const actual = entry.kind === 'link' ? Buffer.from((await inspectLink(roots[entry.root], entry.relative, linkPolicy)).target) : await safeRead(roots[entry.root], entry.relative, 512 * 1024 * 1024);
+      if (sha(actual) !== entry.sha256) { consistent = false; problems.push('CONTENT_CHANGED_AFTER_HASH'); }
+    } catch { consistent = false; problems.push('ENTRY_CHANGED_AFTER_HASH'); }
+  }
+  for (const entry of entries.filter(e => e.kind === 'link')) {
+    if (!entries.some(e => e.root === entry.root && e.relative === entry.link!.resolvedRelative && e.kind !== 'link') && !directories.some(d => d.root === entry.root && d.relative === entry.link!.resolvedRelative)) problems.push('LINK_TARGET_NOT_INDEPENDENTLY_COVERED');
   }
   for (const [file, before] of observedDirectories) {
     const st = await fs.lstat(file).catch(() => null), names = st?.isDirectory() ? (await fs.readdir(file)).sort() : [];
-    if (!st || st.isSymbolicLink() || st.ino !== before.inode || st.dev !== before.dev || JSON.stringify(names) !== JSON.stringify(before.names)) { consistent = false; problems.push('DIRECTORY_MEMBERSHIP_CHANGED'); }
+    if (!st || st.isSymbolicLink() || st.ino !== before.inode || st.ctimeMs !== before.ctimeMs || st.dev !== before.dev || JSON.stringify(names) !== JSON.stringify(before.names)) { consistent = false; problems.push('DIRECTORY_MEMBERSHIP_CHANGED'); }
   }
   entries.sort((a, b) => `${a.root}/${a.relative}`.localeCompare(`${b.root}/${b.relative}`));
+  for (const f of policy.filter(f => f.id.startsWith('historical-preservation-'))) for (const label of labels) if (!entries.some(e => e.relative === `${f.relative}/com.stinkyweasel.dex-reach.${label}.plist` && e.kind === 'file')) problems.push('HISTORICAL_PRESERVATION_INCOMPLETE');
   for (const relative of mandatory) if (!entries.some(e => e.root === 'state' && e.relative === relative)) problems.push('MISSING_RECOVERY_DEPENDENCY');
-  const body: Omit<Manifest, 'digest'> = { version: 1, scope, nodeId: 'macbook-air.local', startedAt, endedAt: new Date().toISOString(), roots, directories, volumes, families, entries, totalBytes: entries.reduce((sum, e) => sum + e.bytes, 0), consistent, problems };
+  const body: Omit<Manifest, 'digest'> = { version: 1, scope, nodeId: 'macbook-air.local', startedAt, endedAt: new Date().toISOString(), roots, linkPolicy, directories, volumes, families, entries, totalBytes: entries.reduce((sum, e) => sum + e.bytes, 0), consistent, problems };
   return { ...body, digest: manifestDigest(body) };
 }
 function validateManifest(raw: unknown, expectedDigest: string): Manifest {
   const m = raw as Manifest;
-  if (!m || m.version !== 1 || m.nodeId !== 'macbook-air.local' || !Array.isArray(m.entries) || !Array.isArray(m.directories) || !m.volumes || !Array.isArray(m.families) || !m.consistent || !Array.isArray(m.problems) || m.problems.length || manifestDigest(m) !== expectedDigest || m.digest !== expectedDigest) throw new Error('MANIFEST_INVALID_OR_UNTRUSTED');
+  if (!m || m.version !== 1 || m.nodeId !== 'macbook-air.local' || !m.linkPolicy || m.linkPolicy.version !== 1 || !Array.isArray(m.linkPolicy.rules) || !Array.isArray(m.entries) || !Array.isArray(m.directories) || !m.volumes || !Array.isArray(m.families) || !m.consistent || !Array.isArray(m.problems) || m.problems.length || manifestDigest(m) !== expectedDigest || m.digest !== expectedDigest) throw new Error('MANIFEST_INVALID_OR_UNTRUSTED');
   if (!Number.isFinite(Date.parse(m.startedAt)) || !Number.isFinite(Date.parse(m.endedAt)) || Date.parse(m.endedAt) < Date.parse(m.startedAt)) throw new Error('INCONSISTENT_TIMESTAMPS');
-  const policy = recoveryFamilies(m.nodeId), ids = m.families.map(f => f.id);
+  const policy = recoveryFamilies(m.nodeId, m.directories.find(d => d.root === 'state' && d.relative === '')?.names), ids = m.families.map(f => f.id);
   if (new Set(ids).size !== policy.length || ids.length !== policy.length || policy.some(f => !ids.includes(f.id) || (f.required && m.families.find(x => x.id === f.id)?.status !== 'INCLUDED'))) throw new Error('INCOMPLETE_COVERAGE');
   const keys = m.entries.map(e => `${e.root}/${e.relative}`);
   if (new Set(keys).size !== keys.length || m.totalBytes !== m.entries.reduce((n, e) => n + e.bytes, 0)) throw new Error('DUPLICATE_OR_TRUNCATED_INVENTORY');
@@ -126,12 +175,14 @@ function validateManifest(raw: unknown, expectedDigest: string): Manifest {
 /** expectedDigest must come from a separately protected inventory, never from the backup itself. */
 export async function verifyCoverage(raw: unknown, roots: Roots, expectedDigest: string): Promise<{ certified: true; files: number; bytes: number }> {
   const m = validateManifest(raw, expectedDigest);
-  const observed = await inspectCoverage(roots, m.scope);
+  const observed = await inspectCoverage(roots, m.scope, m.linkPolicy);
+  if (m.entries.some(e => e.kind === 'link' && (!e.link || e.sha256 !== sha(Buffer.from(e.link.target))))) throw new Error('INVALID_LINK_MANIFEST');
   if (JSON.stringify(observed.volumes) !== JSON.stringify(m.volumes)) throw new Error('VOLUME_IDENTITY_MISMATCH');
   if (!observed.consistent || observed.problems.length || observed.entries.length !== m.entries.length || observed.directories.length !== m.directories.length) throw new Error('SNAPSHOT_INCOMPLETE_OR_CHANGED');
   for (const e of m.entries) {
     const actual = observed.entries.find(a => a.root === e.root && a.relative === e.relative);
-    if (!actual || ['family', 'sha256', 'bytes', 'mode', 'uid', 'gid', 'schema'].some(k => (actual as any)[k] !== (e as any)[k])) throw new Error('INTEGRITY_PERMISSION_OR_SCHEMA_MISMATCH');
+    if (!actual || ['family', 'sha256', 'bytes', 'mode', 'uid', 'gid', 'schema', 'kind'].some(k => (actual as any)[k] !== (e as any)[k])) throw new Error('INTEGRITY_PERMISSION_OR_SCHEMA_MISMATCH');
+    if (JSON.stringify(actual.link) !== JSON.stringify(e.link)) throw new Error('LINK_METADATA_MISMATCH');
   }
   // Directory membership and mode matter even when a directory has no files.
   for (const d of m.directories) {

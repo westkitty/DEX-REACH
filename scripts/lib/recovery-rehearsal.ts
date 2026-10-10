@@ -16,7 +16,7 @@ export async function createSyntheticWorkspace(): Promise<SyntheticWorkspace> {
   const workspace: SyntheticWorkspace = { directory, source, cleanup: async () => { await assertOwned(workspace); await fs.rm(directory, { recursive: true }); owned.delete(workspace); } };
   owned.set(workspace, { directory, roots: { ...source }, inode: (await fs.lstat(directory)).ino }); return workspace;
 }
-async function assertOwned(workspace: SyntheticWorkspace): Promise<void> {
+export async function assertOwned(workspace: SyntheticWorkspace): Promise<void> {
   const original = owned.get(workspace);
   if (!original) throw new Error('UNOWNED_FIXTURE');
   if (workspace.directory !== original.directory || JSON.stringify(workspace.source) !== JSON.stringify(original.roots) || (await fs.lstat(original.directory)).ino !== original.inode) throw new Error('FIXTURE_IDENTITY_CHANGED');
@@ -27,10 +27,18 @@ async function assertOwned(workspace: SyntheticWorkspace): Promise<void> {
   }
 }
 /** Copy only certified synthetic data to a new, empty tool-owned destination. Never launches services. */
-export async function rehearseRestore(workspace: SyntheticWorkspace, manifest: Manifest, trustedDigest: string): Promise<{ scope: 'synthetic'; passed: true; roots: Roots }> {
+export async function rehearseRestore(workspace: SyntheticWorkspace, manifest: Manifest, trustedDigest: string, source: Roots = workspace.source): Promise<{ scope: 'synthetic'; passed: true; roots: Roots }> {
   await assertOwned(workspace);
   if (manifest.scope !== 'synthetic' || JSON.stringify(manifest.roots) !== JSON.stringify(workspace.source)) throw new Error('LIVE_OR_FOREIGN_SNAPSHOT_REFUSED');
-  await verifyCoverage(manifest, workspace.source, trustedDigest);
+  if (source !== workspace.source) {
+    const prefix = path.join(workspace.directory, 'backups') + path.sep;
+    for (const [key, root] of Object.entries(source)) {
+      const rel = root.slice(prefix.length);
+      if (!root.startsWith(prefix) || !new RegExp(`^[a-f0-9-]{36}/${key}$`).test(rel)) throw new Error('FOREIGN_CAPTURE_REFUSED');
+      await realDirectory(root);
+    }
+  }
+  await verifyCoverage(manifest, source, trustedDigest);
   const target = await fs.mkdtemp(path.join(workspace.directory, 'restore-'));
   const roots: Roots = { state: path.join(target, 'state'), agents: path.join(target, 'agents'), worker: path.join(target, 'worker') };
   for (const root of Object.values(roots)) await fs.mkdir(root, { mode: 0o700 });
@@ -40,17 +48,25 @@ export async function rehearseRestore(workspace: SyntheticWorkspace, manifest: M
       await fs.mkdir(destination, { recursive: true, mode: d.mode });
       await realDirectory(destination); await fs.chmod(destination, d.mode);
     }
-    for (const e of manifest.entries) {
+    for (const e of manifest.entries.filter(e => e.kind !== 'link')) {
       await assertOwned(workspace);
       const destination = path.join(roots[e.root], e.relative);
       await fs.mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
       await realDirectory(path.dirname(destination));
-      const bytes = await safeRead(workspace.source[e.root], e.relative, 512 * 1024 * 1024);
+      const bytes = await safeRead(source[e.root], e.relative, 512 * 1024 * 1024);
       await fs.writeFile(destination, bytes, { flag: 'wx', mode: e.mode });
       await fs.chmod(destination, e.mode);
     }
+    for (const e of manifest.entries.filter(e => e.kind === 'link')) {
+      await assertOwned(workspace);
+      const destination = path.join(roots[e.root], e.relative);
+      await realDirectory(path.dirname(destination));
+      if (!e.link || path.isAbsolute(e.link.target)) throw new Error('LINK_RESTORE_REFUSED');
+      await fs.symlink(e.link.target, destination);
+    }
     await verifyCoverage(manifest, roots, trustedDigest);
     await verifyRestoredApplication(roots);
+    await verifyCoverage(manifest, source, trustedDigest);
     await verifyCoverage(manifest, workspace.source, trustedDigest);
     return { scope: 'synthetic', passed: true, roots };
   } catch (error) { await fs.rm(target, { recursive: true }); throw error; }

@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { inspectTasks, publicTaskReport, realDirectory } from './lib/recovery-reconciliation.js';
 import { inspectCoverage, publicCoverage } from './lib/recovery-coverage.js';
 import { runtimeTreeSha256 } from './lib/runtime-rollback.js';
-import { C14_ROOT, RETAINED_RELEASE, RETAINED_TREE, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
+import { C14_ROOT, RETAINED_RELEASE, RETAINED_TREE, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
 
 const runFile = promisify(execFile);
 async function run(bin: string, args: string[]): Promise<string> { return (await runFile(bin, args, { cwd: C14_ROOT, timeout: 20_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } })).stdout.trim(); }
@@ -67,7 +67,7 @@ async function livePreflight() {
   const pkg = JSON.parse(await fs.readFile(path.join(C14_ROOT, 'package.json'), 'utf8'));
   const facts: PreflightFacts = {
     hostname: os.hostname(), model: 'MacBookAir10,1', platform: os.platform(), arch: os.arch(), user: os.userInfo().username, uid: process.geteuid!(), home: os.homedir(), root: C14_ROOT, branch, head, remoteHead, dirty,
-    candidateVersion: pkg.version, ciHead: pr.headRefOid, ciChecks: Object.fromEntries(pr.statusCheckRollup.map((c: any) => [c.name, c.conclusion])),
+    candidateVersion: pkg.version, ciHead: pr.headRefOid, ciChecks: aggregateCheckRuns(pr.statusCheckRollup),
     installedIntact, installedRelease: RETAINED_RELEASE, servicesVerified, backupCertified: false,
     baseline: { previousReleaseId: RETAINED_RELEASE, previousDigest: RETAINED_TREE, observedDigest, previousExists: installedIntact, provenance: 'journal-bound', legacyProvenanceApproved: false, transactionId: '', state: 'uncertain', fresh: false, serviceReleaseIds, configVerified: false, inventoryVerified: false, helperIdle: helperIdle && !recoveryActive, rollbackActive: recoveryActive },
     restoreProof: { scope: 'synthetic', sourceSha: '', passed: false }, taskCount: rows.length, taskUnresolved: rows.length, claimsKnown, claimsCount, ownerPreservationVerified: false, freeBytes, spaceMeasured: false,

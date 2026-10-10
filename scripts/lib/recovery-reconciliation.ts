@@ -20,6 +20,20 @@ export function classifyTask(task: Pick<ReachTaskRecord, 'state' | 'safetyClass'
   return 'INSUFFICIENT_EVIDENCE';
 }
 
+/** Observed execution signals only; absence is reported as absence, never as proof that execution stopped. */
+function executionEvidence(e: Evidence): string[] {
+  const signals = [e.activity && 'ACTIVITY_RECORD', e.lease && 'COORDINATOR_LEASE', e.ticket && 'COORDINATOR_TICKET', e.process === 'matching' && 'MATCHING_PROCESS', e.process === 'absent' && 'RECORDED_PROCESS_ABSENT', e.sharedProcess && 'SHARED_PROCESS'].filter((s): s is string => !!s);
+  return signals.length ? signals : ['NONE_OBSERVED_NOT_TERMINATION_PROOF'];
+}
+/** What remains unknown. Receipts are never task-bound and external effects are never proven by this reader. */
+function unresolvedUncertainty(task: Pick<ReachTaskRecord, 'state' | 'failureClass' | 'idempotencyKey'>, e: Evidence): string[] {
+  return [e.result !== 'verified' && 'TASK_BOUND_RESULT', 'RECEIPT_TASK_BINDING', 'EXTERNAL_EFFECT', e.process !== 'matching' && 'PROCESS_LIVENESS', task.failureClass === 'AMBIGUOUS_EFFECT' && 'PERSISTED_AMBIGUOUS_EFFECT', !task.idempotencyKey && 'IDEMPOTENCY_BINDING', !e.complete && 'EVIDENCE_INCOMPLETE'].filter((s): s is string => !!s);
+}
+export function describeTaskEvidence(task: Pick<ReachTaskRecord, 'state' | 'failureClass' | 'idempotencyKey'>, e: Evidence, receiptCandidates: Array<{ nodeId: string; resultHash: string; ok: boolean }>) {
+  const conflict = new Set(receiptCandidates.map(r => `${r.ok}:${r.resultHash}`)).size > 1;
+  return { OBSERVED_TASK_STATE: task.state, OBSERVED_PROCESS_STATE: e.process.toUpperCase(), EXECUTION_EVIDENCE: executionEvidence(e), RESULT_PROOF: e.result.toUpperCase(), RECEIPT_PROOF: conflict ? 'UNBOUND_CONFLICTING_CANDIDATES' : receiptCandidates.length ? 'UNBOUND_OPERATION_NODE_CANDIDATES' : 'MISSING', EXTERNAL_EFFECT_PROOF: 'UNPROVEN', SAFE_RECOVERY_ELIGIBILITY: e.result === 'verified' && task.failureClass !== 'AMBIGUOUS_EFFECT' && task.state !== 'AMBIGUOUS' ? 'TASK_BOUND_RESULT_OWNER_REVIEW_NO_REPLAY' : 'UNPROVEN_NO_REPLAY', OWNER_DECISION_REQUIRED: true, IDEMPOTENCY_BINDING: task.idempotencyKey ? 'PRESENT_PRIVATE' : 'MISSING', UNRESOLVED_UNCERTAINTY: unresolvedUncertainty(task, e), replayAuthorized: false };
+}
+
 /** Reject symlink ancestors before reading owner metadata. No initialization, locks or recovery calls. */
 export async function realDirectory(root: string): Promise<string> {
   const resolved = path.resolve(root);
@@ -49,7 +63,7 @@ export async function safeRead(root: string, relative: string, maxBytes = 64 * 1
   } finally { await handle.close(); }
 }
 type Row = Record<string, any>;
-export type TaskInspection = { taskId: string; rootTaskId: string; parentTaskId: string | null; nodeId: string; actorId: string; state: string; updatedAt: string; classification: Classification; evidence: Evidence; receiptCandidates: number; replayAuthorized: false };
+export type TaskInspection = { taskId: string; rootTaskId: string; parentTaskId: string | null; nodeId: string; actorId: string; state: string; updatedAt: string; classification: Classification; evidence: Evidence; receiptCandidates: number; sections: ReturnType<typeof describeTaskEvidence>; replayAuthorized: false };
 export async function inspectTasks(input: { root: string; expectedRoot: string; nodeId: string; now?: number; processMatches?: (pid: number, startedAt: string) => Promise<'matching' | 'absent' | 'unknown'> }): Promise<TaskInspection[]> {
   const root = await realDirectory(input.root);
   if (root !== path.resolve(input.expectedRoot) || input.nodeId !== 'macbook-air.local') throw new Error('WRONG_STATE_ROOT_OR_NODE');
@@ -90,10 +104,10 @@ export async function inspectTasks(input: { root: string; expectedRoot: string; 
     }
     const last = events.filter(e => e.taskId === task.taskId).at(-1);
     const e: Evidence = { result, activity: !!activity, lease: !!lease, ticket: !!ticket, process, sharedProcess: !!activity && activities.filter(a => a.state === 'running' && a.pid === activity.pid && a.taskId !== task.taskId).length > 0, stale: !Number.isFinite(Date.parse(task.updatedAtUtc)) || now - Date.parse(task.updatedAtUtc) > 180_000, complete: complete && !!last, eventState: last?.state ?? last?.toState };
-    reports.push({ taskId: task.taskId, rootTaskId: task.rootTaskId, parentTaskId: task.parentTaskId, nodeId: task.nodeId, actorId: task.actorId, state: task.state, updatedAt: task.updatedAtUtc, classification: classifyTask(task, e), evidence: e, receiptCandidates: verifiedReceipts.filter(r => r.nodeId === task.nodeId && r.operation === task.operation).length, replayAuthorized: false });
+    reports.push({ taskId: task.taskId, rootTaskId: task.rootTaskId, parentTaskId: task.parentTaskId, nodeId: task.nodeId, actorId: task.actorId, state: task.state, updatedAt: task.updatedAtUtc, classification: classifyTask(task, e), evidence: e, receiptCandidates: verifiedReceipts.filter(r => r.nodeId === task.nodeId && r.operation === task.operation).length, sections: describeTaskEvidence(task, e, verifiedReceipts.filter(r => r.nodeId === task.nodeId && r.operation === task.operation) as any), replayAuthorized: false });
   }
   return reports;
 }
 export function publicTaskReport(rows: TaskInspection[]) {
-  return { mode: 'READ_ONLY', replayAuthorized: false, total: rows.length, counts: Object.fromEntries([...new Set(rows.map(r => r.classification))].map(c => [c, rows.filter(r => r.classification === c).length])), records: rows.map((r, index) => ({ index, state: r.state, classification: r.classification, evidence: r.evidence, receiptLinkage: 'operation-node-candidate-only' })) };
+  return { mode: 'READ_ONLY', replayAuthorized: false, total: rows.length, counts: Object.fromEntries([...new Set(rows.map(r => r.classification))].map(c => [c, rows.filter(r => r.classification === c).length])), records: rows.map((r, index) => ({ index, state: r.state, classification: r.classification, evidence: r.evidence, sections: r.sections, receiptLinkage: 'operation-node-candidate-only' })) };
 }
