@@ -71,3 +71,17 @@ The full-suite aggregate remains **UNKNOWN**. The bounded prior diagnosis remain
 | Unmeasured | Dashboard delta refresh and installed-service idle CPU/memory remain NOT MEASURED. Long-session stress is deferred. |
 
 See the [C14-D report](c14-performance/c14-d-report.md) and [raw baseline](c14-performance/c14-d-baseline-fada83b.json). This is source-only isolated evidence, not installed-runtime, connector, physical-device, or human-acceptance proof.
+
+## C14-E — bounded long-session stress and resource lifecycle
+
+| Field | Evidence |
+| --- | --- |
+| Requirement scope | Bounded long-session stress across normal completion, retrieval, coordinator lifecycle/queue, controlled failure, ambiguity/recovery/no replay, event/result persistence, resource sampling, and cleanup |
+| Harness | [scripts/c14-stress.ts](../scripts/c14-stress.ts), exposed as `npm run stress:c14`; corrected runs use an ephemeral `DEX_REACH_STATE_DIR` and remove that exact directory |
+| Sustained result | [Raw report](c14-performance/c14-e-stress-results.json): 607.7 seconds, 2,134 cycles, concurrency 2, zero failed cycles; 853 normal, 214 failed, 119 ambiguity/recovery cycles |
+| Resource result | Early/middle/late RSS 81.9/199.8/211.6 MiB; late task/result/event stores 1.84 MiB/406 KiB/653 KiB; cleanup found zero leases, zero tickets, no socket, and `temporaryStateRemoved=true` |
+| Repair | Repeated unchanged recovery-status persistence was demonstrated to drift to 2.27 s median and 6.26 s p95 late in the pre-repair sustained run. Conditional persistence was added in `src/node/boot-recovery.ts`; the regression asserts unchanged `updatedAtUtc` and event count |
+| Post-repair confirmation | [Matched smoke](c14-performance/c14-e-smoke-final.json): 75.4 seconds, 721 cycles, zero failures; recovery median 107.66/119.46/121.33 ms early/middle/late |
+| Status | **PARTIAL**. The sustained run predates the repair and has no exact committed source SHA. Initial harness revisions omitted the temporary-state environment assignment and appended synthetic coordinator history to the owner namespace. Active owner leases/tickets were cleaned and re-read as zero, but historical entries remain preserved. No installed-runtime, physical-chaos, connector, Big Mac, public-exposure, or human-acceptance proof is claimed. |
+
+See the [C14-E report](c14-performance/c14-e-stress-report.md). C14-E is source-level bounded evidence only; C14 overall remains incomplete.
