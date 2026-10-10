@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { EventEmitter } from 'node:events';
-import { acceptCandidate, conditionalRecovery, recoveryDecision, installedReady, freshTask, installStatusFresh, assertTarget, expectedHeadForObservation, validateConnectorReadback, type Observation } from '../scripts/lib/c13-acceptance.js';
+import { acceptCandidate, conditionalRecovery, recoveryDecision, installedReady, freshTask, installStatusFresh, assertTarget, expectedHeadForObservation, priorJournalAllowsInstall, validateConnectorReadback, type Observation } from '../scripts/lib/c13-acceptance.js';
 import { installedQueueProof, waitForCallerExit } from '../scripts/lib/c13-queue-proof.js';
 import { coordinatedStatus, CoordinatorUnavailableError } from '../src/coordinator/client.js';
 import { ResultStore } from '../src/node/result-store.js';
@@ -74,6 +74,20 @@ test('missing task, historical handle, incomplete task and ambiguous fresh selec
   for (const change of [{ state: 'RUNNING' }, { resultRef: undefined }, { taskId: 'expired-handle' }, { attemptNumber: 2 }, { nodeId: 'another-node' }]) assert.throws(() => freshTask([{ ...task, ...change } as ReachTaskRecord], since, task.nodeId));
   assert.throws(() => freshTask([task, { ...task, taskId: 'rtsk_1a11dd2033f_bafe187416836f1b920ed7d2d4f9fc80' }], since, task.nodeId));
   assert.equal(freshTask([task], since, task.nodeId).taskId, task.taskId);
+  const oldFailed = { ...task, taskId: 'rtsk_1a11dd2033f_bafe187416836f1b920ed7d2d4f9fc81', state: 'FAILED', resultRef: undefined, resultHash: undefined } as ReachTaskRecord;
+  assert.equal(freshTask([oldFailed, task], since, task.nodeId).taskId, task.taskId);
+  assert.throws(() => freshTask([oldFailed], since, task.nodeId));
+  assert.throws(() => freshTask([oldFailed, { ...task, state: 'PREPARING' }], since, task.nodeId));
+  assert.throws(() => freshTask([task, { ...oldFailed, state: 'RUNNING' }], since, task.nodeId));
+  assert.throws(() => freshTask([task, { ...oldFailed, state: 'AMBIGUOUS' }], since, task.nodeId));
+});
+test('failed previous candidate may only be superseded after exact verified rollback', () => {
+  assert.equal(priorJournalAllowsInstall('ROLLED BACK', { ...ready, previousRunning: true, candidateRunning: false }), true);
+  assert.equal(priorJournalAllowsInstall('ROLLED BACK', ready), false);
+  assert.equal(priorJournalAllowsInstall('ROLLED BACK', { ...ready, previousRunning: true, candidateRunning: false, snapshotValid: false }), false);
+  assert.equal(priorJournalAllowsInstall('ROLLED BACK', { ...ready, previousRunning: true, candidateRunning: false, cleanupPending: true }), false);
+  assert.equal(priorJournalAllowsInstall('NEEDS RECONCILIATION', ready), false);
+  assert.equal(priorJournalAllowsInstall('SAFE TO RETRY', { ...ready, previousRunning: true, candidateRunning: false, snapshotValid: false, snapshotPresent: false }), true);
 });
 test('expired actual persisted result cannot satisfy fresh acceptance', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'c13-result-'));

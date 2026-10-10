@@ -95,8 +95,11 @@ export async function coordinatedAcquire(request: WorkRequest, options: { requir
 }
 
 export async function coordinatedRelease(id: string, options: { pid?: number; force?: boolean; requireDaemon?: boolean } = {}): Promise<ReleaseResult> {
-  const value = await callDaemon('release', { id, options: { pid: options.pid, force: options.force } }, options.requireDaemon);
-  return value === null ? releaseWork(id, options) : object<ReleaseResult>(value);
+  // The daemon must validate the node caller PID, not its own daemon PID.
+  // Without this, a completed task can strand a live-node lease indefinitely.
+  const callerPid = options.pid ?? process.pid;
+  const value = await callDaemon('release', { id, options: { pid: callerPid, force: options.force } }, options.requireDaemon);
+  return value === null ? releaseWork(id, { ...options, pid: callerPid }) : object<ReleaseResult>(value);
 }
 
 export async function coordinatedHeartbeat(id: string): Promise<boolean> {

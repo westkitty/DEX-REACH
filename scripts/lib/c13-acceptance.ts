@@ -29,10 +29,22 @@ export function installedReady(o: Observation): boolean {
 }
 export function freshTask(tasks: ReachTaskRecord[], since: string, nodeId: string): ReachTaskRecord {
   const matches = tasks.filter(t => t.nodeId === nodeId && t.operation === 'dex.fingerprint' && Date.parse(t.createdAtUtc) >= Date.parse(since));
-  if (matches.length !== 1) throw new Error('REQUIRES OWNER INPUT: exactly one fresh fingerprint task required; connector readback must bind its actor');
-  const task = matches[0]!;
-  if (!TASK_ID_PATTERN.test(task.taskId) || task.state !== 'COMPLETED' || task.attemptNumber !== 1 || !task.resultRef || !task.resultHash || task.mutationLevel !== 'NONE') throw new Error('fresh task has not completed safely with a persisted result');
+  const pending = matches.filter(t => !['COMPLETED', 'FAILED', 'CANCELLED', 'RECONCILED'].includes(t.state));
+  if (pending.length) throw new Error('REQUIRES OWNER INPUT: another fresh fingerprint task is unresolved');
+  // Retain failed/cancelled historical task evidence, but never let it mask one new successful proof.
+  const completed = matches.filter(t => t.state === 'COMPLETED');
+  if (completed.length !== 1) throw new Error('REQUIRES OWNER INPUT: exactly one completed fresh fingerprint task required; connector readback must bind its actor');
+  const task = completed[0]!;
+  if (!TASK_ID_PATTERN.test(task.taskId) || task.attemptNumber !== 1 || !task.resultRef || !task.resultHash || task.mutationLevel !== 'NONE') throw new Error('fresh task has not completed safely with a persisted result');
   return task;
+}
+
+export function priorJournalAllowsInstall(decision: string | undefined, observation: Observation): boolean {
+  if (decision !== 'ROLLED BACK') return recoveryDecision(observation) === 'SAFE TO RETRY';
+  // A new transaction may begin only after a verified rollback restored the exact LKG.
+  return !observation.uncertainOperation && !observation.cleanupPending && observation.helperIdle &&
+    observation.definitionsKnown && observation.snapshotValid && observation.previousIntact &&
+    observation.previousRunning && !observation.candidateRunning;
 }
 export async function acceptCandidate(checks: { runtime(): Promise<void>; task(): Promise<void>; queue(): Promise<void> }): Promise<Decision> {
   await checks.runtime();

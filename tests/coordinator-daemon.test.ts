@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { coordinatorSocketPath } from '../src/shared/work-coordinator.js';
-import { bindCoordinatorCaller, coordinatedEvents, coordinatedStatus } from '../src/coordinator/client.js';
+import { bindCoordinatorCaller, coordinatedEvents, coordinatedRelease, coordinatedStatus } from '../src/coordinator/client.js';
 
 async function socketCall(socketPath: string, request: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -66,6 +66,17 @@ test('coordinator daemon owns an account-private socket and rejects malformed fr
     // queues behind a conflicting repository lease, then exits. The ticket must retain that
     // caller PID so stale-ticket recovery can observe its death instead of the daemon PID.
     const { acquireWork, cancelTicket, readCoordinatorState, releaseWork } = await import('../src/shared/work-coordinator.js');
+    // Actual daemon socket release must carry the living requester's PID, not the daemon's.
+    const completedLease = await acquireWork({ executor: 'other', access: 'read', workload: 'light', snapshot: host() });
+    assert.equal(completedLease.status, 'acquired');
+    if (completedLease.status === 'acquired') {
+      assert.equal(completedLease.lease.pid, process.pid);
+      const wrongCaller = await coordinatedRelease(completedLease.lease.id, { pid: process.pid + 1 });
+      assert.equal(wrongCaller.released, false);
+      const released = await coordinatedRelease(completedLease.lease.id);
+      assert.equal(released.released, true);
+      assert.equal((await readCoordinatorState()).leases.some(lease => lease.id === completedLease.lease.id), false);
+    }
     const repositoryRoot = path.join(state, 'repo');
     await fs.mkdir(repositoryRoot, { recursive: true });
     const held = await acquireWork({ executor: 'human', access: 'mutate', workload: 'medium', repositoryRoot, snapshot: host() });

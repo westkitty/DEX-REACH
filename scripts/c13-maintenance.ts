@@ -12,7 +12,7 @@ import { readEnvFile } from './lib/node-files.js';
 import { runtimeReleaseId } from './lib/runtime-release.js';
 import { runtimeTreeSha256, validateRuntimeRollbackSnapshot, type RuntimeRollbackSnapshot } from './lib/runtime-rollback.js';
 import { launchdIsAbsent, launchdIsRunning, launchdServiceIsEnabled } from './lib/launchctl.js';
-import { acceptCandidate, QueueProofFailure, freshTask, validateConnectorReadback, installStatusFresh, assertTarget, installedReady, recoveryDecision, expectedHeadForObservation, type Observation } from './lib/c13-acceptance.js';
+import { acceptCandidate, QueueProofFailure, freshTask, validateConnectorReadback, installStatusFresh, assertTarget, installedReady, recoveryDecision, expectedHeadForObservation, priorJournalAllowsInstall, type Observation } from './lib/c13-acceptance.js';
 import { installedQueueProof } from './lib/c13-queue-proof.js';
 import type { ReachTaskRecord } from '../src/node/task-store.js';
 
@@ -176,7 +176,7 @@ try {
     await withFileLock(path.join(localState, 'runtime/c13-maintenance.lock'), async () => {
       if (command === 'install') {
         const prior = await json(journalPath).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
-        if (prior && recoveryDecision(await observe(prior, 'historical-retry')) !== 'SAFE TO RETRY') throw new Error('existing maintenance attempt; observe/reconcile rather than replay');
+        if (prior && !priorJournalAllowsInstall(prior.decision, await observe(prior, 'historical-retry'))) throw new Error('existing maintenance attempt; observe/reconcile rather than replay');
         const p = await preflight();
         const j: Journal = { transactionId: crypto.randomUUID(), head: p.head, candidateId: p.candidateId, startedAt: new Date().toISOString(), installUncertain: true, baseline: await baseline(), protectedHash: await protectedHash(), ...(prior ? { history: [...(prior.history ?? []), prior] } : {}) };
         await save(j); // journal is durable before the first installer action
@@ -230,7 +230,9 @@ try {
             }, queue: () => installedQueueProof(path.join(localState, 'runtime/releases', j.candidateId), { onRoot: async root => { j.queueCleanupRoot = root; await save(j); }, onClean: async () => { delete j.queueCleanupRoot; await save(j); } }) });
             delete j.error;
           } else if (command === 'rollback') {
-            if (recoveryDecision(await observe(j)) !== 'SAFE TO ROLLBACK') throw new Error('rollback not safe; owner reconciliation required');
+            if (j.decision === 'ROLLED BACK') throw new Error('transaction already rolled back; refusing duplicate rollback');
+            // The current published source can restore an older installed transaction without rewriting its original head.
+            if (recoveryDecision(await observe(j, 'historical-retry')) !== 'SAFE TO ROLLBACK') throw new Error('rollback not safe; owner reconciliation required');
             j.decision = 'NEEDS RECONCILIATION'; await save(j);
             await run(process.execPath, ['--import', 'tsx', 'scripts/rollback-macos.ts', '--candidate-release-id', j.candidateId], 600000);
             const status = await json(path.join(localState, 'runtime/rollback', j.candidateId, 'rollback-status.json'));
