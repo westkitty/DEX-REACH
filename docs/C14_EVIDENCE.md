@@ -57,3 +57,17 @@ The installed C13 runtime, live services, connector, Big Mac, PR #15, `main`, cr
 | Status | PASS at focused source/regression scope; no live service, connector, or physical chaos proof claimed |
 
 The full-suite aggregate remains **UNKNOWN**. The bounded prior diagnosis remains valid: the existing nonce-cache test takes about 58 seconds alone and passes; no C14 interaction was observed. Hosted CI is unavailable for the standalone branch unless a workflow is triggered separately.
+
+## C14-D — performance baseline and matched repeat
+
+| Field | Evidence |
+| --- | --- |
+| Requirement scope | Task acknowledgement, status reads, event append, task-store growth, result store, coordinator admission/queue/release, bounded event pagination, resource observations, and dashboard/idle-service measurement boundaries |
+| Harness | `scripts/c14-performance.ts`, exposed as `npm run benchmark:c14`; every fixture uses a temporary `DEX_REACH_STATE_DIR` and is removed after measurement |
+| Baseline | Source `fada83b85ce60aa64f81bc5314148d0c683737d0`; 15 measured iterations after 3 warmups; raw artifact `docs/c14-performance/c14-d-baseline-fada83b.json` |
+| Matched final | Source `f0bc40b43059e7bdd00de344d0f89f1fe27f023d`; same harness, fixture sizes, machine, and sampling method; raw artifact `docs/c14-performance/c14-d-final-f0bc40b.json` |
+| Result | C14-D baseline PASS and matched final PASS as repeatability evidence. No production optimization was justified; no production behavior changed. |
+| Key observation | Coordinator acquire/release was the highest measured category, with a final median of 34.07 ms and p95 of 36.35 ms. The bounded task-store and result-store measurements showed no supported asymptotic defect at the tested sizes. |
+| Unmeasured | Dashboard delta refresh and installed-service idle CPU/memory remain NOT MEASURED. Long-session stress is deferred. |
+
+See the [C14-D report](c14-performance/c14-d-report.md) and [raw baseline](c14-performance/c14-d-baseline-fada83b.json). This is source-only isolated evidence, not installed-runtime, connector, physical-device, or human-acceptance proof.
