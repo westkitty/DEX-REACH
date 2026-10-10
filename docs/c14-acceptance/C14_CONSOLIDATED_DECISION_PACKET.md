@@ -6,12 +6,18 @@ Verdicts: C13 NOT PASS · E7 HOST CAPABILITY BLOCKED · C14 source hardening con
 
 The master plan's C14 exit gate requires "a completely fresh chaos pass", including killing and restarting host services, on the representative Mac. C15 requires C14 PASS and explicit commit/push/deploy/install authority. Neither can be satisfied from source work alone. The decisions below are the smallest set that would unblock the remaining program. Each decision states what stays blocked if it is declined.
 
-## 0. Urgent: live host and node health (observed read-only, 2026-10-10 ~17:40 EDT)
+## 0. Urgent: installed services are down (observed read-only, 2026-10-10 17:50–18:05 EDT)
 
-- **`/bin/ps` hangs system-wide:** it ignores even `alarm`, an uninterruptible kernel wait. Capacity sampling and the coordinator depend on `ps`. `withFileLock` liveness checks use `process.kill(pid, 0)` and do not. 72 hung `ps` processes exist, most reparented after their parents exited (this campaign's interrupted test runs and manual probes, plus samplers). The installed coordinator holds one. `execFile` timeouts cannot reap a process in an uninterruptible wait.
-- **Installed node offline:** the gateway on 127.0.0.1:8787 answers `/healthz` with `ok:true, onlineNodes:0`. The node log shows 1,036 `gateway disconnected` reconnect cycles and 69 refused transport proofs or enrollment tokens. `nodes/macbook-air.local.runtime.json` was last written at 16:41. `node-auth.json` keeps being rewritten.
-- **Probable common cause:** the `ps` wedge, which began about 16:41–16:44. During the preceding hour this campaign ran heavy local stress tests (many concurrent integration suites). Contribution from that load is possible and is not ruled out. No installed file, service, credential or policy was modified by this campaign.
-- **Action (owner):** inspect, then restart the host (or at least recover `ps`). Afterwards, confirm read-only that `onlineNodes` returns to 1 before any other window. If the node still refuses after a clean host restart, treat that as a separate enrollment incident, because the log says re-enrollment may be required. Do not re-enroll without diagnosis.
+- **Host restart:** the host restarted at about 17:50 EDT. `ps` works again, and no hung `ps` processes remain.
+- **All five services down:** gateway, node, coordinator, worker and oauth-canary all exit with code **78 `EX_CONFIG`** and sit in launchd `spawn scheduled`. Nothing listens on 127.0.0.1:8787, so the public connector is down.
+- **Root cause:** every LaunchAgent runs `/opt/homebrew/Cellar/node/26.11.0/bin/node`. Homebrew upgraded Node to 26.11.1 at 16:54 EDT and removed the 26.11.0 keg. That path no longer exists. This campaign did not run Homebrew.
+- **Earlier symptoms:** the pre-restart `ps` wedge and the offline node (16:41 onward) overlap that upgrade window. Their exact relationship is unproven, and this campaign's concurrent stress testing is not ruled out as a contributor.
+- **Source repair** (on this branch, not installed): installers now pin `<prefix>/opt/node/bin/node`. They use it only when it resolves to the exact interpreter performing the install, and otherwise keep the exact path (`stableNodeBin`, `scripts/lib/service.ts`, `tests/service-node-binary.test.ts`). The C13 runtime is unchanged.
+- **Live recovery options** (owner choice; each restarts services):
+  - **(a) Smallest:** rewrite only the interpreter path in the five installed LaunchAgents from the 26.11.0 Cellar path to `/opt/homebrew/opt/node/bin/node`, then bootstrap them. The C13 release is unchanged, but runs under Node 26.11.1.
+  - **(b) Reinstall:** reinstall C13 `87a99494` through the immutable installer from a checkout that carries the repair.
+  - **(c) Install the C14 candidate:** this is decision 2, step 3, and needs the backup prerequisites first.
+- **Verification after recovery** (read-only): five services `running`, `/healthz` `onlineNodes:1`, the installed release identity unchanged, and a fresh task report showing 19 (or newly counted) unresolved records untouched.
 
 ## 1. Approve compat-home opaque link preservation (policy only, no live mutation)
 
@@ -58,4 +64,4 @@ The installed C13 runtime has no checkpoint participant, so a coordinated live b
 
 ## Smallest next action
 
-Decision 0: recover the host so that `ps` returns and the installed node is online again. Every other live step depends on a healthy host.
+Decision 0(a): repoint the five installed LaunchAgents at `/opt/homebrew/opt/node/bin/node` and bootstrap them, then confirm `onlineNodes:1`. Every other live step depends on running services.
