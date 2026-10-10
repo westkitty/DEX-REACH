@@ -112,7 +112,8 @@ Final `npm run verify` exited 0: typecheck, 42/42 invariants, 665/665 tests (zer
 cancellations or skips), build, audit at the unchanged high threshold (six moderate advisories), and
 26-tool backend probe. `git diff --check` passed. The preceding focused corrections passed 12/12
 integration/authority tests, 10/10 retention/authority tests, and the final actual-process fault fixture
-passed 1/1. Hosted results remain pending publication/readback. Full verification
+passed 1/1. Corrected source hosted results are verified below; final documentation-head checks are read back
+from GitHub separately. Full verification
 initially found an existing authority test that expected appending through corruption; the authority
 proof remains, and the journal contract now explicitly verifies fail-closed preservation. Independent
 read-only review found the duplicate-ID retention loophole; its failing regression and fix are included.
@@ -159,4 +160,25 @@ The corrected exact-source comprehensive and hosted results are recorded after c
 The corrected candidate passed final `npm run verify` with 665/665 tests, 42 invariants, typecheck,
 build, the unchanged high-threshold audit (six moderate advisories), 26-tool probe and whitespace
 checks. Independent targeted read-only review found no blocker in the actual-entrypoint correction.
-Publication and exact-head hosted readback remain separate gates.
+Publication and exact-head hosted readback remain separate gates, completed for the source SHA below.
+
+
+## Source publication closure
+
+Corrective source `ca3ec28fa46cb876977964db163548c8d2ecc285` is normally pushed to
+`origin/c14-chaos-recovery`; independent `git ls-remote` matches local HEAD. All five owning check
+runs have that exact `head_sha` and completed SUCCESS:
+
+| Check | Owning run/job |
+| --- | --- |
+| analyze | [38066164830 / 114254132490](https://github.com/westkitty/DEX-REACH/actions/runs/38066164830/job/114254132490) |
+| validate | [38066164833 / 114254132785](https://github.com/westkitty/DEX-REACH/actions/runs/38066164833/job/114254132785) |
+| reproducible-build | [38066164833 / 114254132628](https://github.com/westkitty/DEX-REACH/actions/runs/38066164833/job/114254132628) |
+| runtime-proof | [38066164833 / 114254132784](https://github.com/westkitty/DEX-REACH/actions/runs/38066164833/job/114254132784) |
+| CodeQL | [114254356661](https://github.com/westkitty/DEX-REACH/runs/114254356661) |
+
+The hosted proof records 19 proven, zero failed and three unverified hardware/install items, and
+explicitly says DEX//REACH is NOT physically proven. PR #16 was read back open/draft, unmerged,
+head `c14-chaos-recovery`, base `c13-worker-repair`. A documentation-only closure follows this
+source SHA; its final head and five checks are independently read back in the completion receipt
+and remain available from PR #16. There is no installed or program-level promotion here.

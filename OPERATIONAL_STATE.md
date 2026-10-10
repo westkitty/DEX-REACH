@@ -693,3 +693,14 @@ and launcher service entrypoints while preserving misleading-argument refusals. 
 verification passes 665/665 tests, 42 invariants, typecheck, build, unchanged high-threshold audit
 (six moderate advisories), 26-tool probe and whitespace checks. Hosted verification of the correction
 remains pending; installed behavior and the 19 historical unresolved records remain untouched.
+
+
+**C14 SOURCE VERIFIED AND PUBLISHED:** corrective source
+`ca3ec28fa46cb876977964db163548c8d2ecc285` matches `origin/c14-chaos-recovery`; all five checks
+completed SUCCESS at that exact SHA (DEX validation run `38066164833`, analyze run `38066164830`,
+CodeQL check `114254356661`). Hosted runtime-proof established 19 proofs, failed zero, and retained
+three hardware/install gaps. The linked engineering record binds each job identity and preserves
+the prior failed run. PR #16 remains open/draft/unmerged with base `c13-worker-repair`. A
+following documentation-only closure is checked separately at its final GitHub head. Installed
+acceptance remains UNVERIFIED: C13 NOT PASS, E7 HOST CAPABILITY BLOCKED, C14 PROGRAM PARTIAL,
+C15 BLOCKED. All owner systems and historical task records remain outside mutation authority.
