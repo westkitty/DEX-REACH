@@ -53,7 +53,7 @@ import { workspaceWorkerEligible, workspaceWorkerExecute, workspaceWorkerRootsHa
 import { TaskEventLog } from '../shared/task-events.js';
 import { taskStreamPage } from '../shared/task-stream.js';
 import { NodeTaskStore } from './task-store.js';
-import { classifyFailure, classifyOperationSafety, defaultAttemptBudget, decideExistingTask, deriveIdempotencyKey, type SafetyClass } from '../shared/durable-execution.js';
+import { classifyFailure, classifyOperationSafety, defaultAttemptBudget, decideExistingTask, deriveIdempotencyKey, unstartedFailureOutcome, type SafetyClass } from '../shared/durable-execution.js';
 import { reconcileBootTasks } from './boot-recovery.js';
 import type { ProcessExecutionContext } from '../shared/activity.js';
 import { durableCapabilityRefusal, NodeNegotiation } from '../shared/protocol-negotiation.js';
@@ -571,10 +571,16 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
       leaseId = null;
     }
     if (taskId && taskSafety) {
-      const failureClass = classifyFailure({ error, safety: taskSafety });
+      // Execution only begins after a durable RUNNING transition. A failure before it (for example a
+      // coordinator wait timeout) is a definite non-execution, not an ambiguous effect.
+      const before = await taskStore.read(taskId).catch(() => null);
+      const unstarted = before ? unstartedFailureOutcome({ error, safety: taskSafety, persistedState: before.state, executionStarted }) : null;
+      const failureClass = unstarted?.failureClass ?? classifyFailure({ error, safety: taskSafety });
       await taskStore.update(taskId, { failureClass, status: `Task stopped: ${failureClass}.` }).catch(() => undefined);
       const current = await taskStore.read(taskId).catch(() => null);
-      if (current?.state === 'RUNNING' || current?.state === 'PREPARING') {
+      if (unstarted) {
+        if (unstarted.next && current?.state === 'PREPARING') await taskStore.transition(taskId, unstarted.next, `Task stopped before execution: ${failureClass}.`, ['PREPARING']).catch(() => undefined);
+      } else if (current?.state === 'RUNNING' || current?.state === 'PREPARING') {
         const next = failureClass === 'AMBIGUOUS_EFFECT' ? 'AMBIGUOUS' : 'FAILED';
         await taskStore.transition(taskId, next, `Task stopped: ${failureClass}.`).catch(() => undefined);
       }

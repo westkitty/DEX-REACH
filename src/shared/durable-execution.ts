@@ -67,6 +67,23 @@ export function classifyFailure(input: {
   return 'EXECUTION_FAILED';
 }
 
+/**
+ * Failure before execution began. The node only executes after the RUNNING transition is durably
+ * committed, so a task whose persisted state is still ACCEPTED or PREPARING (and whose execution was
+ * never started) cannot have produced an external effect: it is a definite non-execution, never
+ * AMBIGUOUS_EFFECT. Returns null whenever execution may have started; that path keeps its uncertainty.
+ * PREPARING ends FAILED (a legal terminal transition). ACCEPTED cannot become FAILED, so its state is
+ * preserved and only the corrected failure class is recorded.
+ */
+export function unstartedFailureOutcome(input: { error: unknown; safety: SafetyClass; persistedState: string | undefined; executionStarted: boolean }): { failureClass: FailureClass; next: 'FAILED' | null } | null {
+  if (input.executionStarted || (input.persistedState !== 'ACCEPTED' && input.persistedState !== 'PREPARING')) return null;
+  const message = input.error instanceof Error ? input.error.message : String(input.error ?? '');
+  let failureClass = classifyFailure({ error: input.error, safety: 'PURE_READ_IDEMPOTENT' });
+  if (/^COORDINATOR_WAIT_TIMEOUT\b/.test(message)) failureClass = 'TRANSIENT_RESOURCE';
+  if (failureClass === 'AMBIGUOUS_EFFECT') failureClass = 'EXECUTION_FAILED';
+  return { failureClass, next: input.persistedState === 'PREPARING' ? 'FAILED' : null };
+}
+
 export function retryAllowed(safety: SafetyClass, failure: FailureClass): boolean {
   if (['AUTHORITY_REFUSAL', 'POLICY_CHANGED', 'TARGET_CHANGED', 'INVALID_INPUT', 'INPUT_REQUIRED', 'AMBIGUOUS_EFFECT', 'CORRUPT_STATE', 'USER_CANCELLED', 'SYSTEM_CANCELLED'].includes(failure)) return false;
   if (safety === 'PLAN_COMMIT' || safety === 'PROCESS_UNKNOWN_EFFECT' || safety === 'DESTRUCTIVE') return false;
