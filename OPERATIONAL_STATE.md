@@ -1,7 +1,7 @@
 # DEX//REACH Operational State
 
 <!-- operational-state:metadata
-{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":92,"last_updated":"2026-10-10T22:03:41.483631Z","current_baseline":{"identity":"C13 corrected immutable runtime 0.3.2-87a99494ebb3-2f44ae46b11b installed and retained on MacBook-Air.local under transaction 9bf5079f-397e-4cd8-af35-99f1550d3d68. Published source 87a99494ebb3471d3ecc3a79acd630ec18858a92 passed all five hosted checks and full local verification (374 tests). Fresh authenticated same-ID fingerprint E4 PASS; installed lease success/failure/forgery and queue acceptance PASS with zero claims. Previous release/capsules/protected state preserved. E7 BLOCKED HOST CAPABILITY, C13 NOT PASS, C14 preparation only, C15 not started.","state":"c13-runtime-retained-e4-pass-e7-host-blocked","last_verified":"2026-10-10T02:01:08.520507Z"},"scope_boundaries":["Current maximum-scope C14 authority permits source development, isolated fixtures and c14-chaos-recovery publication with PR16 draft/unmerged. Installed runtime, launchd, owner state, credentials, connector administration, main, PR15, Big Mac, DEX and Gay Cast remain protected. C13/E7 and C15 gates are not waived."],"linked_parent_state":null}
+{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":93,"last_updated":"2026-10-10T22:39:34.197974Z","current_baseline":{"identity":"C13 corrected immutable runtime 0.3.2-87a99494ebb3-2f44ae46b11b installed and retained on MacBook-Air.local under transaction 9bf5079f-397e-4cd8-af35-99f1550d3d68. Published source 87a99494ebb3471d3ecc3a79acd630ec18858a92 passed all five hosted checks and full local verification (374 tests). Fresh authenticated same-ID fingerprint E4 PASS; installed lease success/failure/forgery and queue acceptance PASS with zero claims. Previous release/capsules/protected state preserved. E7 BLOCKED HOST CAPABILITY, C13 NOT PASS, C14 preparation only, C15 not started.","state":"c13-runtime-retained-services-restored-node-path-repaired","last_verified":"2026-10-10T22:39:34.197974Z"},"scope_boundaries":["Current maximum-scope C14 authority permits source development, isolated fixtures and c14-chaos-recovery publication with PR16 draft/unmerged. Installed runtime, launchd, owner state, credentials, connector administration, main, PR15, Big Mac, DEX and Gay Cast remain protected. C13/E7 and C15 gates are not waived."],"linked_parent_state":null}
 -->
 
 ## 1. Project Identity and Scope
@@ -11,6 +11,18 @@ DEX//REACH is a secure AI-native remote-computing control plane. It provides use
 Canonical public repository: `https://github.com/westkitty/DEX-REACH`.
 
 ## 2. Current Baseline
+
+**2026-10-10 18:40 EDT — Decision 0(a) executed: C13 services restored (owner-authorized, scope limited to five LaunchAgent interpreter paths).**
+
+- **Preflight:** confirmed host `MacBook-Air.local`, uid 501, installed release `0.3.2-87a99494ebb3-2f44ae46b11b` (tree verified), the 26.11.0 Cellar keg absent, and `/opt/homebrew/opt/node/bin/node` working (v26.11.1).
+- **Backups:** private 0600 copies of the five plists are in `~/.dex-reach/install-rollback/launchagents-node-path-20261010T183611/`.
+- **Change:** in each plist only `ProgramArguments[0]` changed, from the Cellar 26.11.0 path to `/opt/homebrew/opt/node/bin/node`. A diff proved this was the only change; `plutil -lint` passed; modes stayed 0600. The stale Cellar entry in each plist's `PATH` was deliberately left as it was. A missing directory is skipped, and `/opt/homebrew/bin` follows it.
+- **Reload:** bootout, enable, bootstrap and kickstart, once, in order coordinator, worker, gateway, node, oauth-canary.
+- **Result:** the four persistent services are running (runs=1), and the gateway `/healthz` reports `onlineNodes:1`.
+- **OAuth canary:** the first kickstarted run failed because it started before the node connected (exit 1, `nodeOnline:false`). One further run after the node was online exited 0 with refresh recovery and post-refresh MCP verified over the public URL.
+- **Preflight afterwards:** `INSTALLED_IDENTITY` and `FIVE_SERVICES` are true.
+- **Preserved:** all 684 prior task records are unchanged (17 PREPARING and 2 RUNNING still unresolved); there are 2 new COMPLETED canary fingerprints. `secrets.env`, the node env, the access policy and the transport keys are byte-identical. The expected runtime writes were OAuth token rotation by the canary, node-auth nonces and the node status file.
+- **Excluded:** no C14 install, task replay, credential change or other maintenance.
 
 **2026-10-10 18:05 EDT — INSTALLED SERVICES DOWN (read-only observation).** After the host restart at about 17:50, `ps` recovered, but all five installed LaunchAgents exit with code 78 `EX_CONFIG`. They run `/opt/homebrew/Cellar/node/26.11.0/bin/node`, which Homebrew removed when it upgraded Node to 26.11.1 at 16:54. Nothing listens on 127.0.0.1:8787, and the connector is down. The installed C13 release files are intact. Source repair on this branch: installers pin the stable `opt/node` link, only when it resolves to the installing interpreter. Not installed. Recovery needs owner authority ([decision packet](docs/c14-acceptance/C14_CONSOLIDATED_DECISION_PACKET.md), item 0). Full local `npm run verify` on the healthy host: 685/685 tests, 42 invariants, build, audit (6 moderate), probe PASS.
 

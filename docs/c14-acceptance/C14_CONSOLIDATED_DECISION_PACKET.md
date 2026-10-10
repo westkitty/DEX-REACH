@@ -6,7 +6,7 @@ Verdicts: C13 NOT PASS · E7 HOST CAPABILITY BLOCKED · C14 source hardening con
 
 The master plan's C14 exit gate requires "a completely fresh chaos pass", including killing and restarting host services, on the representative Mac. C15 requires C14 PASS and explicit commit/push/deploy/install authority. Neither can be satisfied from source work alone. The decisions below are the smallest set that would unblock the remaining program. Each decision states what stays blocked if it is declined.
 
-## 0. Urgent: installed services are down (observed read-only, 2026-10-10 17:50–18:05 EDT)
+## 0. RESOLVED 2026-10-10 18:40 EDT by owner-authorized option (a); see OPERATIONAL_STATE. Original finding: installed services were down (observed read-only, 2026-10-10 17:50–18:05 EDT)
 
 - **Host restart:** the host restarted at about 17:50 EDT. `ps` works again, and no hung `ps` processes remain.
 - **All five services down:** gateway, node, coordinator, worker and oauth-canary all exit with code **78 `EX_CONFIG`** and sit in launchd `spawn scheduled`. Nothing listens on 127.0.0.1:8787, so the public connector is down.
