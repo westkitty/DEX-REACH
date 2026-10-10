@@ -1,5 +1,7 @@
 # C14 preparation — phase entry remains blocked
 
+> Current-state note (2026-10-10): this is a historical C13 phase-entry preparation packet. Its original authorization statement is not the current source-development authority. C14-A through C14-F source work and evidence now live in `docs/C14_EVIDENCE.md`; C13 remains NOT PASS and E7 remains BLOCKED — HOST CAPABILITY. The original requirements and missing-master-plan limitation below are preserved.
+
 State: PREPARATION ONLY. C13 NOT PASS while E7 remains BLOCKED — HOST CAPABILITY. No C14 implementation or C15 work is authorized by this packet.
 
 ## Planning authority
