@@ -28,8 +28,8 @@ function matchingTicket(task: ReachTaskRecord, status: WorkStatus | null) {
 }
 
 async function hasVerifiedResult(task: ReachTaskRecord, results: ResultStore): Promise<boolean> {
-  if (!task.resultRef) return false;
-  try { await results.readValue(task.resultRef); return true; } catch { return false; }
+  if (!task.resultRef || !task.resultHash) return false;
+  try { await results.readValueForTask(task.resultRef, task.taskId, task.resultHash); return true; } catch { return false; }
 }
 
 export async function reconcileBootTasks(taskStore: NodeTaskStore, results: ResultStore): Promise<BootRecoveryReport[]> {

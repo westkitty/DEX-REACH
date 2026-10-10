@@ -43,3 +43,17 @@ The repository-wide `npm test` invocation was previously observed beyond the bou
 - `src/node/boot-recovery.ts` persists `AMBIGUOUS_EFFECT` when recovery lacks authoritative result evidence.
 
 The installed C13 runtime, live services, connector, Big Mac, PR #15, `main`, credentials, and owner task state were not changed.
+
+## C14-C — security and privacy regression hardening
+
+| Field | Evidence |
+| --- | --- |
+| Requirement scope | Durable result identity, recovery integrity, duplicate binding, privacy-safe summaries, and preserved existing authorization boundaries |
+| Regression file | `tests/c14-security-privacy.test.ts` |
+| Reproduced defect | Boot recovery and task result retrieval checked blob integrity but did not require the result metadata task ID and hash to match the persisted task. A valid result belonging to another task could have satisfied recovery after task-state corruption. |
+| Repair | `ResultStore.readValueForTask` requires task ID and expected hash; boot recovery, task result control, and duplicate-result reattachment use it. Completed tasks missing result binding are refused as corrupt rather than recovered. |
+| Adversarial coverage | Wrong task reference, wrong result hash, corrupt completed binding, ambiguous recovery preservation, synthetic credential redaction, plus existing node-auth, access-policy, task-control, coordinator ownership, result-store, and security regressions |
+| Focused result | 66/66 PASS; typecheck, build, 42 invariants, and `git diff --check` PASS |
+| Status | PASS at focused source/regression scope; no live service, connector, or physical chaos proof claimed |
+
+The full-suite aggregate remains **UNKNOWN**. The bounded prior diagnosis remains valid: the existing nonce-cache test takes about 58 seconds alone and passes; no C14 interaction was observed. Hosted CI is unavailable for the standalone branch unless a workflow is triggered separately.

@@ -96,8 +96,8 @@ async function handleTaskControl(request: GatewayRequest): Promise<GatewayRespon
   if (task.actorId !== actorIdFor(request.actor)) throw new Error('task ownership mismatch; the original actor must control this task');
   if (control.action === 'get') return { type: 'response', id: request.id, ok: true, result: task };
   if (control.action === 'result') {
-    if (task.state !== 'COMPLETED' || !task.resultRef) throw new Error(`task ${task.taskId} has no completed result (${task.state})`);
-    return { type: 'response', id: request.id, ok: true, result: { task, result: await results.readValue(task.resultRef) } };
+    if (task.state !== 'COMPLETED' || !task.resultRef || !task.resultHash) throw new Error(`task ${task.taskId} has no completed result (${task.state})`);
+    return { type: 'response', id: request.id, ok: true, result: { task, result: await results.readValueForTask(task.resultRef, task.taskId, task.resultHash) } };
   }
   if (['COMPLETED', 'FAILED', 'CANCELLED', 'RECONCILED'].includes(task.state)) return { type: 'response', id: request.id, ok: true, result: task };
   const cancelled = await taskStore.transition(task.taskId, 'CANCELLED', 'Task cancellation requested by its owning actor.');
@@ -459,8 +459,11 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     if (duplicate.kind === 'COLLISION') {
       throw new Error('IDEMPOTENCY_KEY_COLLISION_MISMATCH: existing task binding differs; refusing execution');
     }
+    if (duplicate.kind === 'REFUSE_CORRUPT') {
+      throw new Error(`task ${duplicate.task.taskId} has incomplete result binding; refusing recovery`);
+    }
     if (duplicate.kind === 'RETURN_RESULT') {
-      const recovered = await results.readValue(duplicate.task.resultRef!);
+      const recovered = await results.readValueForTask(duplicate.task.resultRef!, duplicate.task.taskId, duplicate.task.resultHash!);
       return { type: 'response', id: request.id, ok: true, result: recovered, traceId: trace.traceId };
     }
     if (duplicate.kind === 'REFUSE_AMBIGUOUS') {

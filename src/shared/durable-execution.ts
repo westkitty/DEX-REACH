@@ -83,11 +83,13 @@ export type ExistingTaskBinding = {
   payloadSha256: string;
   policyHash?: string;
   resultRef?: string;
+  resultHash?: string;
 };
 
 export type ExistingTaskDecision =
   | { kind: 'NEW' }
   | { kind: 'RETURN_RESULT'; task: ExistingTaskBinding }
+  | { kind: 'REFUSE_CORRUPT'; task: ExistingTaskBinding }
   | { kind: 'REFUSE_AMBIGUOUS'; task: ExistingTaskBinding }
   | { kind: 'REFUSE_TERMINAL'; task: ExistingTaskBinding }
   | { kind: 'REFUSE_IN_FLIGHT'; task: ExistingTaskBinding }
@@ -108,7 +110,10 @@ export function decideExistingTask(input: {
       || task.payloadSha256 !== input.payloadSha256 || (task.policyHash && task.policyHash !== input.policyHash)) {
     return { kind: 'COLLISION', task };
   }
-  if (task.state === 'COMPLETED' && task.resultRef) return { kind: 'RETURN_RESULT', task };
+  if (task.state === 'COMPLETED') {
+    if (!task.resultRef || !task.resultHash) return { kind: 'REFUSE_CORRUPT', task };
+    return { kind: 'RETURN_RESULT', task };
+  }
   if (task.state === 'AMBIGUOUS') return { kind: 'REFUSE_AMBIGUOUS', task };
   if (task.state === 'FAILED' || task.state === 'CANCELLED') return { kind: 'REFUSE_TERMINAL', task };
   return { kind: 'REFUSE_IN_FLIGHT', task };
