@@ -12,7 +12,7 @@ export async function taskStreamPage(log: TaskEventLog, taskId: string, nodeId: 
   if (cursor !== undefined && !/^tev_[0-9a-f]{24}$/.test(cursor)) throw new Error('invalid event cursor');
   const history = await log.list(taskId, 2000, true);
   const index = cursor ? history.findIndex(e => e.eventId === cursor) : -1;
-  const gap = cursor ? index < 0 : history[0]?.kind !== 'accepted';
+  const gap = history.some(e => e.historyGap) || (cursor ? index < 0 : history[0]?.kind !== 'accepted');
   const selected = history.slice(index + 1, index + 101);
   const events = selected.map(e => {
     const eventState = e.toState ?? e.state;

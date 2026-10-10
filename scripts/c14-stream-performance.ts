@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { startLivePair } from './lib/live-reach.js';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const pair=await startLivePair({repoRoot:root,nodeIds:['performance-node']});
+const pair=await startLivePair({capacityObservation:'synthetic',repoRoot:root,nodeIds:['performance-node']});
 const samples:number[]=[];let bytes=0;
 const before=process.memoryUsage();
 try{
@@ -21,5 +21,5 @@ try{
     }));
   }
   samples.sort((a,b)=>a-b);const p=(q:number)=>samples[Math.ceil(samples.length*q)-1];
-  console.log(JSON.stringify({source:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),workload:'64 complete SSE replays, concurrency 8, one real OAuth durable task',samples:64,p50Ms:p(.5),p95Ms:p(.95),p99Ms:p(.99),bytes,harnessRssDelta:process.memoryUsage().rss-before.rss,budget:'no project latency budget; distribution only',scope:'isolated source; no installed profiling'},null,2));
+  console.log(JSON.stringify({capacityObservation:pair.capacityObservation,source:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),workload:'64 complete SSE replays, concurrency 8, one real OAuth durable task',samples:64,p50Ms:p(.5),p95Ms:p(.95),p99Ms:p(.99),bytes,harnessRssDelta:process.memoryUsage().rss-before.rss,budget:'no project latency budget; distribution only',scope:'isolated source; no installed profiling'},null,2));
 }finally{await pair.stop();await fs.rm(pair.workspace,{recursive:true,force:true});}

@@ -1,3 +1,4 @@
+import { GATEWAY_RESPONSE_MS, admissionBudgetMs, boundedGatewayMs } from '../shared/request-deadlines.js';
 import crypto from 'node:crypto';
 import type { Server } from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
@@ -129,7 +130,7 @@ export class NodeRegistry {
    * Routes one operation to exactly the named node. There is deliberately no default node, no
    * "first online" choice, and no fallback: an unknown, offline, or revoked node ID always throws.
    */
-  async request(nodeId: string, operation: string, args: Record<string, unknown>, actor?: RequestActor, timeoutMs = 60000): Promise<unknown> {
+  async request(nodeId: string, operation: string, args: Record<string, unknown>, actor?: RequestActor, timeoutMs = GATEWAY_RESPONSE_MS): Promise<unknown> {
     return (await this.requestWithTrace(nodeId, operation, args, actor, undefined, timeoutMs)).result;
   }
 
@@ -139,9 +140,10 @@ export class NodeRegistry {
     args: Record<string, unknown>,
     actor?: RequestActor,
     trace?: { traceparent?: string; tracestate?: string },
-    timeoutMs = 60000,
+    timeoutMs = GATEWAY_RESPONSE_MS,
     task?: DurableTaskRequest
   ): Promise<NodeRequestResult> {
+    timeoutMs = boundedGatewayMs(timeoutMs);
     const record = this.requireNode(nodeId);
     if (await this.nodeAuth.isRevoked(nodeId)) throw new Error(`node is revoked: ${nodeId}`);
     if (this.requireNode(nodeId) !== record) throw new Error('node connection changed before dispatch; request was not sent');
@@ -155,6 +157,7 @@ export class NodeRegistry {
       id,
       operation,
       args,
+      admissionBudgetMs: admissionBudgetMs(timeoutMs),
       ...(actor ? { actor } : {}),
       ...(trace?.traceparent ? { traceparent: trace.traceparent } : {}),
       ...(trace?.tracestate ? { tracestate: trace.tracestate } : {}),

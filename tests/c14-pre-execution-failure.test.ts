@@ -22,7 +22,7 @@ test('a failure before the RUNNING transition is a definite non-execution: never
   for (const safety of ['PROCESS_UNKNOWN_EFFECT', 'DESTRUCTIVE', 'PLAN_COMMIT', 'SIDE_EFFECTING_IDEMPOTENT', 'PURE_READ_IDEMPOTENT'] as const) {
     for (const state of ['ACCEPTED', 'PREPARING'] as const) {
       const o = unstartedFailureOutcome({ error: timeout, safety, persistedState: state, executionStarted: false })!;
-      assert.equal(o.failureClass, 'TRANSIENT_RESOURCE'); assert.equal(o.next, state === 'PREPARING' ? 'FAILED' : null); // ACCEPTED -> FAILED is not a legal transition
+      assert.equal(o.failureClass, 'TRANSIENT_RESOURCE'); assert.equal(o.next, state === 'PREPARING' ? 'FAILED' : 'CANCELLED'); // ACCEPTED -> FAILED is not a legal transition
       // Classification does not grant replay: unknown-effect operations still never retry automatically.
       if (safety !== 'PURE_READ_IDEMPOTENT' && safety !== 'SIDE_EFFECTING_IDEMPOTENT') assert.equal(retryAllowed(safety, o.failureClass), false);
     }

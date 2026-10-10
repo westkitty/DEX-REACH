@@ -66,3 +66,10 @@ The fix applies only to future failures after a separately authorized install; t
 `npm run verify` exit 0: typecheck, 42/42 invariants, 640/640 tests (0 fail, cancelled or skipped), build, audit at the unchanged high threshold (six moderate advisories), 26-tool probe, `git diff --check`.
 
 Inside that run all 32 multi-process checkpoint scenarios (21 real-process plus 11 forged participants) and the evidence and gate suites passed. Hosted CodeQL for the final revision is recorded below from the owning check run, not inferred from local tests.
+
+## Scheduler/admission continuation — 2026-10-10
+
+The earlier source receipt above remains historical. Future-source timeout, capacity and bounded
+retention repairs, legal ACCEPTED → CANCELLED failure handling, synthetic integration evidence and
+measurement limitations are recorded in [C14 scheduler/admission repair](C14_SCHEDULER_ADMISSION_REPAIR.md).
+The 19 unresolved installed records remain untouched; source repair is not installed acceptance.

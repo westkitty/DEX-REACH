@@ -9,7 +9,7 @@ import { NodeTaskStore } from '../src/node/task-store.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 test('real OAuth MCP durable task reaches SSE client and resumes persisted cursor after node restart', {timeout: 90000}, async () => {
-  const pair = await startLivePair({repoRoot, nodeIds:['stream-node'], profile:'development'});
+  const pair = await startLivePair({capacityObservation:'synthetic',repoRoot, nodeIds:['stream-node'], profile:'development'});
   try {
     await pair.dexCli(['enable','--node','stream-node']);
     const source = path.join(pair.roots, 'input.txt'); await fs.writeFile(source, 'fixture');
@@ -47,7 +47,7 @@ test('real OAuth MCP durable task reaches SSE client and resumes persisted curso
 });
 
 test('gateway loss and subscriber disconnect preserve one running external effect and cursor replay', {timeout:90000}, async()=>{
-  const pair=await startLivePair({repoRoot,nodeIds:['chaos-node'],profile:'development'});
+  const pair=await startLivePair({capacityObservation:'synthetic',repoRoot,nodeIds:['chaos-node'],profile:'development'});
   try{
     await pair.dexCli(['enable','--node','chaos-node']);
     const args={node_id:'chaos-node',action:'start',operation:'dex.process.run',mode:'durable',arguments:{command:'touch running.txt; for i in $(seq 1 600); do if test -f release.txt; then printf effect >> oracle.txt; exit 0; fi; sleep 0.1; done; exit 1',cwd:pair.roots,idempotencyKey:'once-only'}};
@@ -75,7 +75,7 @@ test('gateway loss and subscriber disconnect preserve one running external effec
       if(await fs.access(path.join(pair.roots,'running.txt')).then(()=>true,()=>false))break;
       await new Promise(resolve=>setTimeout(resolve,100));
     }
-    await fs.access(path.join(pair.roots,'running.txt'));
+    await fs.access(path.join(pair.roots,'running.txt')).catch(async error=>{throw new Error(`${String(error)}; isolated task states: ${JSON.stringify((await new NodeTaskStore(pair.stateDir).list()).map(t=>({state:t.state,status:t.summary.status,failure:t.failureClass})))}`);});
     const cancelled=await pair.call('reach_task',{node_id:'chaos-node',action:'cancel',task_id:ids[0]});
     assert.equal(cancelled.ok,false,cancelled.text);assert.match(cancelled.text,/CANCELLATION_UNPROVEN/);
     await pair.restartGateway();

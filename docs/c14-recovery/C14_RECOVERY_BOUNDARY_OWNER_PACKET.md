@@ -117,3 +117,12 @@ Starting clean local/remote `97bd901e40215bdc6a30fe42ca43d2f0c7f57569`, with all
 - **Status distinction:** SOURCE IMPLEMENTED and SOURCE VERIFIED for the participant gate, holder protocol and evidence contract. SYNTHETICALLY VERIFIED across isolated multi-process tests using real production modules. Not INSTALLED, not LIVE BACKUP CERTIFIED, not HUMAN ACCEPTED.
 - **Validation:** `npm run verify` exit 0 with typecheck, 42/42 invariants, 635/635 tests (0 fail, cancelled or skipped), build, audit at the unchanged high threshold (six moderate advisories), the 26-tool probe, and `git diff --check`.
 - **Live state, read-only, after implementation:** installed tree digest and five services verified, preflight BLOCKED, and no checkpoint participation enabled in any installed process (no live `checkpoint/` directory, no checkpoint environment in the node LaunchAgent). The nonterminal record count is now **19**: 17 PREPARING AMBIGUOUS_EFFECT and 2 RUNNING INSUFFICIENT_EVIDENCE. Two new PREPARING AMBIGUOUS_EFFECT records were created by the installed node at 2026-10-10T12:56:56Z and 12:58:17Z for the same existing connector actor as the earlier records, not by this campaign's synthetic tests. All 19 are preserved and unresolved, with `replayAuthorized=false`. The earlier 17-record figures above remain accurate for their own inspection times.
+
+## Scheduler/admission source continuation — 2026-10-10
+
+The [scheduler/admission engineering record](../c14-security/C14_SCHEDULER_ADMISSION_REPAIR.md)
+records future-source prevention, bounded causal retention, isolated real-module integration and
+matched measurements. Read-only inspection still observed 19 nonterminal records (17 PREPARING,
+2 RUNNING), all preserved and unresolved, with no task-bound result proving completion and no replay
+authority. This continuation neither reconciles historical effects nor certifies a live backup.
+C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 PROGRAM PARTIAL; C15 BLOCKED.

@@ -1,3 +1,4 @@
+import {coordinatorSocketPath} from '../../src/shared/work-coordinator.js';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import crypto from 'node:crypto';
@@ -46,9 +47,12 @@ export type LivePairOptions = {
   profile?: string;
   /** How long to wait for the gateway and for each node to come online. */
   timeoutMs?: number;
+  /** Functional protocol tests use a synthetic host; explicit performance proofs can measure the physical host. */
+  capacityObservation?: 'synthetic' | 'physical';
 };
 
 export type LivePair = {
+  capacityObservation: 'synthetic' | 'physical';
   baseUrl: URL;
   authorizedFetch(path: string, init?: RequestInit): Promise<Response>;
   otherActorFetch(path: string): Promise<Response>;
@@ -244,6 +248,15 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
   }
 
   try {
+    if (options.capacityObservation === 'synthetic') {
+      // Sensor isolation is distinct from protocol mocks: the real daemon still owns FIFO tickets,
+      // repository locks, slot/bundle checks, caller proofs and lease persistence.
+      await fs.writeFile(path.join(stateDir, 'live-pair-fixture.json'), JSON.stringify({stateRoot:await fs.realpath(stateDir)}), {mode:0o600});
+      await spawnLogged('coordinator-fixture', ['scripts/lib/live-coordinator-fixture.ts'], baseEnv);
+      // Socket name is a digest of the isolated state root. Avoid altering this caller's environment.
+      const socket = coordinatorSocketPath(stateDir);
+      await waitFor('the isolated coordinator fixture socket', timeoutMs, async()=>fs.lstat(socket).then(s=>s.isSocket(),()=>false));
+    }
     await waitFor('the gateway to answer /healthz', timeoutMs, async () => (await health()).ok);
 
     async function nodeCli(args: string[]): Promise<string> {
@@ -409,6 +422,7 @@ export async function startLivePair(options: LivePairOptions): Promise<LivePair>
     }
 
     return {
+      capacityObservation: options.capacityObservation ?? 'physical',
       baseUrl, stateDir, workspace, roots, nodes, client,
       otherActorFetch: async route => {
         const otherProvider = new LiveOAuthProvider(`http://127.0.0.1:${await freePort()}/callback`);

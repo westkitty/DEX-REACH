@@ -671,3 +671,16 @@ The local server remains available on loopback. Changes are uncommitted on detac
 The C13 E8 Control Room source was committed as `b1be136851d305da6313e8fe5dac8f491685c293` (`feat(control-room): add local read-only Stinky Weasel Control`) from the isolated MacBook worktree and pushed without force to `westkitty/DEX-REACH` `origin/main`. An independent `git ls-remote` confirmed that remote revision following the push. The original dirty canonical DEX-REACH checkout and separate DEX checkout remained untouched. The browser screenshots and verification notes remain locally under `output/playwright/` and are ignored by Git to avoid exposing live task IDs.
 
 The earlier C13 E8 browser and focused test evidence remains recorded above. A later broader validation rerun reached the remote 60-second request timeout without a result, so it is not counted as a new PASS. The staged Git diff passed whitespace checks. Hosted CI for this push is not independently verified. This is source publication only: no immutable runtime installation, LaunchAgent change, connector refresh, or human acceptance occurred.
+
+## 24. C14 scheduler and durable admission source repair — 2026-10-10
+
+Authorized source continuation on `c14-chaos-recovery` from `b676d5561382074c401dbaef07f90837b7f9948c`,
+with existing capacity/coordinator/fairness WIP integrated. The
+[scheduler/admission engineering record](docs/c14-security/C14_SCHEDULER_ADMISSION_REPAIR.md)
+contains source behavior, synthetic integration scope, measurements and remaining limits. Draft PR
+[#16](https://github.com/westkitty/DEX-REACH/pull/16) remains the publication target; final local verification passed
+664/664 tests, 42 invariants, typecheck, build, audit at the unchanged high threshold (six moderate
+advisories), the 26-tool probe and whitespace checks. Exact-head hosted results remain pending
+publication/readback. No installed runtime or owner state was
+mutated. Read-only inspection observed 19 unresolved nonterminal tasks, unchanged by this campaign.
+C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 PROGRAM PARTIAL pending installed acceptance; C15 BLOCKED.

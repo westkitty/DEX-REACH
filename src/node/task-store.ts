@@ -440,7 +440,7 @@ export class NodeTaskStore implements TaskStore {
       record.updatedAtUtc = new Date().toISOString();
       return record;
     });
-    await this.event({ taskId: updated.taskId, kind: update.state ? 'transition' : 'updated', state: updated.state, ...(update.state ? { toState: updated.state } : {}), actorId: updated.actorId, nodeId: updated.nodeId, operation: updated.operation, attempt: updated.attemptNumber, summary: updated.summary.status, ...(updated.traceId ? { traceId: updated.traceId } : {}) });
+    await this.event({ taskId: updated.taskId, kind: update.state ? 'transition' : 'updated', state: updated.state, ...(update.state ? { toState: updated.state } : {}), actorId: updated.actorId, nodeId: updated.nodeId, operation: updated.operation, attempt: updated.attemptNumber, summary: updated.summary.status, ...(updated.resultRef ? { evidenceRef: updated.resultRef } : {}), ...(updated.failureClass ? { failureClass: updated.failureClass } : {}), ...(updated.traceId ? { traceId: updated.traceId } : {}) });
     return updated;
   }
 

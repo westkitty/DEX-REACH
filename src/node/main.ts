@@ -1,3 +1,6 @@
+import { boundedAdmissionMs, MAX_ADMISSION_MS } from '../shared/request-deadlines.js';
+import { acquireTaskAdmission } from './task-admission.js';
+import { persistTaskFailure } from './task-failure.js';
 import fs from 'node:fs/promises';
 import { withFileLock } from '../shared/state-io.js';
 import { requiredCapabilities, requestPaths } from '../shared/capabilities.js';
@@ -137,6 +140,10 @@ async function handleTaskControl(request: GatewayRequest): Promise<GatewayRespon
   if (['COMPLETED', 'FAILED', 'CANCELLED', 'RECONCILED'].includes(task.state)) return { type: 'response', id: request.id, ok: true, result: task };
   if (task.state === 'RUNNING' || task.state === 'AMBIGUOUS') throw new Error('CANCELLATION_UNPROVEN: execution may continue; task state preserved');
   const cancelled = await taskStore.transition(task.taskId, 'CANCELLED', 'Task cancelled before execution by its owning actor.', ['ACCEPTED', 'PREPARING']);
+  const coordinator = await coordinatedStatus();
+  for (const ticket of coordinator.tickets) {
+    if (ticket.taskId === task.taskId && ticket.attempt === task.attemptNumber) await coordinatedCancel(ticket.id);
+  }
   return { type: 'response', id: request.id, ok: true, result: cancelled };
 }
 
@@ -324,27 +331,6 @@ function coordinatorRequest(taskId: string, attempt: number, operation: string, 
   };
 }
 
-async function acquireTaskLease(taskId: string, attempt: number, operation: string, safety: SafetyClass): Promise<string> {
-  const request = coordinatorRequest(taskId, attempt, operation, safety);
-  const deadline = Date.now() + 60_000;
-  let ticketId: string | undefined;
-  let lastReason = 'coordinator admission is pending';
-  try {
-    for (;;) {
-      const admission = await coordinatedAcquire({ ...request, ...(ticketId ? { ticketId } : {}) });
-      if (admission.status === 'acquired') return admission.lease.id;
-      ticketId = admission.ticket.id;
-      lastReason = admission.reasons.join('; ') || `position ${admission.position}`;
-      await taskStore.update(taskId, { status: `WAITING_FOR_COORDINATOR: ${lastReason}` });
-      if (Date.now() >= deadline) throw new Error(`COORDINATOR_WAIT_TIMEOUT: ${lastReason}`);
-      await sleep(250);
-    }
-  } catch (error) {
-    if (ticketId) await coordinatedCancel(ticketId).catch(() => false);
-    throw error;
-  }
-}
-
 function startTaskHeartbeat(taskId: string, leaseId: string): NodeJS.Timeout {
   const timer = setInterval(() => {
     void (async () => {
@@ -423,14 +409,8 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = null;
     if (leaseId) await coordinatedRelease(leaseId).catch(() => undefined);
-    const failureClass = classifyFailure({ error, safety: taskSafety });
-    await taskStore.update(task.taskId, { failureClass, status: `Task stopped: ${failureClass}.` }).catch(() => undefined);
-    const current = await taskStore.read(task.taskId).catch(() => null);
-    if (current?.state === 'RUNNING' || current?.state === 'PREPARING') {
-      const next = failureClass === 'AMBIGUOUS_EFFECT' ? 'AMBIGUOUS' : 'FAILED';
-      await taskStore.transition(task.taskId, next, `Task stopped: ${failureClass}.`).catch(() => undefined);
-    }
-    publishTaskEvent(task.taskId, 'failed', failureClass === 'AMBIGUOUS_EFFECT' ? 'AMBIGUOUS' : 'FAILED', `Task stopped: ${failureClass}.`);
+    const failed = await persistTaskFailure(taskStore, task.taskId, taskSafety, error, true);
+    publishTaskEvent(task.taskId, failed.state === 'COMPLETED' ? 'completed' : 'failed', failed.state, 'Task outcome recorded; retrieve original task status.');
     const message = error instanceof Error ? error.message : String(error);
     const durationMs = Date.now() - started;
     const failSpan = childSpan(trace);
@@ -444,7 +424,7 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
   }
 }
 
-async function handleRequest(request: GatewayRequest, options: { defer?: boolean } = {}): Promise<GatewayResponse> {
+async function handleRequest(request: GatewayRequest, options: { defer?: boolean; admissionDeadline?: number } = {}): Promise<GatewayResponse> {
   if (request.task?.action === 'get' || request.task?.action === 'result' || request.task?.action === 'cancel' || request.task?.action === 'events') {
     try { return await handleTaskControl(request); }
     catch (error) { return { type: 'response', id: request.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
@@ -456,7 +436,7 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     const start = request.task;
     try {
       await fs.mkdir(path.join(stateDir(), 'tasks'), { recursive: true, mode: 0o700 });
-      return await withFileLock(path.join(stateDir(), 'tasks', 'admission.lock'), () => handleRequest({ ...request, operation: start.operation, args: start.args, task: undefined }, { defer: true }));
+      return await withFileLock(path.join(stateDir(), 'tasks', 'admission.lock'), () => handleRequest({ ...request, operation: start.operation, args: start.args, task: undefined }, { defer: true, admissionDeadline: options.admissionDeadline }));
     } catch { return { type: 'response', id: request.id, ok: false, error: 'DURABLE_ADMISSION_UNAVAILABLE: no handle was delivered; execution outcome may be uncertain; reconcile using the original idempotency key' }; }
   }
   const started = Date.now();
@@ -469,6 +449,7 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
   let leaseId: string | null = null;
   let heartbeatTimer: NodeJS.Timeout | null = null;
   let executionStarted = false;
+  let continuationStarted = false;
   let reservation: Awaited<ReturnType<typeof reserveOperation>> | undefined;
   // Continue the caller's trace when it supplied a valid W3C context, otherwise start one here.
   // A malformed inbound header never fails the request and never propagates.
@@ -481,6 +462,46 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     stage: 'node', at: new Date().toISOString(), operation: request.operation,
     nodeId: config.nodeId, actorKind: actor?.kind
   });
+  async function failRequest(error: unknown): Promise<GatewayResponse> {
+    const message = error instanceof Error ? error.message : String(error);
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+    if (leaseId) {
+      await coordinatedRelease(leaseId).catch(() => undefined);
+      leaseId = null;
+    }
+    if (taskId && taskSafety) {
+      try { await persistTaskFailure(taskStore, taskId, taskSafety, error, executionStarted); }
+      catch { return { type: 'response', id: request.id, ok: false, error: 'TASK_EVIDENCE_PERSISTENCE_UNAVAILABLE: outcome unresolved; reconcile original task identity', traceId: trace.traceId }; }
+    }
+    const durationMs = Date.now() - started;
+    const failSpan = childSpan(trace);
+    enqueueSpan({
+      traceId: failSpan.traceId, spanId: failSpan.spanId, parentSpanId: failSpan.parentSpanId,
+      stage: 'execute', at: new Date().toISOString(), operation: request.operation,
+      nodeId: config.nodeId, actorKind: actor?.kind, ok: false, durationMs,
+      // Refusal classification only. The refusal message can quote a path or a command, so it is
+      // deliberately not traced; the audit log already holds the redacted detail.
+      outcome: 'refused'
+    });
+    await audit.append({
+      at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor,
+      operation: request.operation, ok: false, durationMs, args: request.args, error: message
+    });
+    const receipt = await appendReceipt({
+      nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: false,
+      error: message, durationMs, policy: policy ?? { unavailable: true }, checkpointId: receiptCheckpoint
+    }).catch(() => null);
+    if (receipt) {
+      const receiptSpan = childSpan(failSpan);
+      enqueueSpan({
+        traceId: receiptSpan.traceId, spanId: receiptSpan.spanId, parentSpanId: receiptSpan.parentSpanId,
+        stage: 'receipt', at: new Date().toISOString(), operation: request.operation,
+        nodeId: config.nodeId, actorKind: actor?.kind, ok: false, receiptId: receipt.receiptId
+      });
+    }
+    return { type: 'response', id: request.id, ok: false, error: taskId ? `${message}; task ${taskId}` : message, traceId: trace.traceId };
+  }
   try {
     // Preauthorize against current owner state without consuming rolling budget or grant uses. This
     // lets a duplicate idempotent request attach to its existing task without charging a new slot.
@@ -524,11 +545,10 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     if (duplicate.kind === 'REFUSE_IN_FLIGHT') {
       return { type: 'response', id: request.id, ok: false, error: `task ${duplicate.task.taskId} is already ${duplicate.task.state}; attach to the existing task`, traceId: trace.traceId };
     }
-    // The final authorization reservation happens immediately before execution and is serialized with
-    // owner policy updates. OFF therefore wins over stale remote state instead of being overwritten.
-    reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args, { expectedPolicyHash: policyHash });
-    budgetReservationId = reservation.budgetReservationId;
-    policy = reservation.policy;
+    // Queue acceptance consumes no budget or grant use. The final reservation is serialized
+    // with owner policy updates after capacity admission, immediately before RUNNING.
+    reservation = preauthorization;
+    policy = preauthorization.policy;
     const authorizeSpan = childSpan(trace);
     enqueueSpan({
       traceId: authorizeSpan.traceId, spanId: authorizeSpan.spanId, parentSpanId: authorizeSpan.parentSpanId,
@@ -547,73 +567,44 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     });
     taskId = task.taskId;
     await taskStore.transition(taskId, 'PREPARING', 'Task admitted on the selected node.');
-    leaseId = await acquireTaskLease(taskId, task.attemptNumber, request.operation, taskSafety);
-    await taskStore.transition(taskId, 'RUNNING', `Task execution started with coordinator lease ${leaseId}.`);
-    heartbeatTimer = startTaskHeartbeat(taskId, leaseId);
-    const execution: AdmittedTaskExecution = {
-      request, actor, trace, started, policy, budgetReservationId, task,
-      taskSafety, leaseId, heartbeatTimer, effectiveProfile: reservation.decision.effectiveProfile, authorizeSpan
+    const runExecution = async (): Promise<GatewayResponse> => {
+      leaseId = await acquireTaskAdmission(coordinatorRequest(taskId!, task.attemptNumber, request.operation, taskSafety!),
+        async status => {
+          if ((await taskStore.read(taskId!))?.state !== 'PREPARING') throw new Error('COORDINATOR_TASK_CANCELLED: task no longer waiting');
+          await taskStore.update(taskId!, { status });
+        },
+        options.defer ? performance.now() + MAX_ADMISSION_MS : options.admissionDeadline ?? performance.now() + MAX_ADMISSION_MS);
+      // Waiting grants neither authority nor exemption from owner changes. Recheck before RUNNING.
+      reservation = await reserveOperation(config.nodeId, actor, request.operation, config.profile, request.args,
+        { expectedPolicyHash: task.policyHash });
+      budgetReservationId = reservation.budgetReservationId;
+      policy = reservation.policy;
+      await taskStore.transition(taskId!, 'RUNNING', 'Task execution started with a coordinator lease.', ['PREPARING']);
+      heartbeatTimer = startTaskHeartbeat(taskId!, leaseId);
+      const execution: AdmittedTaskExecution = {
+        request, actor, trace, started, policy, budgetReservationId, task,
+        taskSafety: taskSafety!, leaseId, heartbeatTimer, effectiveProfile: reservation!.decision.effectiveProfile, authorizeSpan
+      };
+      executionStarted = true;
+      return executeAdmittedTask(execution);
     };
-    executionStarted = true;
     if (options.defer) {
-      publishTaskEvent(task.taskId, 'accepted', 'RUNNING', 'Durable task accepted and execution continues asynchronously.');
-      // Already admitted: the continuation is drained by a checkpoint, never refused.
-      void processCheckpoint().track(() => executeAdmittedTask(execution));
-      return { type: 'response', id: request.id, ok: true, result: { taskId: task.taskId, nodeId: config.nodeId, operation: request.operation, state: 'RUNNING', durable: true }, traceId: trace.traceId };
-    }
-    return executeAdmittedTask(execution);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (heartbeatTimer) clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
-    if (leaseId) {
-      await coordinatedRelease(leaseId).catch(() => undefined);
-      leaseId = null;
-    }
-    if (taskId && taskSafety) {
-      // Execution only begins after a durable RUNNING transition. A failure before it (for example a
-      // coordinator wait timeout) is a definite non-execution, not an ambiguous effect.
-      const before = await taskStore.read(taskId).catch(() => null);
-      const unstarted = before ? unstartedFailureOutcome({ error, safety: taskSafety, persistedState: before.state, executionStarted }) : null;
-      const failureClass = unstarted?.failureClass ?? classifyFailure({ error, safety: taskSafety });
-      await taskStore.update(taskId, { failureClass, status: `Task stopped: ${failureClass}.` }).catch(() => undefined);
-      const current = await taskStore.read(taskId).catch(() => null);
-      if (unstarted) {
-        if (unstarted.next && current?.state === 'PREPARING') await taskStore.transition(taskId, unstarted.next, `Task stopped before execution: ${failureClass}.`, ['PREPARING']).catch(() => undefined);
-      } else if (current?.state === 'RUNNING' || current?.state === 'PREPARING') {
-        const next = failureClass === 'AMBIGUOUS_EFFECT' ? 'AMBIGUOUS' : 'FAILED';
-        await taskStore.transition(taskId, next, `Task stopped: ${failureClass}.`).catch(() => undefined);
-      }
-    }
-    const durationMs = Date.now() - started;
-    const failSpan = childSpan(trace);
-    enqueueSpan({
-      traceId: failSpan.traceId, spanId: failSpan.spanId, parentSpanId: failSpan.parentSpanId,
-      stage: 'execute', at: new Date().toISOString(), operation: request.operation,
-      nodeId: config.nodeId, actorKind: actor?.kind, ok: false, durationMs,
-      // Refusal classification only. The refusal message can quote a path or a command, so it is
-      // deliberately not traced; the audit log already holds the redacted detail.
-      outcome: 'refused'
-    });
-    await audit.append({
-      at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor,
-      operation: request.operation, ok: false, durationMs, args: request.args, error: message
-    });
-    const receipt = await appendReceipt({
-      nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: false,
-      error: message, durationMs, policy: policy ?? { unavailable: true }, checkpointId: receiptCheckpoint
-    }).catch(() => null);
-    if (receipt) {
-      const receiptSpan = childSpan(failSpan);
-      enqueueSpan({
-        traceId: receiptSpan.traceId, spanId: receiptSpan.spanId, parentSpanId: receiptSpan.parentSpanId,
-        stage: 'receipt', at: new Date().toISOString(), operation: request.operation,
-        nodeId: config.nodeId, actorKind: actor?.kind, ok: false, receiptId: receipt.receiptId
+      // Snapshot/event persistence is complete. Queue waiting belongs to this accepted task,
+      // not the transport response. Losing this acknowledgement never authorizes replay.
+      continuationStarted = true;
+      const continuation = processCheckpoint().track(async () => {
+        try { return await runExecution(); }
+        catch (error) { return await failRequest(error); }
+        finally { if (!executionStarted) await releaseBudgetConcurrency(config.nodeId, budgetReservationId).catch(() => undefined); }
       });
+      void continuation.catch(() => console.error('TASK_CONTINUATION_UNRESOLVED: inspect original durable task'));
+      return { type: 'response', id: request.id, ok: true, result: { taskId: task.taskId, nodeId: config.nodeId, operation: request.operation, state: 'PREPARING', durable: true }, traceId: trace.traceId };
     }
-    return { type: 'response', id: request.id, ok: false, error: message, traceId: trace.traceId };
+    return await runExecution();
+  } catch (error) {
+    return failRequest(error);
   } finally {
-    if (!executionStarted) await releaseBudgetConcurrency(config.nodeId, budgetReservationId).catch(() => undefined);
+    if (!executionStarted && !continuationStarted) await releaseBudgetConcurrency(config.nodeId, budgetReservationId).catch(() => undefined);
   }
 }
 
@@ -710,7 +701,8 @@ async function connect(): Promise<void> {
     if ((parsed as { type?: string }).type !== 'request') return;
     negotiation.request();
     try {
-      const response = await processCheckpoint().admit(() => handleRequest(parsed as GatewayRequest));
+      const admissionDeadline = performance.now() + boundedAdmissionMs((parsed as GatewayRequest).admissionBudgetMs);
+      const response = await processCheckpoint().admit(() => handleRequest(parsed as GatewayRequest, { admissionDeadline }));
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(response));
     } catch (error) {
       if (error instanceof CheckpointAdmissionClosedError) {

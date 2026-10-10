@@ -161,6 +161,8 @@ export type GatewayRequest = {
   tracestate?: string;
   /** Internal lifecycle control. It is not part of the compatibility-adapter tool surface. */
   task?: DurableTaskRequest;
+  /** Remaining admission duration only; never an execution cancellation deadline. */
+  admissionBudgetMs?: number;
 };
 
 export type DurableTaskRequest =
