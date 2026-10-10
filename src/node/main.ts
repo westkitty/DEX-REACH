@@ -13,11 +13,18 @@ import { collectNodeTrustReport } from './trust-report.js';
 import { AuditLog } from '../shared/audit.js';
 import {
   REACH_PROTOCOL_VERSION,
+  REACH_PROTOCOL_V1,
+  REACH_PROTOCOL_V2,
+  REACH_DURABLE_TASK_CAPABILITY,
   type AccessSnapshot,
   type GatewayRequest,
   type GatewayResponse,
   type NodeHello,
   type NodeStatus,
+  type ProtocolHelloAck,
+  type ReachCapability as ProtocolReachCapability,
+  type ReachProtocolVersion,
+  type TaskProgressEvent,
   type SchedulerSnapshot,
   type RequestActor,
   type ReachProfile
@@ -44,6 +51,7 @@ import { NodeTaskStore } from './task-store.js';
 import { classifyFailure, classifyOperationSafety, defaultAttemptBudget, decideExistingTask, deriveIdempotencyKey, type SafetyClass } from '../shared/durable-execution.js';
 import { reconcileBootTasks } from './boot-recovery.js';
 import type { ProcessExecutionContext } from '../shared/activity.js';
+import { durableCapabilityRefusal } from '../shared/protocol-negotiation.js';
 
 loadLocalSecrets();
 const config = loadNodeConfig();
@@ -55,6 +63,10 @@ const audit = new AuditLog();
 let stopped = false;
 let reconnectMs = 1000;
 let activeSocket: WebSocket | null = null;
+// A v2 node remains usable through a historical v1 gateway for synchronous calls. Durable requests
+// stay refused until the gateway explicitly admits v2 in the hello acknowledgement.
+let negotiatedProtocol: ReachProtocolVersion = REACH_PROTOCOL_V1;
+let negotiatedCapabilities: ProtocolReachCapability[] = [];
 /**
  * Which credential to present next. A node can hold both a transport key and an enrollment token,
  * and only the gateway knows which one its record currently accepts.
@@ -86,9 +98,18 @@ function actorIdFor(actor: RequestActor | undefined): string {
   return `actor_${hashValue(actor ? { kind: actor.kind, clientId: actor.clientId } : { kind: 'unknown' }).slice(0, 24)}`;
 }
 
+function publishTaskEvent(taskId: string, kind: TaskProgressEvent['kind'], state: string, summary: string): void {
+  if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) return;
+  const event: TaskProgressEvent = { type: 'task_event', taskId, kind, state, summary: summary.replace(/[\r\n]+/g, ' ').slice(0, 240), at: new Date().toISOString() };
+  activeSocket.send(JSON.stringify(event));
+}
+
 async function handleTaskControl(request: GatewayRequest): Promise<GatewayResponse> {
   const control = request.task;
   if (!control || control.action === 'start') throw new Error('invalid task control');
+  if (negotiatedProtocol !== REACH_PROTOCOL_V2 || !negotiatedCapabilities.includes(REACH_DURABLE_TASK_CAPABILITY)) {
+    throw durableCapabilityRefusal(config.nodeId, { version: negotiatedProtocol, capabilities: negotiatedCapabilities });
+  }
   const access = await currentAccess();
   if (access.effectiveMode === 'off') throw new Error('NODE OWNER has disabled remote AI task controls; request refused locally');
   const task = await taskStore.read(control.taskId);
@@ -366,6 +387,7 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
     const stored = await results.boundWithReference(value, task.taskId);
     await taskStore.update(task.taskId, { resultRef: stored.metadata.handle, resultHash: stored.metadata.resultHash });
     await taskStore.transition(task.taskId, 'COMPLETED', 'Task completed with a persisted result reference.');
+    publishTaskEvent(task.taskId, 'completed', 'COMPLETED', 'Task completed with a persisted result reference.');
     const durationMs = Date.now() - started;
     const executeSpan = childSpan(authorizeSpan);
     enqueueSpan({
@@ -393,6 +415,7 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
       const next = failureClass === 'AMBIGUOUS_EFFECT' ? 'AMBIGUOUS' : 'FAILED';
       await taskStore.transition(task.taskId, next, `Task stopped: ${failureClass}.`).catch(() => undefined);
     }
+    publishTaskEvent(task.taskId, 'failed', failureClass === 'AMBIGUOUS_EFFECT' ? 'AMBIGUOUS' : 'FAILED', `Task stopped: ${failureClass}.`);
     const message = error instanceof Error ? error.message : String(error);
     const durationMs = Date.now() - started;
     const failSpan = childSpan(trace);
@@ -412,6 +435,9 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     catch (error) { return { type: 'response', id: request.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
   }
   if (request.task?.action === 'start') {
+    if (negotiatedProtocol !== REACH_PROTOCOL_V2 || !negotiatedCapabilities.includes(REACH_DURABLE_TASK_CAPABILITY)) {
+      return { type: 'response', id: request.id, ok: false, error: durableCapabilityRefusal(config.nodeId, { version: negotiatedProtocol, capabilities: negotiatedCapabilities }).message };
+    }
     return handleRequest({ ...request, operation: request.task.operation, args: request.task.args, task: undefined }, { defer: true });
   }
   const started = Date.now();
@@ -506,6 +532,7 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     };
     executionStarted = true;
     if (options.defer) {
+      publishTaskEvent(task.taskId, 'accepted', 'RUNNING', 'Durable task accepted and execution continues asynchronously.');
       void executeAdmittedTask(execution);
       return { type: 'response', id: request.id, ok: true, result: { taskId: task.taskId, nodeId: config.nodeId, operation: request.operation, state: 'RUNNING', durable: true }, traceId: trace.traceId };
     }
@@ -609,17 +636,21 @@ async function connect(): Promise<void> {
     reconnectMs = 1000;
     lastAliveAt = Date.now();
     activeSocket = ws;
+    negotiatedProtocol = REACH_PROTOCOL_V1;
+    negotiatedCapabilities = [];
     lastStatusJson = '';
     const hello: NodeHello = {
       type: 'hello',
       protocolVersion: REACH_PROTOCOL_VERSION,
+      protocolVersionSemantic: REACH_PROTOCOL_V2,
+      supportedProtocols: [REACH_PROTOCOL_V2, REACH_PROTOCOL_V1],
       nodeId: config.nodeId,
       profile: config.profile,
       fingerprint: await executionFingerprint(config.nodeId),
       tools: backend.listTools(),
       allowedRoots: config.allowedRoots,
       agentVersion: DEX_REACH_VERSION,
-      capabilities: { durable_tasks: true, task_event_stream: false },
+      capabilities: { durable_tasks: true, task_event_stream: true, task_reconciliation: true, two_phase_plan: true },
       access: await currentAccess(),
       scheduler: redactWorkStatusForShare(await coordinatedStatus()) as SchedulerSnapshot
     };
@@ -632,7 +663,14 @@ async function connect(): Promise<void> {
     lastAliveAt = Date.now();
     let parsed: unknown;
     try { parsed = JSON.parse(data.toString()); } catch { return; }
-    if (!parsed || typeof parsed !== 'object' || (parsed as { type?: string }).type !== 'request') return;
+    if (!parsed || typeof parsed !== 'object') return;
+    if ((parsed as { type?: string }).type === 'hello_ack') {
+      const ack = parsed as ProtocolHelloAck;
+      negotiatedProtocol = ack.protocolVersion;
+      negotiatedCapabilities = Array.isArray(ack.capabilities) ? ack.capabilities : [];
+      return;
+    }
+    if ((parsed as { type?: string }).type !== 'request') return;
     const response = await handleRequest(parsed as GatewayRequest);
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(response));
   });
@@ -651,6 +689,8 @@ async function connect(): Promise<void> {
   ws.on('close', () => {
     clearInterval(heartbeat);
     if (activeSocket === ws) activeSocket = null;
+    negotiatedProtocol = REACH_PROTOCOL_V1;
+    negotiatedCapabilities = [];
     void publishStatus().catch(() => undefined);
     if (stopped) return;
     const delay = reconnectMs;

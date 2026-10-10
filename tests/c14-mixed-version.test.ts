@@ -8,7 +8,8 @@ import { createReachMcpServer } from '../src/gateway/mcp.js';
 import { NodeAuthStore } from '../src/gateway/node-auth.js';
 import { NodeRegistry } from '../src/gateway/registry.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
-import { REACH_PROTOCOL_VERSION, type GatewayRequest, type NodeHello } from '../src/shared/protocol.js';
+import { REACH_PROTOCOL_V1, REACH_PROTOCOL_V2, REACH_PROTOCOL_VERSION, type GatewayRequest, type NodeHello } from '../src/shared/protocol.js';
+import { negotiateProtocol } from '../src/shared/protocol-negotiation.js';
 
 class FakeSocket extends EventEmitter {
   readyState: number = WebSocket.OPEN;
@@ -24,6 +25,7 @@ class FakeSocket extends EventEmitter {
 function hello(nodeId: string, capabilities?: NodeHello['capabilities']): NodeHello {
   return {
     type: 'hello', protocolVersion: REACH_PROTOCOL_VERSION, nodeId, profile: 'development',
+    ...(capabilities?.durable_tasks === true ? { protocolVersionSemantic: REACH_PROTOCOL_V2, supportedProtocols: [REACH_PROTOCOL_V2, REACH_PROTOCOL_V1] } : {}),
     fingerprint: { nodeId, hostname: nodeId, platform: 'fixture', arch: 'fixture', user: 'fixture', home: '/', cwd: '/', repositoryRoot: null, branch: null, remote: null, nodeVersion: 'v0', pythonVersion: null },
     tools: [], allowedRoots: ['/fixture'], agentVersion: DEX_REACH_VERSION,
     ...(capabilities === undefined ? {} : { capabilities }),
@@ -133,7 +135,11 @@ test('C14-F reconnect replaces stale capability authority and never crosses node
   }
 });
 
-test('C14-F current source has no ADR-defined Protocol v2 wire path', () => {
-  assert.equal(REACH_PROTOCOL_VERSION, 1);
-  assert.notEqual(REACH_PROTOCOL_VERSION, 2);
+test('C14-F semantic negotiation implements the ADR v1/v2 matrix without downgrade', () => {
+  const v1Node = hello('legacy');
+  const v2Node = hello('current', { durable_tasks: true, task_reconciliation: true, two_phase_plan: true });
+  assert.deepEqual(negotiateProtocol(v2Node), { version: REACH_PROTOCOL_V2, capabilities: ['durable_tasks', 'task_reconciliation', 'two_phase_plan'] });
+  assert.deepEqual(negotiateProtocol(v1Node), { version: REACH_PROTOCOL_V1, capabilities: [] });
+  assert.equal(negotiateProtocol(v2Node, { gatewayProtocols: [REACH_PROTOCOL_V1] }).version, REACH_PROTOCOL_V1, 'v1 gateway admits only legacy mode');
+  assert.throws(() => negotiateProtocol(v1Node, { gatewayProtocols: [REACH_PROTOCOL_V2] as const }), /INCOMPATIBLE_PROTOCOL_VERSION/);
 });

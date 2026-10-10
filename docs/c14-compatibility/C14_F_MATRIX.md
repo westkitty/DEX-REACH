@@ -2,15 +2,15 @@
 
 ## Verdict
 
-**C14-F: PASS at focused current-source compatibility scope; PARTIAL for the ADR-defined v1/v2 migration matrix.**
+**C14-F: PASS at source and isolated loopback-fixture scope; PARTIAL for installed mixed-version migration.**
 
-The current implementation is Protocol v1 with independently advertised node capabilities. It does not implement the ADR-0003 Protocol v2.0 handshake or a genuine v1/v2 dual-stack transport. The focused fixture therefore verifies the supported current contract and explicit refusal boundaries. It does not claim historical binary interoperability or installed mixed-version interoperability.
+The implementation keeps the integer v1 transport marker for historical authentication while adding semantic `1.0`/`2.0` offers, capability intersection, an explicit hello acknowledgement, and content-free task progress frames. It does not claim installed mixed-version interoperability or public connector migration.
 
 ## Actual protocol model
 
 `REACH_PROTOCOL_VERSION` is the integer `1`. The node hello carries optional capability metadata, including `durable_tasks`. The gateway admits only the exact current protocol version during the real node handshake and authenticates the same version in transport proofs. Durable routing is then decided from the selected node's current hello capability, with strict `=== true` handling.
 
-This differs from ADR-0003, which defines semantic major/minor versions `v1.0` and `v2.0`, capability headers/frames, capability intersection, and a six-month dual-stack window. The repository currently has no `2.0` wire constant, no `X-Reach-Protocol-Version: 2.0` negotiation, no v2 task-event stream, and no v2 gateway/node admission path. Changing the integer from 1 to 2 would not implement those requirements and was not done.
+ADR-0003's semantic versions are carried in hello frames rather than by changing the signed integer transport field. The gateway admits only the negotiated intersection; the node defaults to v1 compatibility until it receives a v2 acknowledgement. Durable requests therefore cannot silently fall back.
 
 ## Matrix classification
 
@@ -18,16 +18,16 @@ The fixtures below model current source behavior using synthetic node hello reco
 
 | Matrix | ADR expectation | Current observed behavior | Classification |
 | --- | --- | --- | --- |
-| A: gateway v2 / node v2 / durable | Full v2 durable handle | No v2 handshake or wire path exists. Current v1 task-capable path is tested separately. | UNSUPPORTED_BY_CURRENT_SOURCE |
-| B: gateway v2 / node v2 / synchronous | Supported `sync_legacy` | No v2 gateway/node pair exists. Current v1 synchronous dispatch remains supported. | UNSUPPORTED_BY_CURRENT_SOURCE; v1 equivalent IMPLEMENTED_AND_TESTED |
-| C: gateway v2 / node v1 / durable | Explicit capability refusal | Current capability-based gateway refuses durable work when the selected node lacks `durable_tasks`; no request or handle is created. A genuine v2/v1 binary pair was not exercised. | IMPLEMENTED_AND_TESTED at current v1 boundary; v2 pair UNSUPPORTED |
-| D: gateway v2 / node v1 / synchronous | Standard v1 synchronous execution | `mode=auto` performs the selected-node synchronous request and labels the result `synchronous-fallback`; no durable guarantee is emitted. | IMPLEMENTED_AND_TESTED at current v1 boundary |
-| E: gateway v1 / node v2 / synchronous | Node runs in v1 compatibility mode | Current gateway and node handshake share Protocol v1; no version-distinct v2 node can register. Current v1 synchronous path is tested. | UNSUPPORTED_BY_CURRENT_SOURCE; v1 equivalent IMPLEMENTED_AND_TESTED |
-| F: gateway v1 / node v2 / durable | Legacy gateway rejects at ingress | Current handshake and proof authentication reject a protocol version other than 1; no v2 request is routed. | IMPLEMENTED_AND_TESTED refusal at current boundary; v2 pair UNSUPPORTED |
+| A: gateway v2 / node v2 / durable | Full v2 durable handle | `2.0` is acknowledged with the intersected durable capabilities; durable routing returns the existing `rtsk_` handle path. | IMPLEMENTED_AND_TESTED |
+| B: gateway v2 / node v2 / synchronous | Supported `sync_legacy` | Shared v2 connection still accepts ordinary request/response dispatch without a durable envelope. | IMPLEMENTED_AND_TESTED |
+| C: gateway v2 / node v1 / durable | Explicit capability refusal | Negotiated `1.0` lacks durable admission; registry refuses before dispatch or handle creation. | IMPLEMENTED_AND_TESTED |
+| D: gateway v2 / node v1 / synchronous | Standard v1 synchronous execution | Legacy node remains routable synchronously; MCP `auto` fallback stays explicitly labelled. | IMPLEMENTED_AND_TESTED |
+| E: gateway v1 / node v2 / synchronous | Node runs in v1 compatibility mode | The v2 node advertises v1 compatibility and accepts the legacy synchronous path; the loopback fixture records `1.0` admission. | IMPLEMENTED_AND_TESTED |
+| F: gateway v1 / node v2 / durable | Legacy gateway rejects at ingress | Current v1-configured gateway refuses the durable envelope; the v2 node also refuses if a historical gateway forwards it without a v2 acknowledgement. | IMPLEMENTED_AND_TESTED |
 
 ## Focused behavior covered
 
-The new [C14-F matrix test](../../tests/c14-mixed-version.test.ts) proves:
+The [C14-F matrix test](../../tests/c14-mixed-version.test.ts) and [loopback fixture](../../tests/c14-protocol-v2-loopback.test.ts) prove:
 
 - a legacy-capability node receives an explicitly labeled synchronous fallback only in `mode=auto`;
 - `mode=durable` returns `CAPABILITY_UNSUPPORTED_ON_NODE` without dispatching, creating a task, or fabricating a handle;
@@ -35,7 +35,10 @@ The new [C14-F matrix test](../../tests/c14-mixed-version.test.ts) proves:
 - missing, empty, false, and malformed capability metadata fail closed;
 - reconnect/re-registration replaces stale capability authority;
 - a selected node's request is never sent to another registered node;
-- the current source remains Protocol v1 and has no ADR-defined v2 wire path.
+- semantic v2 capability intersection and explicit v1-only refusal;
+- isolated current-v2 and historical-v1 hello frames over IPv4 loopback with temporary synthetic state;
+- the v2 node remains synchronously compatible when the gateway admits only v1;
+- task progress frames are content-free and bounded at the node emission boundary.
 
 Existing MCP contract tests cover the 16 first-class actions plus `reach_task`, lifecycle action routing, result shape, and no-breaking-schema behavior. Existing routing tests cover unknown/offline/revoked nodes and no fallback. Existing transport-auth tests cover wrong protocol refusal, proof identity, replay, and revocation. Durable execution and C14-A/B/C tests cover task identity, actor/policy binding, result binding, ambiguity preservation, and no replay.
 
@@ -43,7 +46,7 @@ Existing MCP contract tests cover the 16 first-class actions plus `reach_task`, 
 
 No capability is inferred from a missing or malformed hello. No durable request is downgraded to synchronous behavior. The fallback is explicit, selected-node scoped, and carries `supported: false`; it is not a durable result. Durable lifecycle requests remain exact-node and task-identity bound. No cross-node task retrieval, cancellation, or result substitution path is introduced.
 
-The current supported envelope is therefore safe for capability-based Protocol v1 operation. A genuine v2 migration requires a separately coordinated change covering semantic version parsing, handshake headers/frames, capability intersection, gateway/node admission, task-event streaming, public endpoint compatibility, deployed runtime coordination, and migration-window policy. This packet does not implement or install that migration.
+The source envelope is dual-stack for node WebSocket transport. Public MCP endpoint versioning, six-month deprecation governance, installed migration, and external connector compatibility remain separate release gates.
 
 ## Evidence limits
 

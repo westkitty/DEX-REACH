@@ -106,12 +106,12 @@ See the [corrected confirmation report](c14-performance/c14-e-stress-confirmatio
 
 | Field | Evidence |
 | --- | --- |
-| Contract | Current source uses Protocol v1 (`REACH_PROTOCOL_VERSION=1`) plus independently advertised node capabilities. ADR-0003's semantic v2.0 wire negotiation is not implemented. |
-| Matrix fixture | [C14-F matrix test](../tests/c14-mixed-version.test.ts) uses synthetic hello records and in-memory MCP transport; it is explicitly not binary v1/v2 interoperability proof. |
-| Current supported behavior | Legacy capability absence, empty/false/malformed capability metadata, and stale capability replacement fail closed. `mode=auto` returns an explicitly labeled synchronous fallback; `mode=durable` refuses without dispatch or a fabricated task handle. Task-capable routing preserves exact node and actor identity. |
-| Refusal/routing | Existing protocol-auth tests reject wrong protocol versions. Mixed-node fixture proves one node's capability and socket never receive another node's selected request. |
-| Matrix status | Current v1 capability-based legacy/task-capable combinations: **IMPLEMENTED_AND_TESTED**. Genuine ADR-defined v2 gateway/node combinations: **UNSUPPORTED_BY_CURRENT_SOURCE**, documented without changing the wire constant. |
-| Validation | C14-F matrix 5/5 PASS; combined compatibility/durable/recovery/security set 46/46 PASS; typecheck, 42 invariants, build, and `git diff --check` PASS. Full suite and hosted CI remain UNKNOWN. |
-| Status | **PASS at focused current-source compatibility scope; PARTIAL for the ADR-defined v1/v2 migration matrix.** No installed mixed-version runtime, public connector refresh, live migration, credential/policy change, or production restart was performed. |
+| Contract | ADR-0003 semantic `1.0`/`2.0` negotiation is implemented additively. Legacy `protocolVersion: 1` remains unchanged for transport-auth and historical hello compatibility. |
+| Matrix fixtures | [C14-F matrix test](../tests/c14-mixed-version.test.ts) covers negotiation/refusal semantics; [loopback fixture](../tests/c14-protocol-v2-loopback.test.ts) uses isolated IPv4 WebSocket connections, synthetic bearer credentials, and temporary state. |
+| v2 path | Current v2 gateway and node negotiate `2.0`, intersect `durable_tasks`, `task_event_stream`, `task_reconciliation`, and `two_phase_plan`, and admit durable execution. The node emits bounded content-free accepted/completed/failed task frames. |
+| Legacy path | Historical v1 hello omission negotiates `1.0`; v2 nodes remain synchronous-compatible through a v1 gateway. Durable requests are refused explicitly at the current gateway boundary, and the node independently refuses durable envelopes when no v2 acknowledgement was received. |
+| Matrix status | A-F source fixtures: **IMPLEMENTED_AND_TESTED**. No silent downgrade, phantom handle, node fallback, identity widening, or policy bypass is introduced. |
+| Validation | Full repository run 387/387 PASS; focused loopback/matrix tests 7/7 PASS; typecheck, 42 invariants, build, audit threshold, and `git diff --check` PASS. Hosted CI requires a fresh exact-head result. |
+| Status | **PASS at source and isolated loopback-fixture scope; PARTIAL for installed mixed-version migration and external connector/runtime acceptance.** No installed runtime, public connector refresh, live migration, credential/policy change, or production restart was performed. |
 
 See the [C14-F matrix report](c14-compatibility/C14_F_MATRIX.md). C13 remains NOT PASS, E7 remains BLOCKED — HOST CAPABILITY, and C14 overall remains incomplete.

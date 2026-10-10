@@ -30,9 +30,9 @@ and the durable [closure campaign record](C14_EVIDENCE_CLOSURE_CAMPAIGN.md).
 
 ## C14-F2 — protocol compatibility closure
 
-- Status: PASS at current-source compatibility scope; PARTIAL for genuine ADR v1/v2 interoperability.
-- Evidence: `docs/c14-compatibility/C14_F_MATRIX.md`, `tests/c14-mixed-version.test.ts`, 5/5 matrix tests and combined 46/46 compatibility-adjacent tests.
-- No Protocol v2 constant or production path was invented. Genuine v2 combinations remain explicitly unsupported.
+- Status: PASS at source scope for the ADR-defined dual-stack fixture; installed mixed-version migration remains unverified.
+- Evidence: `docs/c14-compatibility/C14_F_MATRIX.md`, `tests/c14-mixed-version.test.ts`, `tests/c14-protocol-v2-loopback.test.ts`, and the 387-test repository run.
+- Semantic `1.0`/`2.0` negotiation, explicit capability intersection, hello acknowledgement, content-free task progress frames, and no-downgrade durable refusal are implemented. The legacy integer transport-auth field remains `1` for backward compatibility.
 
 ## C14-H — isolated chaos matrix
 
@@ -64,7 +64,7 @@ C14-K fresh source validation and acceptance matrix. Do not install, deploy, mer
 - Evidence: `docs/c14-acceptance/C14_K_SOURCE_ACCEPTANCE.md`.
 - Comprehensive validation: 385/385 tests, typecheck, 42 invariants, build, backend probe, dependency audit threshold, and diff check passed. Audit still reports six moderate advisories; no fix was applied.
 - Protected state: installed runtime, owner state, credentials, main, PR #15, connector, and physical systems unchanged.
-- Remaining unknowns: physical/installed chaos, DEX ecosystem conformance, dashboard/installed observability, independent second evaluator, and genuine ADR-0003 v2 interoperability. Hosted CI is recorded for the prior source-equivalent head `7161f95`; the final delta is documentation-only and will receive a fresh exact-head check.
+- Remaining unknowns: physical/installed chaos, DEX ecosystem conformance, dashboard/installed observability, independent second evaluator, and installed mixed-version migration. Hosted CI for this implementation still requires a fresh exact-head result.
 
 ## Campaign closure boundary
 

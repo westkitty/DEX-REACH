@@ -10,11 +10,11 @@ public connector, DEX ecosystem conformance, hosted CI, or human acceptance.
 is type-safe, buildable, invariant-clean, reproducible from a fresh dependency
 install, and the comprehensive suite passed 385/385 tests.
 
-**C14 program acceptance: NOT COMPLETE (PARTIAL).** The master-plan source was
-not available for independent nine-category reconciliation, several physical or
-ecosystem gates remain unverified, and ADR-0003 Protocol v2 migration is not
-implemented by the current Protocol v1 source. The canonical master-plan DOCX
-is now recovered and hash-verified, but it was not copied into this repository.
+**C14 program acceptance: NOT COMPLETE (PARTIAL).** Several physical or
+ecosystem gates remain unverified, and installed mixed-version migration has not
+been performed. ADR-0003 Protocol v2 source implementation is covered by the
+isolated loopback fixtures; the canonical master-plan DOCX remains outside this
+repository.
 
 ## Nine-category matrix
 
@@ -27,12 +27,12 @@ is now recovered and hash-verified, but it was not copied into this repository.
 | 5. Performance baseline and matched measurement | C14-D baseline/matched repeat and C14-J reconciliation with uncertainty retained | PASS for source benchmark evidence | Installed idle CPU/memory and dashboard delta refresh were not measured |
 | 6. Bounded long-session and resource lifecycle | Corrected C14-E isolated sustained confirmation: 661.1 s, 3,611 cycles, concurrency 2, zero failures, cleanup verified | PASS at source-only scope | Historical pre-repair C14-E remains PARTIAL; no installed runtime claim |
 | 7. Security, privacy, and trust boundaries | C14-I matrix plus access, secrets, receipts, traces, policy, coordinator and control-room regressions | PASS at current REACH source scope | PAIR PRIVATE/SEALED, DROPZONE, WITNESS runtime conformance is UNVERIFIED |
-| 8. Mixed-version compatibility and migration | C14-F2 5/5 matrix tests; current Protocol v1 capability contract and explicit legacy refusal/fallback | PASS for current source contract; PARTIAL for ADR v1/v2 migration | Genuine ADR-defined Protocol v2 wire interoperability is unsupported and needs a release decision |
+| 8. Mixed-version compatibility and migration | Semantic v1.0/v2.0 negotiation, capability intersection, progress frames, and isolated IPv4 loopback A-F fixtures | PASS at source/fixture scope; PARTIAL for installed migration | Public connector compatibility, installed rollout, and external consumer proof remain open |
 | 9. Cold-start, reconstructability, and observability | C14-G fresh `npm ci`, typecheck, build, 42 invariants, 10/10 focused tests, 160-artifact clean-build; C14-J gap record; recovered-plan traceability | PASS for source reconstruction; PARTIAL for independent evaluation | Second blind evaluator, installed revision display, and some observability proof unavailable |
 
 ## Final validation record
 
-- `npm test`: **385/385 PASS**, 0 failed, 0 skipped, 145.4 seconds.
+- `npm test`: **387/387 PASS**, 0 failed, 0 skipped, 146.1 seconds.
 - `npm run typecheck`: PASS.
 - `npm run invariants -- --check`: PASS, 42 release-blocking invariants.
 - `npm run build`: PASS.

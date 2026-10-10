@@ -1,5 +1,17 @@
 export const REACH_PROTOCOL_VERSION = 1;
+export const REACH_PROTOCOL_V1 = '1.0' as const;
+export const REACH_PROTOCOL_V2 = '2.0' as const;
 export const REACH_DURABLE_TASK_CAPABILITY = 'durable_tasks' as const;
+export const REACH_TASK_EVENT_STREAM_CAPABILITY = 'task_event_stream' as const;
+export const REACH_TASK_RECONCILIATION_CAPABILITY = 'task_reconciliation' as const;
+export const REACH_TWO_PHASE_PLAN_CAPABILITY = 'two_phase_plan' as const;
+
+export type ReachProtocolVersion = typeof REACH_PROTOCOL_V1 | typeof REACH_PROTOCOL_V2;
+export type ReachCapability =
+  | typeof REACH_DURABLE_TASK_CAPABILITY
+  | typeof REACH_TASK_EVENT_STREAM_CAPABILITY
+  | typeof REACH_TASK_RECONCILIATION_CAPABILITY
+  | typeof REACH_TWO_PHASE_PLAN_CAPABILITY;
 
 export type ReachProfile =
   | 'read-only'
@@ -98,6 +110,10 @@ export type SchedulerSnapshot = {
 export type NodeHello = {
   type: 'hello';
   protocolVersion: number;
+  /** Additive semantic version marker. The integer above remains for v1 transport-auth compatibility. */
+  protocolVersionSemantic?: ReachProtocolVersion;
+  /** Ordered by preference; omission is the historical v1 hello shape. */
+  supportedProtocols?: ReachProtocolVersion[];
   nodeId: string;
   profile: ReachProfile;
   fingerprint: ExecutionFingerprint;
@@ -108,6 +124,8 @@ export type NodeHello = {
   capabilities?: {
     durable_tasks?: boolean;
     task_event_stream?: boolean;
+    task_reconciliation?: boolean;
+    two_phase_plan?: boolean;
   };
   access?: AccessSnapshot;
   scheduler?: SchedulerSnapshot;
@@ -115,6 +133,22 @@ export type NodeHello = {
 
 /** Pushed by a node whenever its local access policy changes. */
 export type NodeStatus = { type: 'status'; access: AccessSnapshot; scheduler?: SchedulerSnapshot };
+
+export type ProtocolHelloAck = {
+  type: 'hello_ack';
+  protocolVersion: ReachProtocolVersion;
+  capabilities: ReachCapability[];
+};
+
+/** Content-free asynchronous progress frame; task payloads and results never cross this frame. */
+export type TaskProgressEvent = {
+  type: 'task_event';
+  taskId: string;
+  kind: 'accepted' | 'progress' | 'completed' | 'failed';
+  state: string;
+  summary: string;
+  at: string;
+};
 
 export type GatewayRequest = {
   type: 'request';
@@ -144,4 +178,4 @@ export type GatewayResponse = {
 };
 
 export type Heartbeat = { type: 'heartbeat'; at: number };
-export type WireMessage = NodeHello | NodeStatus | GatewayRequest | GatewayResponse | Heartbeat;
+export type WireMessage = NodeHello | ProtocolHelloAck | TaskProgressEvent | NodeStatus | GatewayRequest | GatewayResponse | Heartbeat;

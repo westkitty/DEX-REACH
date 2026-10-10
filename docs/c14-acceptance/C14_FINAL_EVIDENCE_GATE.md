@@ -18,7 +18,7 @@ also executed the exact head.
 | Long-session lifecycle | 661.1-second corrected isolated confirmation, 3,611 cycles, zero failures, cleanup | Full suite PASS | No installed long-session run | Search/provenance product growth unverified | PASS source-only; historical pre-repair partial retained |
 | Security | 42 invariants and security/access/budget/replay/revocation tests | PASS + CodeQL PASS | Installed policy proof is historical, not this candidate | Cross-product trust runtime unverified | PASS current REACH source scope |
 | Privacy | Secret, trace, receipt, share projection and control-room tests | PASS | Installed UI acceptance not rerun | PAIR/DROPZONE/WITNESS integrated proof absent | PASS REACH source scope; ecosystem partial |
-| Mixed-version migration | C14-F2 current Protocol v1 capability matrix and explicit legacy refusal | PASS | No installed mixed-version migration | DEX registry expects versioned contract | PARTIAL: genuine ADR-0003 v2 dual-stack not implemented |
+| Mixed-version migration | Semantic v1.0/v2.0 negotiation, capability intersection, progress frames, and isolated IPv4 loopback A-F fixtures | PASS at source/fixture scope | No installed mixed-version migration | Public/external consumer compatibility remains unverified | PARTIAL: installed migration and connector acceptance remain open |
 | Cold-start/reconstructability | Fresh detached install, 160-artifact clean build, exact master-plan recovery | Reproducible-build PASS | Installed/source distinction preserved | DEX source separately inspected | PASS reconstruction; independent evaluator unverified |
 | Failure prevention and closure | Demonstrated defects have regression fixtures; focused and full suite green | Validate PASS | No physical failure injection | DEX negative fixtures exist, no REACH consumer | PASS for recorded source defects; future defects still require fixtures |
 
@@ -34,7 +34,7 @@ human/connector acceptance. C15 therefore remains blocked.
 
 ## Final checks
 
-- Full suite: 385/385 PASS, 0 failed, 0 skipped.
+- Full suite: 387/387 PASS, 0 failed, 0 skipped.
 - Typecheck: PASS.
 - Invariants: 42/42 PASS.
 - Build: PASS.

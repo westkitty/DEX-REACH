@@ -2,8 +2,9 @@ import crypto from 'node:crypto';
 import type { Server } from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
 import { parseNodeAuthorization, type NodeAuthStore } from './node-auth.js';
-import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type DurableTaskRequest, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor, type SchedulerSnapshot } from '../shared/protocol.js';
+import { REACH_PROTOCOL_VERSION, REACH_DURABLE_TASK_CAPABILITY, type AccessSnapshot, type DurableTaskRequest, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor, type SchedulerSnapshot, type ProtocolHelloAck, type ReachCapability, type ReachProtocolVersion, type TaskProgressEvent } from '../shared/protocol.js';
 import { addRevokedNode, loadRevokedNodes } from '../shared/revoked-nodes.js';
+import { durableCapabilityRefusal, negotiateProtocol, supportsNegotiatedCapability, type NegotiatedProtocol } from '../shared/protocol-negotiation.js';
 
 export type NodeRecord = {
   hello: NodeHello;
@@ -13,6 +14,12 @@ export type NodeRecord = {
   /** Latest node-reported local access policy (display only; the node enforces it). */
   access: AccessSnapshot | null;
   scheduler: SchedulerSnapshot | null;
+  negotiated: NegotiatedProtocol;
+};
+
+export type NodeRegistryOptions = {
+  supportedProtocols?: readonly ReachProtocolVersion[];
+  capabilities?: readonly ReachCapability[];
 };
 
 export type NodeRequestResult = {
@@ -33,7 +40,7 @@ export class NodeRegistry {
   private readonly revoked = new Set<string>();
   private sweepTimer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly nodeAuth: NodeAuthStore, private readonly stateDir: string) {}
+  constructor(private readonly nodeAuth: NodeAuthStore, private readonly stateDir: string, private readonly options: NodeRegistryOptions = {}) {}
 
   async initialize(): Promise<void> {
     for (const nodeId of await loadRevokedNodes(this.stateDir)) this.revoked.add(nodeId);
@@ -100,6 +107,8 @@ export class NodeRegistry {
       aiAccess: record.access ? { mode: record.access.effectiveMode, until: record.access.until, clients: record.access.clients } : 'unknown',
       scheduler: record.scheduler,
       capabilities: record.hello.capabilities ?? {},
+      negotiatedProtocol: record.negotiated.version,
+      admittedCapabilities: record.negotiated.capabilities,
       toolCount: record.hello.tools.length,
       agentVersion: record.hello.agentVersion,
       connectedAt: new Date(record.connectedAt).toISOString(),
@@ -130,6 +139,9 @@ export class NodeRegistry {
     task?: DurableTaskRequest
   ): Promise<NodeRequestResult> {
     const record = this.requireNode(nodeId);
+    if (task && !supportsNegotiatedCapability(record.negotiated, REACH_DURABLE_TASK_CAPABILITY)) {
+      throw durableCapabilityRefusal(nodeId, record.negotiated);
+    }
     const id = crypto.randomUUID();
     const request: GatewayRequest = {
       type: 'request',
@@ -159,7 +171,7 @@ export class NodeRegistry {
 
   supportsDurableTasks(nodeId: string): boolean {
     const record = this.requireNode(nodeId);
-    return record.hello.capabilities?.durable_tasks === true;
+    return supportsNegotiatedCapability(record.negotiated, REACH_DURABLE_TASK_CAPABILITY);
   }
 
   async revoke(nodeId: string): Promise<boolean> {
@@ -197,7 +209,8 @@ export class NodeRegistry {
 
   /** Test seam: register an already-authenticated socket-like object as a node. */
   registerForTest(hello: NodeHello, socket: WebSocket): void {
-    this.nodes.set(hello.nodeId, { hello, socket, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null });
+    const negotiated = negotiateProtocol(hello, { gatewayProtocols: this.options.supportedProtocols, gatewayCapabilities: this.options.capabilities });
+    this.nodes.set(hello.nodeId, { hello, socket, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null, negotiated });
   }
 
   /** Test seam: deliver a node response as if it arrived on the socket. */
@@ -221,15 +234,24 @@ export class NodeRegistry {
         if (hello.nodeId !== expectedNodeId || hello.protocolVersion !== REACH_PROTOCOL_VERSION || this.revoked.has(hello.nodeId)) {
           return ws.close(1008, 'invalid node identity or protocol');
         }
+        let negotiated: NegotiatedProtocol;
+        try {
+          negotiated = negotiateProtocol(hello, { gatewayProtocols: this.options.supportedProtocols, gatewayCapabilities: this.options.capabilities });
+        } catch {
+          return ws.close(1008, 'incompatible semantic protocol');
+        }
         const existing = this.nodes.get(hello.nodeId);
         if (existing && existing.socket !== ws) existing.socket.close(4000, 'replaced by newer connection');
-        this.nodes.set(hello.nodeId, { hello, socket: ws, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null });
+        this.nodes.set(hello.nodeId, { hello, socket: ws, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null, negotiated });
         registered = true;
+        const ack: ProtocolHelloAck = { type: 'hello_ack', protocolVersion: negotiated.version, capabilities: negotiated.capabilities };
+        ws.send(JSON.stringify(ack));
         return;
       }
       const record = this.nodes.get(expectedNodeId);
       if (record) record.lastSeenAt = Date.now();
       if (typed.type === 'response') this.finishResponse(message as GatewayResponse);
+      if (typed.type === 'task_event') this.acceptTaskEvent(message as TaskProgressEvent);
       if (typed.type === 'status' && record) {
         const status = message as NodeStatus;
         record.access = status.access ?? null;
@@ -253,5 +275,11 @@ export class NodeRegistry {
     } else {
       pending.reject(new Error(response.error || 'node request failed'));
     }
+  }
+
+  private acceptTaskEvent(event: TaskProgressEvent): void {
+    // The gateway deliberately does not persist progress payloads here. The node owns the durable
+    // event log; this validation boundary ensures only content-free lifecycle frames are accepted.
+    if (!event.taskId || !event.state || !event.summary || !Number.isFinite(Date.parse(event.at))) return;
   }
 }
