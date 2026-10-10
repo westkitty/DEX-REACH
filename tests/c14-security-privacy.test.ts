@@ -7,6 +7,7 @@ import { reconcileBootTasks } from '../src/node/boot-recovery.js';
 import { NodeTaskStore } from '../src/node/task-store.js';
 import { ResultStore } from '../src/node/result-store.js';
 import { decideExistingTask } from '../src/shared/durable-execution.js';
+import { TaskEventLog } from '../src/shared/task-events.js';
 
 const hash = 'a'.repeat(64);
 
@@ -46,6 +47,14 @@ test('C14-C binds durable results to both task identity and persisted hash', asy
     assert.equal(after?.failureClass, 'AMBIGUOUS_EFFECT');
     assert.equal(after?.resultRef, stored.metadata.handle);
     assert.equal(after?.nodeId, 'node-c14');
+    await reconcileBootTasks(new NodeTaskStore(state), results);
+    const beforeStableRepeat = await new NodeTaskStore(state).read(recovering.taskId);
+    const eventsBeforeStableRepeat = await new TaskEventLog(state).list(recovering.taskId, 500);
+    await reconcileBootTasks(new NodeTaskStore(state), results);
+    const afterStableRepeat = await new NodeTaskStore(state).read(recovering.taskId);
+    const eventsAfterStableRepeat = await new TaskEventLog(state).list(recovering.taskId, 500);
+    assert.equal(afterStableRepeat?.updatedAtUtc, beforeStableRepeat?.updatedAtUtc, 'repeated ambiguous recovery must not rewrite unchanged status');
+    assert.equal(eventsAfterStableRepeat.length, eventsBeforeStableRepeat.length, 'repeated ambiguous recovery must not append duplicate status events');
   } finally {
     await fs.rm(state, { recursive: true, force: true });
   }

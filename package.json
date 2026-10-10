@@ -22,6 +22,7 @@
     "dex": "tsx scripts/dex-reach.ts",
     "invariants": "tsx scripts/invariants.ts",
     "benchmark:c14": "tsx scripts/c14-performance.ts",
+    "stress:c14": "tsx scripts/c14-stress.ts",
     "verify:clean-build": "tsx scripts/verify-clean-build.ts",
     "release:provenance": "tsx scripts/release-provenance.ts",
     "proof": "tsx scripts/proof-run.ts",
