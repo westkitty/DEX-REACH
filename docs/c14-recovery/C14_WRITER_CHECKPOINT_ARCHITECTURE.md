@@ -60,7 +60,7 @@ IDLE by default: `processCheckpoint()` returns a frozen object whose methods are
 ## Remaining live limitations (precise missing capabilities)
 
 - **Not activated.** Participation is not enabled in any installed process. Doing so needs an approved LaunchAgent environment change plus restart. Not authorized.
-- **Capture is synthetic only.** `liveCapture()` still refuses, and all ten live boundary gates remain false.
+- **Online capture is unavailable.** `liveCapture()` still refuses, and all ten live boundary gates remain false. An *offline* capture of the stopped installation now exists (`scripts/lib/recovery-offline-capture.ts`, `capture-offline` CLI). Its boundary is all five services booted out, no writer process, and every writer lock fenced; it is recorded in the same evidence chain. It is owner-run only, and its receipt is not yet ingested by the preflight, whose `BACKUP_COVERAGE` stays false until typed receipt ingestion exists. Regressions: `tests/c14-offline-capture.test.ts` (15).
 - **Coordinator daemon** has no participant. It is fenced by its locks, and any live lease or ticket refuses admission. Two writes previously escaped that fence and were repaired: capacity health (`capacity-profile.lock` was not fenced), and `workStatus` reclaiming expired leases and tickets without `coordinator.lock`, so a status read could delete coordinator files while another holder owned the lock. During a checkpoint, status reads now wait (bounded at 15 s) instead of mutating. Regressions: `tests/c14-coordinator-fence.test.ts`.
 - **Installer and rollback scripts** have no admission lock. Quiescence is process absence plus content comparison.
 - **Plan claims and asynchronous trace flushes** are detected, not prevented.

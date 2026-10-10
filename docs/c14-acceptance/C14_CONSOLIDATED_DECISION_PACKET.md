@@ -31,7 +31,13 @@ The master plan's C14 exit gate requires "a completely fresh chaos pass", includ
 The installed C13 runtime has no checkpoint participant, so a coordinated live backup of the C13 state needs either a C14 install or all services stopped. The smallest consistent route is:
 
 1. **Fresh read-only preflight and task report:** confirm 19 unresolved records (or a newly counted figure), zero leases/tickets, and the exact host, account and HEAD.
-2. **Offline capture:** stop the five services (`launchctl bootout`, LaunchAgents unchanged), capture to one owner-selected private destination and volume, run an isolated application restore under an independently stored expectation, then restart the same C13 services. Source work still needed first: `liveCapture()` refuses today. A service-stopped live capture adapter must be implemented and reviewed on this branch before this step. It is not implemented yet.
+2. **Offline capture** (implemented in source, owner-run): stop the five services with `launchctl bootout`, leaving the LaunchAgents unchanged. Then run `npm run recovery:c14 -- capture-offline` with an owner-chosen transaction id, a private destination plus its approved device, inode and APFS volume UUID, and private evidence and expectation roots. Add `--preserve-compat-home-links` only if decision 1 is approved. The command:
+   - refuses unless every service is booted out and no service, adapter or maintenance process exists;
+   - fences every writer lock, requires a consistent closed-world manifest, and records the independent expectation before copying;
+   - copies, runs an isolated application restore from the backup bytes, re-proves quiescence and an unchanged source, and only then certifies;
+   - never restarts a service or retries a transaction.
+
+   Then restart the same C13 services and confirm health. A live negative run with services up refused with `SERVICE_LOADED` and wrote nothing.
 3. **Install the C14 candidate:** use the existing immutable installer, retain C13 as Last Known Good, and verify release identity and the five services. This also deploys the admission wait-status repair that stops the task-journal flooding.
 4. **Physical chaos sequence:** kill and restart the gateway, node, coordinator and worker at the task phases listed in master plan C14 item 1. Reconcile every uncertain outcome before any retry.
 5. **Rollback proof:** roll back to C13 Last Known Good, then forward again.
