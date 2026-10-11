@@ -1,0 +1,106 @@
+{
+  "schema": "reach.dex-command-mappings",
+  "version": "1.0.0",
+  "synthetic": true,
+  "mappings": [
+    {
+      "command": "DEX//FIXTURE_SESSION_STATUS",
+      "authority": "SYNTHETIC test fixture; grants nothing",
+      "invokesReach": true,
+      "product": "session",
+      "safetyClass": "PURE_READ_IDEMPOTENT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.trustReport"
+    },
+    {
+      "command": "DEX//FIXTURE_DROPZONE_INGEST",
+      "authority": "SYNTHETIC test fixture; grants nothing",
+      "invokesReach": true,
+      "product": "dropzone",
+      "safetyClass": "SIDE_EFFECTING_IDEMPOTENT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "dropzone",
+      "reachOperation": "dex.file.write"
+    },
+    {
+      "command": "DEX//FIXTURE_PAIR_READ",
+      "authority": "SYNTHETIC test fixture; grants nothing",
+      "invokesReach": true,
+      "product": "pair",
+      "safetyClass": "PURE_READ_IDEMPOTENT",
+      "dataClass": "PRIVATE",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.file.read"
+    },
+    {
+      "command": "DEX//FIXTURE_WITNESS_EXPORT",
+      "authority": "SYNTHETIC test fixture; grants nothing",
+      "invokesReach": true,
+      "product": "witness",
+      "safetyClass": "PURE_READ_IDEMPOTENT",
+      "dataClass": "SEALED",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.result.read"
+    },
+    {
+      "command": "DEX//FIXTURE_REMIX_APPLY",
+      "authority": "SYNTHETIC test fixture; grants nothing",
+      "invokesReach": true,
+      "product": "remix",
+      "safetyClass": "SIDE_EFFECTING_IDEMPOTENT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.file.write"
+    },
+    {
+      "command": "DEX//FIXTURE_NOT_CATALOGUED",
+      "authority": "SYNTHETIC test fixture; grants nothing",
+      "invokesReach": true,
+      "product": "capsule",
+      "safetyClass": "PURE_READ_IDEMPOTENT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.invented.operation"
+    },
+    {
+      "command": "DEX//FIXTURE_LOCAL_HELP",
+      "authority": "SYNTHETIC test fixture; grants nothing",
+      "invokesReach": false,
+      "product": "session",
+      "safetyClass": "PURE_READ_IDEMPOTENT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "owner"
+    },
+    {
+      "command": "DEX//FIXTURE_REACH_PROBE",
+      "authority": "SYNTHETIC test fixture; grants nothing",
+      "invokesReach": true,
+      "product": null,
+      "safetyClass": "PURE_READ_IDEMPOTENT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.fingerprint"
+    },
+    {
+      "command": "DEX//FIXTURE_COMMIT_PLAN",
+      "authority": "SYNTHETIC test fixture; grants nothing",
+      "invokesReach": true,
+      "product": null,
+      "safetyClass": "PLAN_COMMIT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.commitPlan"
+    },
+    {
+      "command": "DEX//FIXTURE_MAINT_WIPE",
+      "authority": "SYNTHETIC test fixture; grants nothing",
+      "invokesReach": true,
+      "product": null,
+      "safetyClass": "PROCESS_UNKNOWN_EFFECT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.process.run"
+    }
+  ]
+}

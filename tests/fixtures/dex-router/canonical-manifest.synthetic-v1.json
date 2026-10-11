@@ -1,0 +1,298 @@
+{
+  "manifestVersion": "1.0.0",
+  "synthetic": true,
+  "commands": [
+    {
+      "name": "FIXTURE_SESSION_STATUS",
+      "canonical": "DEX//FIXTURE_SESSION_STATUS",
+      "slash": "/fixture_session_status",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "SESSION",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+DRY",
+        "+SHIP",
+        "+FAST",
+        "+LOG",
+        "+PROVE"
+      ],
+      "workflowId": "workflow_fixture_session_status_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "Synthetic test command. Not a DEX command.",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "FIXTURE_DROPZONE_INGEST",
+      "canonical": "DEX//FIXTURE_DROPZONE_INGEST",
+      "slash": "/fixture_dropzone_ingest",
+      "aliases": [],
+      "commandClass": "MUTATE",
+      "scope": "DROPZONE",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "artifact"
+      ],
+      "supportedModifiers": [
+        "+SHIP",
+        "+FAST"
+      ],
+      "workflowId": "workflow_fixture_dropzone_ingest_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "Synthetic test command. Not a DEX command.",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "FIXTURE_PAIR_READ",
+      "canonical": "DEX//FIXTURE_PAIR_READ",
+      "slash": "/fixture_pair_read",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "PAIR",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "room"
+      ],
+      "supportedModifiers": [
+        "+DRY",
+        "+FAST"
+      ],
+      "workflowId": "workflow_fixture_pair_read_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "Synthetic test command. Not a DEX command.",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "FIXTURE_WITNESS_EXPORT",
+      "canonical": "DEX//FIXTURE_WITNESS_EXPORT",
+      "slash": "/fixture_witness_export",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "WITNESS",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "case"
+      ],
+      "supportedModifiers": [
+        "+DRY"
+      ],
+      "workflowId": "workflow_fixture_witness_export_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "Synthetic test command. Not a DEX command.",
+      "appCommand": null,
+      "trustDomain": "evidence"
+    },
+    {
+      "name": "FIXTURE_REMIX_APPLY",
+      "canonical": "DEX//FIXTURE_REMIX_APPLY",
+      "slash": "/fixture_remix_apply",
+      "aliases": [],
+      "commandClass": "MUTATE",
+      "scope": "REMIX",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "artifact"
+      ],
+      "supportedModifiers": [
+        "+SHIP",
+        "+DRY"
+      ],
+      "workflowId": "workflow_fixture_remix_apply_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "Synthetic test command. Not a DEX command.",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "FIXTURE_NOT_CATALOGUED",
+      "canonical": "DEX//FIXTURE_NOT_CATALOGUED",
+      "slash": "/fixture_not_catalogued",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "CAPSULE",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "artifact"
+      ],
+      "supportedModifiers": [],
+      "workflowId": "workflow_fixture_not_catalogued_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "Synthetic test command. Not a DEX command.",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "FIXTURE_LOCAL_HELP",
+      "canonical": "DEX//FIXTURE_LOCAL_HELP",
+      "slash": "/fixture_local_help",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "SESSION",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [],
+      "workflowId": "workflow_fixture_local_help_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "Synthetic test command. Not a DEX command.",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "FIXTURE_REACH_PROBE",
+      "canonical": "DEX//FIXTURE_REACH_PROBE",
+      "slash": "/fixture_reach_probe",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "REACH",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_fixture_reach_probe_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "Synthetic test command. Not a DEX command.",
+      "appCommand": null,
+      "trustDomain": "remote-control"
+    },
+    {
+      "name": "FIXTURE_COMMIT_PLAN",
+      "canonical": "DEX//FIXTURE_COMMIT_PLAN",
+      "slash": "/fixture_commit_plan",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "COMMIT",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_fixture_commit_plan_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "Synthetic test command. Not a DEX command.",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "FIXTURE_UNMAPPED",
+      "canonical": "DEX//FIXTURE_UNMAPPED",
+      "slash": "/fixture_unmapped",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_fixture_unmapped_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "Synthetic test command. Not a DEX command.",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "FIXTURE_MAINT_WIPE",
+      "canonical": "DEX//FIXTURE_MAINT_WIPE",
+      "slash": "/fixture_maint_wipe",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "MAINT",
+      "mutationLevel": "DESTRUCTIVE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_fixture_maint_wipe_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "Synthetic test command. Not a DEX command.",
+      "appCommand": null,
+      "trustDomain": "maintenance"
+    }
+  ]
+}

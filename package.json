@@ -22,6 +22,7 @@
     "nodes": "tsx scripts/node-credentials.ts",
     "dex": "tsx scripts/dex-reach.ts",
     "invariants": "tsx scripts/invariants.ts",
+    "conformance:dex": "tsx scripts/dex-contract-conformance.ts",
     "benchmark:c14": "tsx scripts/c14-performance.ts",
     "stress:c14": "tsx scripts/c14-stress.ts",
     "verify:clean-build": "tsx scripts/verify-clean-build.ts",
