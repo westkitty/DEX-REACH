@@ -58,7 +58,8 @@ test('failure classifier separates transport uncertainty from safe read timeout'
 
 test('reconciliation chooses evidence-supported recovery and never invents completion', () => {
   assert.equal(reconcile({ resultAvailable: true }, 'PROCESS_UNKNOWN_EFFECT'), 'FINISH_FROM_DURABLE_EVIDENCE');
-  assert.equal(reconcile({ processAlive: true }, 'PROCESS_UNKNOWN_EFFECT'), 'REATTACH');
+  assert.equal(reconcile({ processAlive: true }, 'PROCESS_UNKNOWN_EFFECT'), 'MONITOR_ORPHAN');
+  assert.equal(reconcile({ activitySeen: true }, 'PROCESS_UNKNOWN_EFFECT'), 'MONITOR_ORPHAN');
   assert.equal(reconcile({ policyStillAllows: false }, 'PURE_READ_IDEMPOTENT'), 'INPUT_REQUIRED');
   assert.equal(reconcile({}, 'PURE_READ_IDEMPOTENT'), 'RETRY_SAFE');
   assert.equal(reconcile({}, 'PLAN_COMMIT'), 'AMBIGUOUS');

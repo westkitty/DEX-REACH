@@ -163,7 +163,7 @@ assert.equal(await fs.readFile(path.join(roots,'exit-oracle.txt'),'utf8'),'exit-
  await until(ready);
  await control('result',running.taskId);assert.equal(await fs.readFile(path.join(roots,'disconnected.txt'),'utf8'),'effect');
  assert.equal((await store.list()).filter(t=>t.taskId===running.taskId).length,1);
- // Interrupt RUNNING execution. Restart retains uncertainty and refuses identical-key replay.
+ // Interrupt an in-flight execution (recorded RUNNING before the stop). Restart keeps it AMBIGUOUS and refuses identical-key replay.
  const activeCommand='printf started >> active-restart.txt; while ! test -f never-release.txt; do sleep 0.1; done; printf effect >> active-effect.txt';
  const active=(await start('active-restart',activeCommand)).result as {taskId:string};
  // The shell's `>>` creates the file before printf writes: wait for the marker itself, not the empty file.
@@ -177,7 +177,9 @@ assert.equal(await fs.readFile(path.join(roots,'exit-oracle.txt'),'utf8'),'exit-
  // Crash the node alone. The shell is orphaned, still held by its release marker; the task must still be AMBIGUOUS, never replayed.
  const crashCommand='printf started >> crash-restart.txt; while ! test -f crash-release.txt; do sleep 0.1; done; printf effect >> crash-effect.txt';
  // The graceful step's lease must be gone before the crash task is admitted, or it queues behind a dead holder.
- await until(async()=>(await readCoordinatorState()).leases.length===0);
+ // It is released at boot when the orphan is already gone, or by the node's 30 s orphan supervisor once it has ended.
+ // The wait returns as soon as the lease is absent; the bound covers one supervisor period plus margin, never a fixed sleep.
+ await until(async()=>(await readCoordinatorState()).leases.length===0, 60_000);
  const crashed=(await start('crash-restart',crashCommand)).result as {taskId:string};
  await until(async()=>(await fs.readFile(path.join(roots,'crash-restart.txt'),'utf8').catch(()=>''))==='started');
  assert.deepEqual(await crashNodeOnly(child),{code:null,signal:'SIGKILL'});

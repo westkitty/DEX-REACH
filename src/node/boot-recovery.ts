@@ -1,6 +1,6 @@
 import { readQuarantine } from '../shared/task-quarantine.js';
 import { listProcessActivities, type ProcessActivity } from '../shared/activity.js';
-import { coordinatedHeartbeat, coordinatedStatus } from '../coordinator/client.js';
+import { coordinatedHeartbeat, coordinatedRelease, coordinatedStatus } from '../coordinator/client.js';
 import { decideBootRecovery, type BootRecoveryDecision } from '../shared/task-recovery.js';
 import { verifyProcessIdentity, type ProcessIdentityVerdict } from '../shared/process-identity.js';
 import type { WorkStatus } from '../shared/work-coordinator.js';
@@ -23,6 +23,8 @@ export type BootRecoveryOptions = {
   activities?: ProcessActivity[] | null;
   verify?: (activity: ProcessActivity) => Promise<ProcessIdentityVerdict>;
   heartbeatLease?: (leaseId: string) => Promise<boolean>;
+  /** Releases the lease of an orphan that identity has proven ended. Never used while the orphan may still run. */
+  releaseLease?: (leaseId: string) => Promise<{ released: boolean }>;
 };
 
 function matchingActivity(task: ReachTaskRecord, records: readonly ProcessActivity[]): ProcessActivity | undefined {
@@ -61,6 +63,16 @@ async function keepLeaseWhileOrphanRuns(leaseId: string | undefined, options: Bo
   await (options.heartbeatLease ?? coordinatedHeartbeat)(leaseId).catch(() => false);
 }
 
+/**
+ * A graceful stop can exit the node before an in-flight request reaches its release, so the lease outlives its
+ * holder. Once the recorded process is verified ended, nothing can still run under that lease: release it now,
+ * rather than waiting for the coordinator's stale-heartbeat reclaim.
+ */
+async function releaseEndedOrphanLease(leaseId: string | undefined, options: BootRecoveryOptions): Promise<void> {
+  if (!leaseId) return;
+  await (options.releaseLease ?? coordinatedRelease)(leaseId).catch(() => undefined);
+}
+
 async function verdictFor(activity: ProcessActivity | undefined, options: BootRecoveryOptions): Promise<ProcessIdentityVerdict | null> {
   if (!activity) return null;
   if (activity.state !== 'running') return 'GONE';
@@ -86,6 +98,7 @@ async function superviseAmbiguous(
   if (activity.state !== 'running' || verdict === 'GONE' || verdict === 'REUSED') {
     // The recorded process has ended on any evidence. Its effect is still unobservable, so the task is not completed.
     const reason = 'The recorded process has ended; its final effect is not observable. The task stays AMBIGUOUS and is not replayed.';
+    await releaseEndedOrphanLease(lease?.id, options);
     await setStatusIfChanged(task, reason, taskStore);
     return { kind: 'INPUT_REQUIRED', reason };
   }

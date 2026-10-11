@@ -167,11 +167,14 @@ export type ReconciliationEvidence = {
   policyStillAllows?: boolean;
 };
 
-export type ReconciliationDecision = 'REATTACH' | 'FINISH_FROM_DURABLE_EVIDENCE' | 'RETRY_SAFE' | 'INPUT_REQUIRED' | 'AMBIGUOUS';
+export type ReconciliationDecision = 'REATTACH' | 'MONITOR_ORPHAN' | 'FINISH_FROM_DURABLE_EVIDENCE' | 'RETRY_SAFE' | 'INPUT_REQUIRED' | 'AMBIGUOUS';
 
 export function reconcile(evidence: ReconciliationEvidence, safety: SafetyClass): ReconciliationDecision {
   if (evidence.receiptVerified || evidence.resultAvailable) return 'FINISH_FROM_DURABLE_EVIDENCE';
-  if (evidence.processAlive || evidence.activitySeen || evidence.externalJobId) return 'REATTACH';
+  // A local process is never reattached: after a node restart nothing holds its pipes or exit status, so the task is
+  // monitored by identity and stays AMBIGUOUS (repair C). Only a remote job with its own supervisor may be reattached.
+  if (evidence.processAlive || evidence.activitySeen) return 'MONITOR_ORPHAN';
+  if (evidence.externalJobId) return 'REATTACH';
   if (evidence.policyStillAllows === false) return 'INPUT_REQUIRED';
   return safety === 'PURE_READ_IDEMPOTENT' && !evidence.externalJobId ? 'RETRY_SAFE' : 'AMBIGUOUS';
 }

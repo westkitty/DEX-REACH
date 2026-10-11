@@ -273,3 +273,27 @@ test('repeated identical key after restart never reaches a second side effect wh
     assert.equal(decision.task.taskId, task.taskId);
   } finally { await w.cleanup(); }
 });
+
+test('supervision releases the lease only of an orphan proven ended; live and unverifiable orphans keep theirs; no state changes', async () => {
+  const w = await createSyntheticWorkspace(); try {
+    const store = new NodeTaskStore(w.source.state);
+    const ended = await runningTask(store, 'lease-ended');
+    const live = await runningTask(store, 'lease-live');
+    const unknown = await runningTask(store, 'lease-unverifiable');
+    for (const task of [ended, live, unknown]) await store.transition(task.taskId, 'AMBIGUOUS', 'synthetic orphan evidence');
+    const lease = (task: ReachTaskRecord, pid: number) => ({ id: `lease-${task.idempotencyKey}`, taskId: task.taskId, attempt: task.attemptNumber, pid });
+    const coordinator = { leases: [lease(ended, UNUSED_PID), lease(live, process.pid), lease(unknown, process.pid)], tickets: [] } as unknown as WorkStatus;
+    const activities = [activityFor(ended, UNUSED_PID), activityFor(live, process.pid), activityFor(unknown, process.pid)];
+    const verdicts: Record<string, 'GONE' | 'SAME' | 'UNVERIFIABLE'> = { [ended.taskId]: 'GONE', [live.taskId]: 'SAME', [unknown.taskId]: 'UNVERIFIABLE' };
+    const released: string[] = [], heartbeats: string[] = [];
+    await superviseAmbiguousTasks(store, {
+      coordinator, transportConnected: true, activities,
+      verify: async activity => verdicts[activity.taskId!]!,
+      releaseLease: async id => { released.push(id); return { released: true }; },
+      heartbeatLease: async id => { heartbeats.push(id); return true; }
+    });
+    assert.deepEqual(released, ['lease-lease-ended'], 'only the proven-ended orphan releases its lease');
+    assert.deepEqual(heartbeats.sort(), ['lease-lease-live', 'lease-lease-unverifiable'], 'live and unverifiable orphans keep their leases');
+    for (const task of [ended, live, unknown]) assert.equal((await store.read(task.taskId))?.state, 'AMBIGUOUS', 'supervision never transitions state');
+  } finally { await w.cleanup(); }
+});
