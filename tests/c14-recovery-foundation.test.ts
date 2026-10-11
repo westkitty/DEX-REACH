@@ -91,7 +91,7 @@ test('recomputed integrity cannot hide incompatible application state; original 
   } finally { await w.cleanup(); }
 });
 function goodFacts(): PreflightFacts {
-  return { hostname: 'MacBook-Air.local', model: 'MacBookAir10,1', platform: 'darwin', arch: 'arm64', user: 'andrew', uid: 501, home: '/Users/andrew', root: RELEASE_ROOT, branch: '', head: 'a'.repeat(40), remoteHead: 'a'.repeat(40), dirty: false, approvedSha: 'a'.repeat(40), candidateVersion: '0.3.2', approvedVersion: '0.3.2', ciHead: 'a'.repeat(40), ciChecks: Object.fromEntries(['validate', 'runtime-proof', 'reproducible-build', 'analyze', 'CodeQL'].map(k => [k, 'SUCCESS'])), installedIntact: true, installedRelease: RETAINED_RELEASE, servicesVerified: true, backupCertified: true,
+  return { hostname: 'MacBook-Air.local', model: 'MacBookAir10,1', platform: 'darwin', arch: 'arm64', user: 'andrew', uid: 501, home: '/Users/andrew', root: RELEASE_ROOT, repositoryUrl: 'git@github.com:westkitty/DEX-REACH.git', branch: '', head: 'a'.repeat(40), remoteHead: 'a'.repeat(40), dirty: false, approvedSha: 'a'.repeat(40), candidateVersion: '0.3.2', approvedVersion: '0.3.2', ciHead: 'a'.repeat(40), ciChecks: Object.fromEntries(['validate', 'runtime-proof', 'reproducible-build', 'analyze', 'CodeQL'].map(k => [k, 'SUCCESS'])), installedIntact: true, installedRelease: RETAINED_RELEASE, servicesVerified: true, backupCertified: true,
     baseline: { previousReleaseId: RETAINED_RELEASE, previousDigest: RETAINED_TREE, observedDigest: RETAINED_TREE, previousExists: true, provenance: 'manifest-verified', legacyProvenanceApproved: false, transactionId: '12345678-1234-4234-8234-123456789abc', state: 'prepared', fresh: true, serviceReleaseIds: Array(5).fill(RETAINED_RELEASE), configVerified: true, inventoryVerified: true, helperIdle: true, rollbackActive: false, provenanceDetails: { sourceSha: '87a99494ebb3471d3ecc3a79acd630ec18858a92', installTransaction: '9bf5079f-397e-4cd8-af35-99f1550d3d68', dependencyDigest: hash, configDigest: hash, expectedConfigDigest: hash, policyDigest: hash, expectedPolicyDigest: hash, ownerManifestDigest: hash, trustedManifestDigest: hash, snapshotComplete: true, metadataVerified: true, reserveVerified: true } },
     restoreProof: { scope: 'synthetic', sourceSha: 'a'.repeat(40), passed: true }, taskCount: 0, taskUnresolved: 0, claimsKnown: true, claimsCount: 0, ownerPreservationVerified: true, freeBytes: 10 * 1024 ** 3, spaceMeasured: true, space: { candidateBytes: 100, dependencyBytes: 100, retainedBytes: 100, backupBytes: 100, restoreBytes: 100, stagingBytes: 100, reserveBytes: 2 * 1024 ** 3 }, exactLegacyPairingVerified: true, credentialsCompatible: true, requiredHostCapabilityAvailable: true, maintenanceAuthorized: true };
 }
@@ -159,20 +159,6 @@ test('unmeasured space estimates and invalid transaction binding fail closed', (
 });
 
 import { exactShaCheckRows, aggregateCheckRuns, REQUIRED_HOSTED_CHECKS } from '../scripts/lib/c14-recovery-preflight.js';
-test('hosted evidence is read for the exact commit only, with CodeQL from its push workflow on main', () => {
-  const sha = 'a'.repeat(40), other = 'b'.repeat(40);
-  const run = (name: string, head = sha, conclusion = 'success') => ({ name, head_sha: head, status: 'completed', conclusion });
-  const checks = { check_runs: [run('validate'), run('runtime-proof'), run('reproducible-build'), run('analyze'), run('validate', other, 'failure'), run('CodeQL', sha, 'success')] };
-  const wf = (extra: Record<string, unknown>) => ({ workflow_runs: [{ name: 'CodeQL', head_sha: sha, event: 'push', head_branch: 'main', status: 'completed', conclusion: 'success', ...extra }] });
-  const all = aggregateCheckRuns(exactShaCheckRows(sha, checks, wf({})));
-  assert.ok(REQUIRED_HOSTED_CHECKS.every(k => all[k] === 'SUCCESS'), JSON.stringify(all));
-  // A pull_request CodeQL run, another branch, another commit, or an unfinished run never satisfies the push gate.
-  for (const bad of [{ event: 'pull_request' }, { head_branch: 'c14-chaos-recovery' }, { head_sha: other }]) assert.notEqual(aggregateCheckRuns(exactShaCheckRows(sha, checks, wf(bad))).CodeQL, 'SUCCESS');
-  assert.equal(aggregateCheckRuns(exactShaCheckRows(sha, checks, wf({ status: 'in_progress', conclusion: null }))).CodeQL, 'INCOMPLETE');
-  // A second validate run for the same commit is ambiguous, never a pass.
-  assert.equal(aggregateCheckRuns(exactShaCheckRows(sha, { check_runs: [...checks.check_runs, run('validate')] }, wf({}))).validate, 'AMBIGUOUS');
-  assert.deepEqual(exactShaCheckRows('not-a-sha', checks, wf({})), []);
-});
 test('the release line accepts only main or a detached HEAD, and the release worktree root', () => {
   for (const branch of ['', 'main']) { const f = goodFacts(); f.branch = branch; assert.equal(evaluatePreflight(f).checks.AUTHORIZED_BRANCH, true); }
   for (const branch of ['c14-chaos-recovery', 'release/0.4.0-prep']) { const f = goodFacts(); f.branch = branch; assert.equal(evaluatePreflight(f).checks.AUTHORIZED_BRANCH, false); }

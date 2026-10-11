@@ -100,6 +100,12 @@ export async function inspectTasks(input: { root: string; expectedRoot: string; 
   const activityDoc = await read('activity/processes.json');
   const activities: Row[] = Array.isArray(activityDoc) ? activityDoc : [];
   if (!Array.isArray(activityDoc)) complete = false;
+  // Launch intents are additive to the C13 ledger. Their absence is expected on older releases.
+  try {
+    const intents = JSON.parse((await safeRead(root, 'activity/launch-intents.json')).toString());
+    if (intents.version !== 1 || !Array.isArray(intents.records)) complete = false;
+    else for (const row of intents.records) if (!activities.some(a => a.id === row.id)) activities.push(row);
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') complete = false; }
   async function claims(name: string): Promise<Row[]> {
     try {
       await realDirectory(path.join(root, 'coordinator', name));
@@ -115,11 +121,11 @@ export async function inspectTasks(input: { root: string; expectedRoot: string; 
   const reports: TaskInspection[] = [];
   for (const task of tasks) {
     const matches = (row: Row) => row.taskId === task.taskId && row.attempt === task.attemptNumber;
-    const activity = activities.filter(matches).find(a => a.state === 'running');
+    const activity = activities.filter(matches).find(a => a.state === 'running' || a.state === 'starting');
     const freshClaim = (row: Row) => { const age = now - Date.parse(row.heartbeatAt); return Number.isFinite(age) && age >= 0 && age < 150_000; };
     const lease = leases.filter(matches).find(freshClaim);
     const ticket = tickets.filter(matches).find(freshClaim);
-    const process = activity && input.processMatches ? await input.processMatches(activity.pid, activity.startedAt) : 'unknown';
+    const process = activity && activity.state !== 'starting' && input.processMatches ? await input.processMatches(activity.pid, activity.startedAt) : 'unknown';
     let result: Evidence['result'] = task.resultRef || task.resultHash ? 'invalid-or-expired' : 'missing';
     if (task.resultRef && task.resultHash) {
       try { await safeRead(root, 'results/manifest.json'); await safeRead(root, `results/${task.resultRef}.json`); await results.readValueForTask(task.resultRef, task.taskId, task.resultHash); result = 'verified'; } catch { /* Absence/corruption is never negative execution proof. */ }

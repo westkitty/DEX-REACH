@@ -119,7 +119,7 @@ test('nativeProcess exposes the real child pid while work is running and records
     let active: Awaited<ReturnType<typeof listProcessActivities>>[number] | undefined;
     let result: Awaited<typeof pending>;
     try {
-      await waitFor(async () => (await listProcessActivities()).some(item => item.kind === 'native-process'));
+      await waitFor(async () => (await listProcessActivities()).some(item => item.kind === 'native-process' && item.state === 'running'));
       active = (await listProcessActivities()).find(item => item.kind === 'native-process');
       assert.ok(active);
       assert.notEqual(active.pid, process.pid);

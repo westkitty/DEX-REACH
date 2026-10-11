@@ -75,6 +75,7 @@ async function releaseEndedOrphanLease(leaseId: string | undefined, options: Boo
 
 async function verdictFor(activity: ProcessActivity | undefined, options: BootRecoveryOptions): Promise<ProcessIdentityVerdict | null> {
   if (!activity) return null;
+  if (activity.state === 'starting') return 'UNVERIFIABLE';
   if (activity.state !== 'running') return 'GONE';
   return (options.verify ?? (record => verifyProcessIdentity(record.identity, record.pid)))(activity);
 }
@@ -95,7 +96,7 @@ async function superviseAmbiguous(
   // Owner reconciliation is required whenever no live orphan remains (the pre-existing INPUT_REQUIRED meaning).
   const ownerReconciliation = 'Execution state cannot be resolved from durable evidence; owner reconciliation is required.';
   if (!activity) return { kind: 'INPUT_REQUIRED', reason: ownerReconciliation };
-  if (activity.state !== 'running' || verdict === 'GONE' || verdict === 'REUSED') {
+  if ((activity.state !== 'running' && activity.state !== 'starting') || verdict === 'GONE' || verdict === 'REUSED') {
     // The recorded process has ended on any evidence. Its effect is still unobservable, so the task is not completed.
     const reason = 'The recorded process has ended; its final effect is not observable. The task stays AMBIGUOUS and is not replayed.';
     await releaseEndedOrphanLease(lease?.id, options);

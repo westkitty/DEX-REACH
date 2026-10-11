@@ -11,7 +11,11 @@ import { assertIdentityBindingUnchanged, captureProcessIdentity, parseProcessIde
 const execFileAsync = promisify(execFile);
 const MAX_ACTIVITY_RECORDS = 200;
 
-export const PROCESS_ACTIVITY_STATES = ['running', 'completed', 'failed', 'timed-out', 'terminated', 'exited'] as const;
+/**
+ * `starting` is the pre-execution barrier: a durable intent row written before the child is spawned, with no pid yet.
+ * It means a process MAY have started. Readers never treat it as ended, and it never proves the process is gone.
+ */
+export const PROCESS_ACTIVITY_STATES = ['starting', 'running', 'completed', 'failed', 'timed-out', 'terminated', 'exited'] as const;
 export type ProcessActivityState = (typeof PROCESS_ACTIVITY_STATES)[number];
 export type ProcessActivityKind = 'native-process' | 'compat-process';
 
@@ -71,6 +75,8 @@ export type ProcessObservation = {
 
 export function activityDir(): string { return path.join(machineStateDir(), 'activity'); }
 export function activityFile(): string { return path.join(activityDir(), 'processes.json'); }
+/** Additive sidecar: retained C13 readers keep their original positive-PID activity schema. */
+export function processIntentFile(): string { return path.join(activityDir(), 'launch-intents.json'); }
 export function activityLockFile(): string { return path.join(activityDir(), 'processes.lock'); }
 
 function processAlive(pid: number): boolean {
@@ -97,7 +103,8 @@ function validRecord(raw: unknown): ProcessActivity | null {
   if (typeof value.id !== 'string' || !value.id.startsWith('activity-')) return null;
   if (value.kind !== 'native-process' && value.kind !== 'compat-process') return null;
   if (!PROCESS_ACTIVITY_STATES.includes(value.state as ProcessActivityState)) return null;
-  if (typeof value.pid !== 'number' || !Number.isInteger(value.pid) || value.pid <= 0) return null;
+  // An intent row has no pid (0) and no identity; every other row names its process.
+  if (typeof value.pid !== 'number' || !Number.isInteger(value.pid) || (value.state === 'starting' ? value.pid !== 0 || value.identity !== undefined : value.pid <= 0)) return null;
   if (typeof value.operation !== 'string' || typeof value.processLabel !== 'string') return null;
   if (typeof value.startedAt !== 'string' || typeof value.updatedAt !== 'string') return null;
   if (value.taskId !== undefined && (typeof value.taskId !== 'string' || !/^rtsk_[0-9a-f]{11,13}_[0-9a-f]{16,32}$/.test(value.taskId))) return null;
@@ -116,23 +123,38 @@ function validRecord(raw: unknown): ProcessActivity | null {
 }
 
 async function readRecordsUnlocked(): Promise<ProcessActivity[]> {
-  try {
-    const parsed = JSON.parse(await fs.readFile(activityFile(), 'utf8')) as unknown;
-    if (!Array.isArray(parsed)) throw new Error('activity store must contain an array');
-    const records = parsed.map(validRecord);
-    if (records.some(record => record === null)) throw new Error('activity store contains a malformed record');
-    return records as ProcessActivity[];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw error;
+  async function read(file: string): Promise<unknown | undefined> {
+    try { return JSON.parse(await fs.readFile(file, 'utf8')); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
   }
+  const parsed = await read(activityFile());
+  if (parsed !== undefined && !Array.isArray(parsed)) throw new Error('activity store must contain an array');
+  const legacy = (parsed ?? []) as unknown[];
+  const sidecar = await read(processIntentFile()) as { version?: number; records?: unknown[] } | undefined;
+  if (sidecar !== undefined && (!sidecar || sidecar.version !== 1 || !Array.isArray(sidecar.records))) throw new Error('process intent store is malformed');
+  const records = legacy.map(validRecord);
+  const intents = (sidecar?.records ?? []).map(validRecord);
+  if (records.some(r => !r || r.state === 'starting') || intents.some(r => !r || r.state !== 'starting')) throw new Error('activity store contains a malformed record');
+  const combined = records as ProcessActivity[];
+  for (const intent of intents as ProcessActivity[]) {
+    const bound = combined.find(r => r.id === intent.id);
+    if (bound) {
+      if (bound.taskId !== intent.taskId || bound.attempt !== intent.attempt || bound.startedAt !== intent.startedAt) throw new Error('process intent binding mismatch');
+      // A crash after committing the bound row but before removing its intent is safe: prefer the bound row.
+    } else combined.push(intent);
+  }
+  if (new Set(combined.map(r => r.id)).size !== combined.length) throw new Error('duplicate activity identity');
+  return combined;
 }
 
 async function writeRecordsUnlocked(records: ProcessActivity[]): Promise<void> {
-  const bounded = records
-    .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
-    .slice(-MAX_ACTIVITY_RECORDS);
-  await atomicWriteFile(activityFile(), JSON.stringify(bounded, null, 2) + '\n');
+  const active = records.filter(record => record.state === 'starting' || record.state === 'running');
+  if (active.length > MAX_ACTIVITY_RECORDS) throw new Error('PROCESS_ACTIVITY_CAPACITY');
+  const finished = records.filter(record => record.state !== 'starting' && record.state !== 'running')
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  const bounded = [...finished.slice(-(MAX_ACTIVITY_RECORDS - active.length) || finished.length), ...active];
+  await atomicWriteFile(activityFile(), JSON.stringify(bounded.filter(r => r.state !== 'starting'), null, 2) + '\n');
+  await atomicWriteFile(processIntentFile(), JSON.stringify({ version: 1, records: bounded.filter(r => r.state === 'starting') }) + '\n');
 }
 
 /** The bindings a record may never change after creation: process identity, PID, task and attempt. */
@@ -144,7 +166,10 @@ function assertBindingsUnchanged(before: Map<string, ProcessActivity>, after: re
   for (const record of after) {
     const prior = before.get(record.id);
     if (!prior) continue;
-    if (prior.pid !== record.pid || prior.taskId !== record.taskId || prior.attempt !== record.attempt) throw new Error('process activity binding is immutable');
+    // The only permitted pid change is the single bind of a pre-execution intent row to its spawned process.
+    const bind = prior.state === 'starting' && prior.pid === 0 && record.state === 'running' && record.pid > 0;
+    if ((!bind && prior.pid !== record.pid) || prior.taskId !== record.taskId || prior.attempt !== record.attempt) throw new Error('process activity binding is immutable');
+    if (record.state === 'starting' && prior.state !== 'starting') throw new Error('process activity cannot return to starting');
     assertIdentityBindingUnchanged(prior.identity, record.identity);
   }
 }
@@ -157,6 +182,47 @@ async function mutateRecords<T>(fn: (records: ProcessActivity[]) => Promise<T> |
     assertBindingsUnchanged(before, records);
     await writeRecordsUnlocked(records);
     return result;
+  });
+}
+
+/**
+ * Pre-execution barrier. Writes a durable `starting` row for this task BEFORE the child is spawned. If this write
+ * fails for any reason, the caller must not spawn: no untracked process can then exist.
+ */
+export async function recordProcessIntent(input: {
+  kind: ProcessActivityKind;
+  operation: string;
+  command: string;
+  taskId?: string;
+  attempt?: number;
+  phase?: string;
+  cwd?: string;
+}): Promise<ProcessActivity> {
+  const context = validateProcessExecutionContext({ taskId: input.taskId, attempt: input.attempt, phase: input.phase });
+  const now = new Date().toISOString();
+  const record: ProcessActivity = {
+    id: `activity-${crypto.randomUUID()}`, kind: input.kind, state: 'starting', pid: 0, operation: input.operation,
+    processLabel: safeProcessLabel(input.command),
+    ...(context.taskId ? { taskId: context.taskId } : {}),
+    ...(context.attempt !== undefined ? { attempt: context.attempt } : {}),
+    ...(context.phase ? { phase: context.phase } : {}),
+    ...(input.cwd ? { cwd: input.cwd } : {}),
+    startedAt: now, updatedAt: now
+  };
+  await mutateRecords(records => { records.push(record); });
+  return record;
+}
+
+/** Binds the spawned pid and its platform identity to an intent row, making it `running`. Only a `starting` row binds. */
+export async function bindProcessIntent(id: string, pid: number): Promise<ProcessActivity> {
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error('process intent requires a real pid');
+  const identity = await captureProcessIdentity(pid);
+  if (!identity) throw new Error('PROCESS_INTENT_IDENTITY_UNVERIFIABLE');
+  return mutateRecords(records => {
+    const record = records.find(entry => entry.id === id);
+    if (!record || record.state !== 'starting') throw new Error('PROCESS_INTENT_NOT_BINDABLE');
+    Object.assign(record, { state: 'running' as const, pid, updatedAt: new Date().toISOString(), ...(identity ? { identity } : {}) });
+    return { ...record };
   });
 }
 
@@ -221,7 +287,7 @@ export async function updateProcessActivityByPid(
 
 export async function finishProcessActivity(
   id: string,
-  state: Exclude<ProcessActivityState, 'running'>,
+  state: Exclude<ProcessActivityState, 'running' | 'starting'>,
   exitCode?: number,
   signal?: string
 ): Promise<boolean> {
@@ -237,7 +303,7 @@ export async function finishProcessActivity(
 
 export async function finishProcessActivityByPid(
   pid: number,
-  state: Exclude<ProcessActivityState, 'running'>,
+  state: Exclude<ProcessActivityState, 'running' | 'starting'>,
   exitCode?: number
 ): Promise<boolean> {
   const now = new Date().toISOString();
@@ -283,7 +349,7 @@ export async function listProcessActivities(options: {
   const includeFinished = options.includeFinished ?? false;
   const limit = Math.max(1, Math.min(options.limit ?? 50, MAX_ACTIVITY_RECORDS));
   return records
-    .filter(record => includeFinished || record.state === 'running')
+    .filter(record => includeFinished || record.state === 'running' || record.state === 'starting')
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
     .slice(0, limit);
 }
@@ -297,7 +363,7 @@ export async function readProcessActivities(options: {
   const includeFinished = options.includeFinished ?? false;
   const limit = Math.max(1, Math.min(options.limit ?? 50, MAX_ACTIVITY_RECORDS));
   return records
-    .filter(record => includeFinished || record.state === 'running')
+    .filter(record => includeFinished || record.state === 'running' || record.state === 'starting')
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
     .slice(0, limit);
 }

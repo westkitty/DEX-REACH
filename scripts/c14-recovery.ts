@@ -14,7 +14,7 @@ import { TransactionEvidenceLog, ExpectationStore } from './lib/recovery-evidenc
 import { COMPAT_HOME_PRESERVATION_RULE, defaultLinkPolicy } from './lib/recovery-symlinks.js';
 import { recoveryStorageEstimate } from './lib/recovery-storage.js';
 import type { DestinationFacts } from './lib/recovery-destination.js';
-import { reloadHelperIdle, exactShaCheckRows, RELEASE_LINE, RELEASE_ROOT, RETAINED_RELEASE, RETAINED_TREE, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
+import { reloadHelperIdle, isCanonicalRepository, readReleaseHostedEvidence, RELEASE_LINE, RELEASE_ROOT, RETAINED_RELEASE, RETAINED_TREE, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
 import { parseCaptureExclusionFlags } from './lib/recovery-capture-flags.js';
 
 const runFile = promisify(execFile);
@@ -24,7 +24,7 @@ export async function assertLiveTarget(): Promise<void> {
   if (root !== RELEASE_ROOT || os.hostname() !== 'MacBook-Air.local' || os.platform() !== 'darwin' || os.arch() !== 'arm64' || os.userInfo().username !== 'andrew' || process.geteuid?.() !== 501 || os.homedir() !== '/Users/andrew' || process.env.DEX_REACH_STATE_DIR && process.env.DEX_REACH_STATE_DIR !== '/Users/andrew/.dex-reach') throw new Error('WRONG_ENVIRONMENT');
   // The release worktree is detached at main's tip (or on main itself); REMOTE_PARITY then pins the exact SHA.
   if (!['', RELEASE_LINE].includes(await run('/usr/bin/git', ['branch', '--show-current']))) throw new Error('WRONG_BRANCH');
-  if (await run('/usr/sbin/sysctl', ['-n', 'hw.model']) !== 'MacBookAir10,1' || await run('/usr/bin/git', ['rev-parse', '--show-toplevel']) !== RELEASE_ROOT || await run('/usr/bin/git', ['remote', 'get-url', 'origin']) !== 'git@github.com:westkitty/DEX-REACH.git') throw new Error('WRONG_HOST_OR_REPOSITORY');
+  if (await run('/usr/sbin/sysctl', ['-n', 'hw.model']) !== 'MacBookAir10,1' || await run('/usr/bin/git', ['rev-parse', '--show-toplevel']) !== RELEASE_ROOT || !isCanonicalRepository(await run('/usr/bin/git', ['remote', 'get-url', 'origin']))) throw new Error('WRONG_HOST_OR_REPOSITORY');
 }
 const liveRoots = { state: '/Users/andrew/.dex-reach', agents: '/Users/andrew/Library/LaunchAgents', worker: '/Users/andrew/.dex-reach-worker' };
 export async function liveTaskReport() {
@@ -47,9 +47,8 @@ async function livePreflight() {
   const remoteHead = (await run('/usr/bin/git', ['ls-remote', 'origin', `refs/heads/${RELEASE_LINE}`])).split(/\s/)[0] ?? '';
   const dirty = !!await run('/usr/bin/git', ['status', '--porcelain']);
   // Hosted evidence for this exact commit only: its check runs and its CodeQL push workflow run.
-  const checkRuns = JSON.parse(await run('gh', ['api', `repos/westkitty/DEX-REACH/commits/${head}/check-runs?per_page=100`]));
-  const workflowRuns = JSON.parse(await run('gh', ['api', `repos/westkitty/DEX-REACH/actions/runs?head_sha=${head}&per_page=100`]));
-  const ciRows = exactShaCheckRows(head, checkRuns, workflowRuns);
+  const hosted = await readReleaseHostedEvidence(head, endpoint => run('gh', ['api', endpoint]));
+  const ciRows = hosted.rows;
   const rows = await liveTaskReport();
   const releaseRoot = path.join(liveRoots.state, 'runtime/releases', RETAINED_RELEASE);
   let observedDigest = '', installedIntact = false;
@@ -86,7 +85,7 @@ async function livePreflight() {
   const syntheticAtHead = ciChecks.validate === 'SUCCESS';
   const approved = !!authorization && authorization.approvedSha === head;
   const facts: PreflightFacts = {
-    hostname: os.hostname(), model: 'MacBookAir10,1', platform: os.platform(), arch: os.arch(), user: os.userInfo().username, uid: process.geteuid!(), home: os.homedir(), root: RELEASE_ROOT, branch, head, remoteHead, dirty,
+    hostname: os.hostname(), model: 'MacBookAir10,1', platform: os.platform(), arch: os.arch(), user: os.userInfo().username, uid: process.geteuid!(), home: os.homedir(), root: RELEASE_ROOT, repositoryUrl: await run('/usr/bin/git', ['remote', 'get-url', 'origin']), branch, head, remoteHead, dirty,
     candidateVersion: pkg.version, ciHead: ciRows.length ? head : '', ciChecks,
     ...(approved ? { approvedSha: authorization!.approvedSha, approvedVersion: authorization!.approvedVersion } : {}),
     installedIntact, installedRelease: RETAINED_RELEASE, servicesVerified, backupCertified: window.backupCertified,
@@ -98,8 +97,13 @@ async function livePreflight() {
     exactLegacyPairingVerified: window.exactLegacyPairingVerified, credentialsCompatible: window.exactLegacyPairingVerified,
     // E7 (hosted connector interruption) is unavailable; only the owner-approved local/runtime-only scope is admissible.
     requiredHostCapabilityAvailable: approved && authorization!.releaseScope === 'local-runtime-only',
-    maintenanceAuthorized: approved && authorization!.maintenanceWindow, releaseScope: 'local-runtime-only', boundary: window.boundary
+    maintenanceAuthorized: approved && authorization!.maintenanceWindow, ...(approved ? { releaseScope: authorization!.releaseScope } : {}), boundary: window.boundary
   };
+  // CI/capture reads can take time. Reject drift that occurred while collecting their evidence.
+  const finalHead = await run('/usr/bin/git', ['rev-parse', 'HEAD']);
+  const finalRemote = (await run('/usr/bin/git', ['ls-remote', 'origin', `refs/heads/${RELEASE_LINE}`])).split(/\s/)[0];
+  facts.dirty = dirty || !!await run('/usr/bin/git', ['status', '--porcelain']) || finalHead !== head;
+  facts.remoteHead = finalRemote ?? '';
   return { ...evaluatePreflight(facts), head, installedTreeVerified: installedIntact, freeBytes, spaceEstimate: window.spaceMeasured ? 'MEASURED_FROM_CERTIFIED_CAPTURE' : 'PLANNING_ONLY_REQUIRES_OWNER_BUDGET', windowBlockers: window.blockers, quarantined: window.quarantined, tasks: publicTaskReport(rows), releaseLine: RELEASE_LINE, hostedCheckRows: ciRows.length };
 }
 /**

@@ -13,7 +13,7 @@ import { stateDir } from '../shared/local-env.js';
 import { NO_SECRETS, requestedSecretAliases, resolveSecrets, scrubSecretValues, secretInjectionRefusal, type ResolvedSecrets } from '../shared/secrets.js';
 import { describeOperation } from '../shared/operations.js';
 import { withLockPatience } from '../shared/state-io.js';
-import { finishProcessActivity, startProcessActivity, updateProcessActivity, type ProcessExecutionContext } from '../shared/activity.js';
+import { bindProcessIntent, finishProcessActivity, recordProcessIntent, updateProcessActivity, type ProcessExecutionContext } from '../shared/activity.js';
 import { ProcessSignalTerminationError } from '../shared/durable-execution.js';
 
 const execFileAsync = promisify(execFile);
@@ -184,54 +184,57 @@ export async function nativeProcess(
   const scrub = (text: string) => scrubSecretValues(redactKnownEnvironmentSecrets(text), secrets.values);
   const program = readonly ? readonly.program : shell!;
   const childArgs = readonly ? readonly.args : ['-lc', command];
-  // Activity rows are the evidence boot and the orphan supervisor use to prove a process ended. Losing one to a
-  // 5 s lock wait under fsync contention left an ended orphan's lease held until stale reclaim. The writes run
-  // alongside the child, off any latency path, so they wait out contention instead of dropping evidence.
-  return withLockPatience(ACTIVITY_LOCK_PATIENCE_MS, () => new Promise((resolve, reject) => {
-    const child = execFile(program, childArgs, { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env }, async (error, stdout, stderr) => {
-      const activity = await activityPromise.catch(() => null);
-      if (activity && (stdout || stderr)) await updateProcessActivity(activity.id, { updatedAt: new Date().toISOString(), lastStdoutAt: new Date().toISOString() }).catch(() => undefined);
-      if (!error) {
-        if (activity) await finishProcessActivity(activity.id, 'completed', 0).catch(() => undefined);
-        resolve({ exitCode: 0, stdout: scrub(stdout), stderr: scrub(stderr), secretsUsed: secrets.aliases });
-        return;
-      }
-      const value = error as Error & { code?: number | string; killed?: boolean; signal?: NodeJS.Signals | null; stdout?: string; stderr?: string };
-      // A numeric code with no signal is the child's own exit status, the only case where a code exists.
-      if (typeof value.code === 'number' && !value.signal && !value.killed) {
-        if (activity) await finishProcessActivity(activity.id, 'failed', value.code).catch(() => undefined);
-        resolve({
-          exitCode: value.code,
-          stdout: scrub(value.stdout || stdout || ''),
-          stderr: scrub(value.stderr || stderr || value.message),
-          secretsUsed: secrets.aliases
-        });
-        return;
-      }
-      // Killed by a signal, or stopped by the time limit: the outcome is uncertain and no code exists.
-      if (value.signal || value.killed) {
-        const signal = value.signal ?? null;
-        const cause = value.killed ? 'time-limit' : 'signal';
-        const description = value.killed
-          ? `process exceeded its ${timeout} ms time limit and was stopped${signal ? ` with ${signal}` : ''}`
-          : `process was terminated by ${signal} before reporting an exit status`;
-        if (activity) await finishProcessActivity(activity.id, value.killed ? 'timed-out' : 'terminated', undefined, signal ?? undefined).catch(() => undefined);
-        reject(new ProcessSignalTerminationError(signal, cause, `${description}; its effect is unknown and the outcome is uncertain`));
-        return;
-      }
-      // The child never started (for example a missing program or working directory). No effect happened
-      // and no exit status exists, so none is reported.
-      if (activity) await finishProcessActivity(activity.id, 'failed').catch(() => undefined);
-      reject(new Error(`process could not be started (${String(value.code ?? 'unknown error')})`));
+  try { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('not a directory'); }
+  catch { throw new Error('process could not be started (invalid working directory)'); }
+  // This fixed POSIX shim waits on its private stdin. No user command is evaluated until
+  // intent and the waiting process identity have been persisted. exec keeps the same PID.
+  const barrier = 'IFS= read -r gate || exit 125; [ "$gate" = "execute" ] || exit 125; exec "$@"';
+  return withLockPatience(ACTIVITY_LOCK_PATIENCE_MS, async () => {
+    const intent = await recordProcessIntent({ kind: 'native-process', operation: 'dex.process.run', command, cwd, ...context });
+    let child!: ReturnType<typeof execFile>;
+    let timedOut = false;
+    let deadline: ReturnType<typeof setTimeout>;
+    const stopAtDeadline = () => { timedOut = true; child.kill(); };
+    const outcome = new Promise<{ error: Error | null; stdout: string; stderr: string }>(resolve => {
+      child = execFile('/bin/sh', ['-c', barrier, 'dex-reach-launch', program, ...childArgs],
+        { cwd, maxBuffer: 2 * 1024 * 1024, env }, (error, stdout, stderr) => { clearTimeout(deadline); resolve({ error, stdout, stderr }); });
+      deadline = setTimeout(stopAtDeadline, ACTIVITY_LOCK_PATIENCE_MS + 5000);
     });
-    const activityPromise = child.pid
-      ? startProcessActivity({ kind: 'native-process', pid: child.pid, operation: 'dex.process.run', command, cwd, ...context })
-      : Promise.resolve(null);
-    // Observed immediately: a lock timeout here while the command is still running was an unhandled
-    // rejection that terminated the node mid-task. The command continues without an activity record,
-    // which recovery already treats as UNKNOWN, never as proof the process ended.
-    activityPromise.catch(error => console.error(`DEX//REACH process activity not recorded: ${error instanceof Error ? error.message : 'unknown error'}`));
-  }));
+    // Observe pipe failures immediately, including a timeout during identity/ledger contention.
+    let pipeError: Error | null = null;
+    child.stdin?.on('error', error => { pipeError = error; });
+    try {
+      if (!child.pid) throw new Error('PROCESS_INTENT_NO_PID');
+      await bindProcessIntent(intent.id, child.pid);
+      if (child.exitCode !== null || child.signalCode !== null || !child.stdin || pipeError) throw new Error('PROCESS_BARRIER_ENDED');
+      clearTimeout(deadline!);
+      deadline = setTimeout(stopAtDeadline, timeout);
+      await new Promise<void>((resolve, reject) => child.stdin!.write('execute\n', error => { if (error) reject(error); else { child.stdin!.end(); resolve(); } }));
+    } catch {
+      // This handle belongs to our child; never signal a PID obtained from the ledger.
+      child.kill();
+      await outcome;
+      throw new ProcessSignalTerminationError(null, 'signal', 'Process launch evidence could not be committed; execution is uncertain and replay is forbidden.');
+    }
+    const { error, stdout, stderr } = await outcome;
+    try {
+      if (stdout || stderr) await updateProcessActivity(intent.id, { lastStdoutAt: new Date().toISOString() });
+      if (!error) {
+        if (!await finishProcessActivity(intent.id, 'completed', 0)) throw new Error('PROCESS_ACTIVITY_MISSING');
+        return { exitCode: 0, stdout: scrub(stdout), stderr: scrub(stderr), secretsUsed: secrets.aliases };
+      }
+      const value = error as Error & { code?: number | string; killed?: boolean; signal?: NodeJS.Signals | null };
+      if (typeof value.code === 'number' && !value.signal && !timedOut && !value.killed) {
+        if (!await finishProcessActivity(intent.id, 'failed', value.code)) throw new Error('PROCESS_ACTIVITY_MISSING');
+        return { exitCode: value.code, stdout: scrub(stdout), stderr: scrub(stderr || value.message), secretsUsed: secrets.aliases };
+      }
+      if (!await finishProcessActivity(intent.id, timedOut ? 'timed-out' : 'terminated', undefined, value.signal ?? undefined)) throw new Error('PROCESS_ACTIVITY_MISSING');
+      throw new ProcessSignalTerminationError(value.signal ?? null, timedOut ? 'time-limit' : 'signal', `Process ${timedOut ? 'exceeded its time limit' : `was terminated by ${value.signal ?? 'an unknown signal'}`}; its effect is unknown, the outcome is uncertain, and replay is forbidden.`);
+    } catch (error) {
+      if (error instanceof ProcessSignalTerminationError) throw error;
+      throw new ProcessSignalTerminationError(null, 'signal', 'Process result evidence could not be committed; its effect is uncertain and replay is forbidden.');
+    }
+  });
 }
 
 /**
