@@ -6,6 +6,7 @@ import { OAuthError, OAuthErrorCode, type AuthInfo, type OAuthClientInformationF
 import { InvalidGrantError, InvalidScopeError, type AuthorizationParams } from './oauth-types.js';
 import { timingSafeEqualText } from '../shared/security.js';
 import { atomicWriteFile } from '../shared/state-io.js';
+import { processCheckpoint } from '../shared/checkpoint.js';
 
 type TokenRecord = {
   clientId: string;
@@ -259,7 +260,8 @@ export class ReachOAuthProvider {
   private async persist(): Promise<void> {
     this.sweep();
     const snapshot = JSON.stringify(this.state, null, 2) + '\n';
-    const next = this.persistQueue.catch(() => undefined).then(() => atomicWriteFile(this.stateFile, snapshot, 0o600));
+    // Deferred, not refused, while a checkpoint holds admission: memory stays ahead of disk as it already may.
+    const next = this.persistQueue.catch(() => undefined).then(() => processCheckpoint().defer(() => atomicWriteFile(this.stateFile, snapshot, 0o600)));
     this.persistQueue = next;
     await next;
   }

@@ -1,0 +1,49 @@
+{
+  "historicalSha": "5b08354ace35644a2ff9e72e346ff745484eb8ca",
+  "currentSha": "77cb28940f4ff1774111381a74905597fab4f63d",
+  "matrix": [
+    {
+      "label": "current/current",
+      "signedTransport": "PASS",
+      "sync": "PASS",
+      "durable": "PASS",
+      "reconnect": "PASS",
+      "noFallback": "PASS",
+      "processes": "independently compiled gateway and node",
+      "authentication": "synthetic bearer node enrollment and real OAuth MCP"
+    },
+    {
+      "label": "current/historical",
+      "signedTransport": "PASS",
+      "sync": "PASS",
+      "durable": "REFUSED",
+      "reconnect": "PASS",
+      "noFallback": "PASS",
+      "processes": "independently compiled gateway and node",
+      "authentication": "synthetic bearer node enrollment and real OAuth MCP",
+      "refusal": "CAPABILITY_UNSUPPORTED_ON_NODE: node matrix-node does not advertise durable_tasks"
+    },
+    {
+      "label": "historical/current",
+      "signedTransport": "PASS",
+      "sync": "PASS",
+      "durable": "REFUSED",
+      "reconnect": "PASS",
+      "noFallback": "PASS",
+      "processes": "independently compiled gateway and node",
+      "authentication": "synthetic bearer node enrollment and real OAuth MCP",
+      "refusal": "Protocol v1 ingress refuses unknown reach_task tool (-32602)."
+    },
+    {
+      "label": "historical/historical",
+      "signedTransport": "PASS",
+      "sync": "PASS",
+      "durable": "REFUSED",
+      "reconnect": "PASS",
+      "noFallback": "PASS",
+      "processes": "independently compiled gateway and node",
+      "authentication": "synthetic bearer node enrollment and real OAuth MCP",
+      "refusal": "Protocol v1 ingress refuses unknown reach_task tool (-32602)."
+    }
+  ]
+}

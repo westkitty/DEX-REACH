@@ -1,3 +1,6 @@
+import { assertNotQuarantined } from '../shared/task-quarantine.js';
+import { REACH_CAPABILITIES } from '../shared/capabilities.js';
+import type { TaskAuthority } from '../shared/access.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -52,6 +55,7 @@ export type ReachTaskRecord = {
   idempotencyKey: string;
   payloadSha256: string;
   policyHash?: string;
+  authority?: TaskAuthority;
   traceId?: string;
   resultRef?: string;
   resultHash?: string;
@@ -70,6 +74,7 @@ export type TaskCreateInput = {
   idempotencyKey: string;
   payloadSha256: string;
   policyHash?: string;
+  authority?: TaskAuthority;
   traceId?: string;
   parentTaskId?: string | null;
   rootTaskId?: string;
@@ -216,6 +221,10 @@ function validateRecord(value: unknown, location: string): ReachTaskRecord {
   if (!record.summary || record.summary.isShareSafe !== true || typeof record.summary.status !== 'string' || record.summary.status.length > 240) {
     throw new TaskStoreCorruptError(`${location}.summary is not share-safe`);
   }
+  if (record.authority && (!Array.isArray(record.authority.capabilities) || !record.authority.capabilities.length
+    || record.authority.capabilities.some(c => !REACH_CAPABILITIES.includes(c))
+    || !Array.isArray(record.authority.paths) || record.authority.paths.length > 128
+    || record.authority.paths.some(p => typeof p !== 'string' || p.length > 4096))) throw new TaskStoreCorruptError('invalid task authority');
   assertRepoContext(record.repoContext);
   if (record.archivedAtUtc !== undefined) assertTimestamp(record.archivedAtUtc, `${location}.archivedAtUtc`);
   return clone(record as ReachTaskRecord);
@@ -363,6 +372,7 @@ export class NodeTaskStore implements TaskStore {
           ? `task identity already exists; use read instead: ${taskId}`
           : `task identity has conflicting binding: ${taskId}`);
       }
+      if (Object.values({ ...document.records, ...document.archived }).some(r => r.idempotencyKey === input.idempotencyKey && r.actorId === input.actorId && r.nodeId === input.nodeId && r.operation === input.operation)) throw new Error('idempotency key already exists; reattach instead of creating duplicate execution');
       const parent = parentTaskId ? document.records[parentTaskId] ?? document.archived[parentTaskId] : undefined;
       if (parentTaskId && !parent) throw new Error(`parent task not found: ${parentTaskId}`);
       const rootTaskId = input.rootTaskId ?? parent?.rootTaskId ?? taskId;
@@ -381,6 +391,7 @@ export class NodeTaskStore implements TaskStore {
         createdAtUtc: now, updatedAtUtc: now, idempotencyKey: input.idempotencyKey,
         payloadSha256: input.payloadSha256, ...(input.repoContext ? { repoContext: clone(input.repoContext) } : {}),
         ...(input.policyHash ? { policyHash: input.policyHash } : {}),
+        ...(input.authority ? { authority: clone(input.authority) } : {}),
         ...(input.traceId ? { traceId: input.traceId } : {}),
         summary: { status: 'Task accepted and durably persisted on node storage.', isShareSafe: true }
       };
@@ -400,6 +411,7 @@ export class NodeTaskStore implements TaskStore {
 
   async update(taskId: string, update: TaskUpdate): Promise<ReachTaskRecord> {
     assertTaskId(taskId);
+    await assertNotQuarantined(this.dir, taskId);
     if (update.status === undefined && update.resultRef === undefined && update.resultHash === undefined && update.failureClass === undefined) throw new Error('task update requires state, status, or outcome metadata');
     if (update.status !== undefined && update.status.length > 240) throw new Error('task status is too long');
     const updated = await this.mutate(document => {
@@ -430,12 +442,13 @@ export class NodeTaskStore implements TaskStore {
       record.updatedAtUtc = new Date().toISOString();
       return record;
     });
-    await this.event({ taskId: updated.taskId, kind: update.state ? 'transition' : 'updated', state: updated.state, ...(update.state ? { toState: updated.state } : {}), actorId: updated.actorId, nodeId: updated.nodeId, operation: updated.operation, attempt: updated.attemptNumber, summary: updated.summary.status, ...(updated.traceId ? { traceId: updated.traceId } : {}) });
+    await this.event({ taskId: updated.taskId, kind: update.state ? 'transition' : 'updated', state: updated.state, ...(update.state ? { toState: updated.state } : {}), actorId: updated.actorId, nodeId: updated.nodeId, operation: updated.operation, attempt: updated.attemptNumber, summary: updated.summary.status, ...(updated.resultRef ? { evidenceRef: updated.resultRef } : {}), ...(updated.failureClass ? { failureClass: updated.failureClass } : {}), ...(updated.traceId ? { traceId: updated.traceId } : {}) });
     return updated;
   }
 
-  async transition(taskId: string, state: TaskState, status?: string): Promise<ReachTaskRecord> {
+  async transition(taskId: string, state: TaskState, status?: string, expectedStates?: readonly TaskState[]): Promise<ReachTaskRecord> {
     assertTaskId(taskId);
+    await assertNotQuarantined(this.dir, taskId);
     if (!TASK_STATES.includes(state)) throw new Error(`invalid task state: ${state}`);
     const transitioned = await this.mutate(document => {
       const record = document.records[taskId];
@@ -443,6 +456,7 @@ export class NodeTaskStore implements TaskStore {
         if (document.archived[taskId]) throw new Error(`task is archived and immutable: ${taskId}`);
         throw new Error(`task not found: ${taskId}`);
       }
+      if (expectedStates && !expectedStates.includes(record.state)) throw new Error('CANCELLATION_UNPROVEN: execution may continue; task state preserved');
       if (!legalTransition(record.state, state)) throw new Error(`illegal task transition ${record.state} -> ${state}`);
       record.state = state;
       record.updatedAtUtc = new Date().toISOString();

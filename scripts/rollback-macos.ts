@@ -9,6 +9,7 @@ import { errorText, failureOutcome, launchdIsRunning, launchdServiceIsEnabled } 
 import { reloadLaunchdService } from './lib/service-reloader.js';
 import { readEnvFile } from './lib/node-files.js';
 import { restoreRuntimeRollbackSnapshot, validateRuntimeRollbackSnapshot, verifiedOnlineNodeCount, type RuntimeRollbackService } from './lib/runtime-rollback.js';
+import { installLockFile } from './lib/runtime-release.js';
 
 const releaseIndex = process.argv.indexOf('--candidate-release-id');
 const candidateReleaseId = releaseIndex >= 0 ? process.argv[releaseIndex + 1] : undefined;
@@ -135,4 +136,4 @@ try {
 }
 }
 
-await withFileLock(path.join(localStateDir, 'runtime', 'install.lock'), rollback, { timeoutMs: 1000 });
+await withFileLock(installLockFile(localStateDir), rollback, { timeoutMs: 1000 });

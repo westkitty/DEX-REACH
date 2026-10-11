@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { stageRuntimeRelease, verifyRuntimeRelease } from '../scripts/lib/runtime-release.js';
+import { installLockFile, stageRuntimeRelease, verifyRuntimeRelease } from '../scripts/lib/runtime-release.js';
 import { servicePath } from '../scripts/lib/service.js';
 
 async function write(file: string, text: string): Promise<void> {
@@ -80,8 +80,9 @@ test('macOS install has a revision-bound rollback capsule and explicit recovery 
   assert.ok(snapshotAt >= 0 && snapshotAt < workerWriteAt);
   assert.ok(workerWriteAt < plistWriteAt && plistWriteAt < activationAt);
   assert.match(installer, /launchctl.*print-disabled/s);
-  assert.match(installer, /withFileLock\(path\.join\(localStateDir, 'runtime', 'install\.lock'\), install/);
-  assert.match(rollback, /withFileLock\(path\.join\(localStateDir, 'runtime', 'install\.lock'\), rollback/);
+  assert.match(installer, /withFileLock\(installLockFile\(localStateDir\), install/);
+  assert.match(rollback, /withFileLock\(installLockFile\(localStateDir\), rollback/);
+  assert.equal(installLockFile('/state'), path.join('/state', 'runtime', 'install.lock'));
   assert.match(installer, /do not have distinct running process identities/);
 });
 

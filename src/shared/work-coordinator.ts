@@ -189,8 +189,8 @@ export function coordinatorDir(): string { return path.join(machineStateDir(), '
  * state path is represented by a stable non-secret digest beneath the system temporary directory.
  * The daemon still verifies account ownership and applies 0600 permissions before serving it.
  */
-export function coordinatorSocketPath(): string {
-  const identity = crypto.createHash('sha256').update(machineStateDir()).digest('hex').slice(0, 20);
+export function coordinatorSocketPath(root = machineStateDir()): string {
+  const identity = crypto.createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 20);
   return path.join(os.tmpdir(), `dex-reach-coord-${identity}.sock`);
 }
 export function leasesDir(): string { return path.join(coordinatorDir(), 'leases'); }
@@ -500,6 +500,9 @@ async function pruneExpired(state: CoordinatorState, now = Date.now()): Promise<
 // ---------------------------------------------------------------------------
 
 export type CapacitySnapshot = {
+  /** Internal freshness and lease-accounting binding; omitted only by deterministic trusted fixtures. */
+  sampledAtMs?: number;
+  excludedLeaseIds?: string[];
   physicalMemoryBytes: number;
   logicalCpuCount: number;
   loadAverage1m: number | null;
@@ -516,16 +519,21 @@ export type CapacitySnapshot = {
  * same thing: the lock is held only long enough to reserve capacity.
  */
 export async function snapshotCapacity(): Promise<CapacitySnapshot> {
+  const sampledAtMs = Date.now();
   const state = await readCoordinatorState().catch(() => ({ leases: [] as WorkLease[] }));
   const [probe, rows] = await Promise.all([probeHost(), observeProcessRows()]);
-  const observed = classifyObservedWorkloads(rows, { leasedPids: state.leases.map(lease => lease.pid) });
+  // Lease exclusion is identity-checked against process start time; an unreadable table is 'unknown'.
+  const leases = state.leases.flatMap(lease => typeof lease.pid === 'number' && typeof lease.createdAt === 'string' ? [{ pid: lease.pid, createdAt: lease.createdAt }] : []);
+  const observed = rows ? classifyObservedWorkloads(rows, { leases, observedAt: Date.now() }) : { uncoordinatedHeavy: 0, dexServices: 0, uncoordinatedDetails: [], dexServiceDetails: [], processObservation: 'unknown' as const };
   const health = await recordCapacityHealth({
-    memory: probe.memory,
+    memory: observed.processObservation === 'unknown' ? 'unknown' : probe.memory,
     cpu: classifyCpuPressure(probe.loadAverage1m, probe.logicalCpuCount),
     thermal: probe.thermal,
     observedUncoordinatedHeavy: observed.uncoordinatedHeavy
   });
   return {
+    sampledAtMs,
+    excludedLeaseIds: state.leases.map(lease => lease.id).sort(),
     physicalMemoryBytes: probe.physicalMemoryBytes,
     logicalCpuCount: probe.logicalCpuCount,
     loadAverage1m: probe.loadAverage1m,
@@ -547,6 +555,9 @@ export function decideAdmission(
 ): { admit: boolean; capacity: MachineCapacity; reasons: string[] } {
   const blocking: string[] = [];
   const substantive = isSubstantive(request.workload, request.access);
+
+  if (substantive && snapshot.sampledAtMs !== undefined && (Date.now() - snapshot.sampledAtMs > 2000 || Date.now() < snapshot.sampledAtMs)) blocking.push('capacity observation stale; fresh sampling required');
+  if (substantive && snapshot.excludedLeaseIds && JSON.stringify(snapshot.excludedLeaseIds) !== JSON.stringify(state.leases.map(lease => lease.id).sort())) blocking.push('lease accounting changed during observation; fresh sampling required');
 
   // Corrupt or unreadable coordination state collapses to one substantive job (DEX-INV-024).
   const degradedPenalty = state.degraded && substantive ? 1 : 0;
@@ -596,7 +607,7 @@ export function decideAdmission(
       memory: snapshot.memory,
       thermal: snapshot.thermal
     },
-    { activeSubstantive, activeHeavy, observedUncoordinatedHeavy: snapshot.observed.uncoordinatedHeavy },
+    { activeSubstantive, activeHeavy, observedUncoordinatedHeavy: snapshot.observed.uncoordinatedHeavy, processObservation: snapshot.observed.processObservation ?? 'observed' },
     { workload: request.workload, access: request.access, profile: snapshot.profile, interactiveReady: snapshot.interactiveReady }
   );
 
@@ -768,7 +779,9 @@ export async function cancelTicket(ticketId: string): Promise<boolean> {
 export async function workStatus(options: { snapshot?: CapacitySnapshot } = {}): Promise<WorkStatus> {
   await ensureLayout();
   const snapshot = options.snapshot ?? (await snapshotCapacity());
-  const state = await pruneExpired(await readCoordinatorState());
+  // Reclaiming removes lease/ticket files and records events: the same mutation acquire performs, so it
+  // takes the same lock. Otherwise a status read races admission and escapes a checkpoint fence.
+  const state = await withFileLock(coordinatorLockFile(), async () => pruneExpired(await readCoordinatorState()), { timeoutMs: 15_000 });
   const decision = decideAdmission(state, snapshot, { access: 'mutate', workload: 'medium' });
   return {
     capacity: decision.capacity,

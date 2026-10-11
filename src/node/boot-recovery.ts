@@ -1,3 +1,4 @@
+import { readQuarantine } from '../shared/task-quarantine.js';
 import { listProcessActivities, type ProcessActivity } from '../shared/activity.js';
 import { coordinatedStatus } from '../coordinator/client.js';
 import { decideBootRecovery, type BootRecoveryDecision } from '../shared/task-recovery.js';
@@ -28,8 +29,8 @@ function matchingTicket(task: ReachTaskRecord, status: WorkStatus | null) {
 }
 
 async function hasVerifiedResult(task: ReachTaskRecord, results: ResultStore): Promise<boolean> {
-  if (!task.resultRef) return false;
-  try { await results.readValue(task.resultRef); return true; } catch { return false; }
+  if (!task.resultRef || !task.resultHash) return false;
+  try { await results.readValueForTask(task.resultRef, task.taskId, task.resultHash); return true; } catch { return false; }
 }
 
 export async function reconcileBootTasks(taskStore: NodeTaskStore, results: ResultStore): Promise<BootRecoveryReport[]> {
@@ -42,7 +43,10 @@ export async function reconcileBootTasks(taskStore: NodeTaskStore, results: Resu
   catch { transportConnected = false; }
 
   const reports: BootRecoveryReport[] = [];
+  const quarantined = await readQuarantine(taskStore.rootDir);
   for (const task of tasks) {
+    // Owner-quarantined: preserved byte-for-byte. No status note, no transition, no replay.
+    if (quarantined.has(task.taskId)) { reports.push({ taskId: task.taskId, decision: { kind: 'INPUT_REQUIRED', reason: 'Owner-quarantined historical task: effect unknown, replay forbidden, record preserved unchanged.' } }); continue; }
     const activity = matchingActivity(task, activities);
     const lease = matchingLease(task, coordinator);
     const ticket = matchingTicket(task, coordinator);
@@ -67,11 +71,14 @@ export async function reconcileBootTasks(taskStore: NodeTaskStore, results: Resu
         await taskStore.transition(task.taskId, 'COMPLETED', `Boot reconciliation completed the task from verified durable result evidence.`);
       }
     } else if (decision.kind === 'AMBIGUOUS' || decision.kind === 'DEGRADED') {
-      if (task.state === 'RUNNING') await taskStore.transition(task.taskId, 'AMBIGUOUS', decision.reason);
-      else await taskStore.update(task.taskId, { status: decision.reason });
+      if (task.state === 'RUNNING') {
+        if (decision.kind === 'AMBIGUOUS') await taskStore.update(task.taskId, { failureClass: 'AMBIGUOUS_EFFECT' });
+        await taskStore.transition(task.taskId, 'AMBIGUOUS', decision.reason);
+      }
+      else if (task.summary.status !== decision.reason) await taskStore.update(task.taskId, { status: decision.reason });
     } else if (decision.kind === 'INPUT_REQUIRED') {
       if (task.state === 'RUNNING') await taskStore.transition(task.taskId, 'INPUT_REQUIRED', decision.reason);
-      else await taskStore.update(task.taskId, { status: decision.reason });
+      else if (task.summary.status !== decision.reason) await taskStore.update(task.taskId, { status: decision.reason });
     } else {
       await taskStore.update(task.taskId, { status: decision.reason });
     }

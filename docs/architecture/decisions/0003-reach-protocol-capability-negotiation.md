@@ -1,5 +1,12 @@
 # ADR-0003 — REACH Protocol Capability Negotiation and Legacy Compatibility
 
+## Current source note — 2026-10-10 maximum-scope v2 campaign
+
+Accepted decision implemented at source scope: integer signed marker 1 is retained, semantic 1.0/2.0 is negotiated on node frames, legacy MCP schemas remain unchanged, and an additive OAuth SSE route supplies persisted replay. Remote task_reconciliation is withheld; owner CLI reconciliation remains. There is no invented legacy REST/OpenAPI surface. The six-month clock begins with future general release. Installed and external-client acceptance remain independent.
+
+Evidence and exact validation/publication boundaries: [../../c14-compatibility/C14_V2_COMPLETION_REPORT.md](../../c14-compatibility/C14_V2_COMPLETION_REPORT.md).
+C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 program PARTIAL; C15 BLOCKED.
+
 Status: Accepted
 Date: 2026-10-05
 Decision owners: DEX//REACH project

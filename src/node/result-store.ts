@@ -131,6 +131,14 @@ export class ResultStore {
     try { return JSON.parse(text) as unknown; } catch { throw new Error('result blob is corrupt; refusing recovery'); }
   }
 
+  async readValueForTask(handle: string, taskId: string, expectedHash: string): Promise<unknown> {
+    const metadata = await this.metadata(handle);
+    if (metadata.taskId !== taskId || metadata.resultHash !== expectedHash) {
+      throw new Error('result binding mismatch; refusing recovery');
+    }
+    return this.readValue(handle);
+  }
+
   async metadata(handle: string): Promise<ResultMetadata> {
     if (!HANDLE_PATTERN.test(handle)) throw new Error('invalid result handle');
     const document = await readDocument(this.dir);

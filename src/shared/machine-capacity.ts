@@ -35,6 +35,8 @@ export type ObservedWorkloads = {
   /** Ephemeral, local-only explanations for the current classification; command arguments are never retained. */
   uncoordinatedDetails?: ObservedProcess[];
   dexServiceDetails?: ObservedProcess[];
+  /** 'unknown' when the process table could not be read: absence of rows is then not evidence of capacity. */
+  processObservation?: 'observed' | 'unknown';
 };
 
 export type ObservedProcess = {
@@ -73,6 +75,8 @@ export type CapacityCounts = {
   activeSubstantive: number;
   activeHeavy: number;
   observedUncoordinatedHeavy: number;
+  /** Omitted means observed (historical callers). 'unknown' queues substantive work conservatively. */
+  processObservation?: 'observed' | 'unknown';
 };
 
 /**
@@ -174,6 +178,8 @@ export function evaluateCapacity(
     };
   }
 
+  // An unreadable process table proves nothing about competing work: queue rather than assume an idle host.
+  if (counts.processObservation === 'unknown') reasons.push('process observation unavailable; substantive work queues conservatively');
   const usedSubstantive = counts.activeSubstantive + counts.observedUncoordinatedHeavy;
   if (usedSubstantive >= substantiveSlots) {
     reasons.push(
@@ -189,15 +195,15 @@ export function evaluateCapacity(
 
   if (probe.memory === 'critical') reasons.push('memory pressure critical');
   else if (probe.memory === 'warning' && heavy) reasons.push('memory pressure warning; heavy work queues');
-  else if (probe.memory === 'unknown' && heavy) reasons.push('memory pressure unknown; heavy work queues conservatively');
+  else if (probe.memory === 'unknown') reasons.push('memory pressure unknown; substantive work queues conservatively');
 
   // Memory and CPU are the primary and secondary limiters, so an unmeasured reading of either
-  // queues heavy work. Thermal has no portable signal at all (Linux reports none), so an unknown
-  // thermal reading is not treated as pressure; that would make heavy work impossible off macOS.
-  if (probe.thermal === 'limited' && heavy) reasons.push('thermal limiting observed; heavy work queues');
-  if (cpu === 'saturated' && heavy) reasons.push('CPU saturated (1m load >= logical CPUs)');
+  // queues substantive work. Thermal has no portable signal at all (Linux reports none), so an
+  // unknown thermal reading is not treated as pressure; otherwise work could never run off macOS.
+  if (probe.thermal === 'limited') reasons.push('thermal limiting observed; substantive work queues');
+  if (cpu === 'saturated') reasons.push('CPU saturated (1m load >= logical CPUs)');
   else if (cpu === 'busy' && heavy) reasons.push('CPU busy (1m load >= 75% of logical CPUs)');
-  else if (cpu === 'unknown' && heavy) reasons.push('CPU load unknown; heavy work queues conservatively');
+  else if (cpu === 'unknown') reasons.push('CPU load unknown; substantive work queues conservatively');
 
   if (!reasons.length) reasons.push('capacity available');
 
@@ -293,7 +299,7 @@ export function parseLinuxMemInfo(raw: string): { memory: MemoryPressure; swapUs
 
 async function runProbe(file: string, args: string[]): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync(file, args, { timeout: 4000, maxBuffer: 1024 * 1024 });
+    const { stdout } = await execFileAsync(file, args, { timeout: 1000, maxBuffer: 1024 * 1024 });
     return stdout;
   } catch {
     return null;
@@ -327,16 +333,20 @@ export async function probeHost(): Promise<HostProbe> {
   let swapUsedBytes: number | null = null;
 
   if (platform === 'darwin') {
-    const level = await runProbe('sysctl', ['-n', 'kern.memorystatus_vm_pressure_level']);
+    // Independent probes run together; an unavailable optional thermal signal cannot
+    // age healthy capacity evidence beyond the admission freshness window.
+    const [level, swap, therm] = await Promise.all([
+      runProbe('sysctl', ['-n', 'kern.memorystatus_vm_pressure_level']),
+      runProbe('sysctl', ['-n', 'vm.swapusage']),
+      runProbe('pmset', ['-g', 'therm'])
+    ]);
     if (level) memory = parseDarwinPressureLevel(level);
     if (memory === 'unknown') {
       const pressure = await runProbe('memory_pressure', []);
       if (pressure) memory = parseDarwinMemoryPressure(pressure);
       else probeErrors.push('memory_pressure unavailable');
     }
-    const swap = await runProbe('sysctl', ['-n', 'vm.swapusage']);
     if (swap) swapUsedBytes = parseDarwinSwapUsage(swap);
-    const therm = await runProbe('pmset', ['-g', 'therm']);
     thermal = therm ? parseDarwinThermal(therm) : 'unknown';
   } else if (platform === 'linux') {
     const psi = await readIfPresent('/proc/pressure/memory');
@@ -362,7 +372,16 @@ export async function probeHost(): Promise<HostProbe> {
 // Uncoordinated workload observation.
 // ---------------------------------------------------------------------------
 
-export type ProcessRow = { pid: number; ppid: number; cpu: number; mem: number; command: string };
+export type ProcessRow = { pid: number; ppid: number; cpu: number; mem: number; command: string; elapsedSeconds?: number };
+
+/** `ps` elapsed time `[[dd-]hh:]mm:ss` to seconds; undefined when it cannot be read exactly. */
+export function parseElapsed(raw: string): number | undefined {
+  const match = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(raw);
+  if (!match) return undefined;
+  const [, days, hours, minutes, seconds] = match;
+  if (Number(minutes) > 59 || Number(seconds) > 59 || (hours !== undefined && Number(hours) > 23)) return undefined;
+  return ((Number(days ?? 0) * 24 + Number(hours ?? 0)) * 60 + Number(minutes)) * 60 + Number(seconds);
+}
 
 /** Parse `ps -axo pid,ppid,%cpu,%mem,etime,command` (or the Linux `args` equivalent). */
 export function parseProcessTable(raw: string): ProcessRow[] {
@@ -375,19 +394,14 @@ export function parseProcessTable(raw: string): ProcessRow[] {
       ppid: Number.parseInt(match[2]!, 10),
       cpu: Number.parseFloat(match[3]!),
       mem: Number.parseFloat(match[4]!),
-      command: match[6]!
+      command: match[6]!,
+      ...(parseElapsed(match[5]!) !== undefined ? { elapsedSeconds: parseElapsed(match[5]!) } : {})
     });
   }
   return rows;
 }
 
-/** Commands that indicate a substantial build/test/AI coding workload. */
-const HEAVY_COMMAND_PATTERNS: readonly RegExp[] = [
-  /\bclaude\b/, /\bcodex\b/, /\bgrok(bot)?\b/,
-  /\btsc\b/, /\bvite\b/, /\bwebpack\b/, /\brollup\b/, /\besbuild\b/,
-  /\bnpm\b/, /\bpnpm\b/, /\byarn\b/,
-  /\bpytest\b/, /\bcargo\b/, /\bswift(c)?\b/, /\bxcodebuild\b/, /\bgradle\b/, /\bjava\b/, /\badb\b/
-];
+/* Workload identities are defined by AGENT_IDENTITIES and TOOL_IDENTITIES below. */
 
 /**
  * Long-running DEX gateway/node services are not competing coding jobs, even though they are
@@ -401,16 +415,25 @@ const DEX_SERVICE_PATTERNS: readonly RegExp[] = [
   /src\/node\/main\.(ts|js)/
 ];
 
-/**
- * Electron/Chromium helpers inherit their host application's command line, including strings such
- * as `codex-sandbox`. They are part of a desktop application's UI process tree, not independent
- * coding sessions. Keep this constrained to documented helper process types so a CLI command with
- * an unrelated `--type` flag remains eligible for ordinary workload classification.
- */
-const DESKTOP_HELPER_TYPE_PATTERN = /(?:^|\s)--type=(?:renderer|gpu-process|utility|zygote)(?:\s|$)/;
-
+/** Service identity follows the actual entrypoint through Node loaders and the known tsx launcher.
+ * Loader values, eval strings and later command arguments never establish service identity. */
 export function isDexServiceCommand(command: string): boolean {
-  return DEX_SERVICE_PATTERNS.some(pattern => pattern.test(command));
+  const tokens = command.trim().split(/\s+/);
+  if (!/^(?:node|nodejs|tsx|bun)$/.test(path.basename(tokens.shift() ?? ''))) return false;
+  const entrypoint = (): string | undefined => {
+    while (tokens.length) {
+      const token = tokens.shift()!;
+      if (/^(?:-e|--eval|-p|--print)(?:=|$)/.test(token)) return undefined;
+      if (VALUE_FLAGS.has(token)) { tokens.shift(); continue; }
+      if (token.startsWith('-') && token !== '--') continue;
+      if (token === '--') return tokens.shift();
+      return token;
+    }
+    return undefined;
+  };
+  let script = entrypoint();
+  if (script && /(?:^|\/)node_modules\/tsx\/dist\/cli\.mjs$/.test(script)) script = entrypoint();
+  return !!script && DEX_SERVICE_PATTERNS.some(pattern => pattern.test(script) && /main\.(?:ts|js)$/.test(script));
 }
 
 export function dexServiceLabel(command: string): 'coordinator' | 'worker' | 'gateway' | 'node' {
@@ -427,11 +450,66 @@ export function safeProcessLabel(command: string): string {
   return /^[A-Za-z0-9._+:-]{1,48}$/.test(base) ? base : 'process';
 }
 
+/**
+ * Workload identity from the executable itself, never from arbitrary arguments: a wrapper whose
+ * arguments mention `npm`, or a script given `--name claude`, is not that workload. The executable
+ * is a macOS bundle's `Contents/MacOS/<name>` (paths may contain spaces), else the first token; for
+ * interpreters it is the script (or `node --test`, `python -m <module>`). Unknown active identity remains an anonymous competitor; names never authorize an exclusion.
+ */
+const AGENT_IDENTITIES = new Set(['claude', 'codex', 'grok', 'grokbot']);
+const TOOL_IDENTITIES = new Set(['tsc', 'vite', 'webpack', 'rollup', 'esbuild', 'npm', 'pnpm', 'yarn', 'pytest', 'cargo', 'swift', 'swiftc', 'xcodebuild', 'gradle', 'java', 'adb', 'node-test']);
+const SCRIPT_ALIASES: Record<string, string> = { 'npm-cli': 'npm', 'pnpm.cjs': 'pnpm', 'yarn.js': 'yarn', 'tsc.js': 'tsc' };
+const INTERPRETERS = /^(?:node|nodejs|bun|deno|python(?:\d+(?:\.\d+)?)?)$/;
+const VALUE_FLAGS = new Set(['--import', '--require', '-r', '--loader', '--experimental-loader', '--conditions', '-C', '--input-type', '--env-file']);
+export type WorkloadIdentity = { name: string; kind: 'agent' | 'tool' };
+export function processWorkloadIdentity(command: string): WorkloadIdentity | null {
+  const trimmed = command.trim();
+  const bundle = /^(\/[^\0]*?\.app\/Contents\/MacOS\/[^/\s]+)(?=\s|$)/.exec(trimmed);
+  const executable = bundle ? bundle[1]! : (trimmed.split(/\s+/)[0] ?? '');
+  const rest = (bundle ? trimmed.slice(bundle[1]!.length) : trimmed.slice(executable.length)).trim().split(/\s+/).filter(Boolean);
+  let name = path.basename(executable);
+  if (INTERPRETERS.test(name)) {
+    if (/^node|^nodejs|^bun|^deno/.test(name) && rest.includes('--test')) name = 'node-test';
+    else {
+      const moduleIndex = name.startsWith('python') ? rest.indexOf('-m') : -1;
+      if (moduleIndex >= 0) name = rest[moduleIndex + 1] ?? '';
+      else {
+        let script = '';
+        for (let i = 0; i < rest.length; i++) {
+          const token = rest[i]!;
+          if (VALUE_FLAGS.has(token)) { i++; continue; }
+          if (token.startsWith('-')) continue;
+          script = token; break;
+        }
+        // macOS ps prints unquoted script paths containing spaces. Recognize only a leading
+        // absolute script path, not arbitrary later arguments. Unknown hot identities still count.
+        const spacedScript = /^(\/[^\0]+?\/(?:tsc|npm-cli\.js|pnpm\.cjs|yarn\.js))(?=\s+-|$)/.exec(rest.join(' '))?.[1];
+        const base = path.basename(spacedScript ?? script);
+        name = SCRIPT_ALIASES[base] ?? base.replace(/\.(?:c|m)?(?:js|ts)$/, '');
+        name = SCRIPT_ALIASES[name] ?? name;
+      }
+    }
+  }
+  if (AGENT_IDENTITIES.has(name)) return { name, kind: 'agent' };
+  if (TOOL_IDENTITIES.has(name)) return { name, kind: 'tool' };
+  return null;
+}
+
+function desktopBundle(command: string): string | null {
+  return /^(\/[^\0]*?\.app)\/Contents\//.exec(command.trim())?.[1] ?? null;
+}
+
 export function looksHeavy(row: ProcessRow): boolean {
   if (isDexServiceCommand(row.command)) return false;
-  if (DESKTOP_HELPER_TYPE_PATTERN.test(row.command)) return false;
-  if (!HEAVY_COMMAND_PATTERNS.some(pattern => pattern.test(row.command))) return false;
-  // A named build tool that is consuming neither CPU nor memory is idle, not a competing job.
+  // Anonymous high CPU and active desktop work cannot hide behind helper flags.
+  if (row.cpu >= 80) return true;
+  if (desktopBundle(row.command)) return row.cpu >= 10;
+  const identity = processWorkloadIdentity(row.command);
+  if (!identity) return row.cpu >= 10;
+  // A resident agent session holds memory while idle; only sustained CPU shows it is doing work.
+  // Host memory pressure is evaluated separately and still refuses work. Build/test tools keep the
+  // historical CPU-or-memory rule: a memory-heavy compiler is a real competing job.
+  if (identity.kind === 'agent') return row.cpu >= 10;
   return row.cpu >= 10 || row.mem >= 2;
 }
 
@@ -440,11 +518,29 @@ export function looksHeavy(row: ProcessRow): boolean {
  * it, their own process tree below this process, and the tree beneath every already-leased PID.
  * Sibling agents are deliberately NOT excluded — those are exactly the workloads worth counting.
  */
+export type LeaseIdentity = { pid: number; createdAt: string };
+export type ExclusionOptions = { leasedPids?: readonly number[]; selfPid?: number; leases?: readonly LeaseIdentity[]; observedAt?: number };
+/**
+ * A lease covers a PID only when that process provably existed when the lease was created: a
+ * process that started later reused the PID and is an unrelated job. Unknown start time is not proof.
+ */
+export function verifiedLeasePids(rows: readonly ProcessRow[], leases: readonly LeaseIdentity[], observedAt: number): number[] {
+  const byPid = new Map(rows.map(row => [row.pid, row]));
+  return leases.flatMap(lease => {
+    const row = byPid.get(lease.pid), created = Date.parse(lease.createdAt);
+    if (!row || row.elapsedSeconds === undefined || !Number.isFinite(created)) return [];
+    const startedAt = observedAt - row.elapsedSeconds * 1000;
+    // ps etime is rounded to seconds: only exclude when even the latest possible
+    // start predates creation. Boundary/unknown identity is conservatively counted.
+    return startedAt <= created ? [lease.pid] : [];
+  });
+}
 export function collectExcludedPids(
   rows: readonly ProcessRow[],
-  options: { leasedPids?: readonly number[]; selfPid?: number } = {}
+  options: ExclusionOptions = {}
 ): Set<number> {
   const selfPid = options.selfPid ?? process.pid;
+  options = { ...options, leasedPids: [...(options.leasedPids ?? []), ...verifiedLeasePids(rows, options.leases ?? [], options.observedAt ?? Date.now())] };
   const parentOf = new Map<number, number>();
   const childrenOf = new Map<number, number[]>();
   for (const row of rows) {
@@ -484,17 +580,22 @@ export function collectExcludedPids(
  */
 export function classifyObservedWorkloads(
   rows: readonly ProcessRow[],
-  options: { leasedPids?: readonly number[]; selfPid?: number } = {}
+  options: ExclusionOptions = {}
 ): ObservedWorkloads {
   const excluded = collectExcludedPids(rows, options);
   const byPid = new Map(rows.map(row => [row.pid, row]));
   const heavy = rows.filter(row => !excluded.has(row.pid) && !isDexServiceCommand(row.command) && looksHeavy(row));
+  // One workload per session: busy tools under one agent (or one build) share that ancestor's slot,
+  // whether or not the ancestor itself is busy. Independent sessions remain separate workloads.
   const heavyPids = new Set(heavy.map(row => row.pid));
+  const workloadAncestor = (row: ProcessRow | undefined) => !!row && !excluded.has(row.pid) && !isDexServiceCommand(row.command) && (heavyPids.has(row.pid) || processWorkloadIdentity(row.command) !== null);
   const rootFor = (row: ProcessRow): number => {
     let root = row;
+    // A desktop helper is one app workload, not one independent coding session per renderer.
+    const bundle = desktopBundle(row.command);
     let parent = byPid.get(root.ppid);
     let guard = 0;
-    while (parent && heavyPids.has(parent.pid) && guard++ < 64) { root = parent; parent = byPid.get(root.ppid); }
+    while (parent && parent.pid !== root.pid && (workloadAncestor(parent) || (bundle !== null && desktopBundle(parent.command) === bundle)) && guard++ < 64) { root = parent; parent = byPid.get(root.ppid); }
     return root.pid;
   };
   const groups = new Map<number, ProcessRow[]>();
@@ -503,21 +604,29 @@ export function classifyObservedWorkloads(
     const root = byPid.get(pid) ?? group[0]!;
     const cpu = Math.max(...group.map(row => row.cpu));
     const mem = Math.max(...group.map(row => row.mem));
-    return { pid, pids: group.map(row => row.pid).sort((a, b) => a - b), cpu, mem, processLabel: safeProcessLabel(root.command), matchedBy: cpu >= 10 ? 'cpu' : 'memory' };
+    return { pid, pids: group.map(row => row.pid).sort((a, b) => a - b), cpu, mem, processLabel: processWorkloadIdentity(root.command)?.name ?? safeProcessLabel(root.command), matchedBy: cpu >= 10 ? 'cpu' : 'memory' };
   }).sort((a, b) => a.pid - b.pid);
   const dexServiceDetails = rows.filter(row => isDexServiceCommand(row.command)).map((row): ObservedProcess => ({
     pid: row.pid, pids: [row.pid], cpu: row.cpu, mem: row.mem,
     processLabel: dexServiceLabel(row.command), matchedBy: row.cpu >= 10 ? 'cpu' : 'memory'
   }));
-  return { uncoordinatedHeavy: uncoordinatedDetails.length, dexServices: dexServiceDetails.length, uncoordinatedDetails, dexServiceDetails };
+  return { uncoordinatedHeavy: uncoordinatedDetails.length, dexServices: dexServiceDetails.length, uncoordinatedDetails, dexServiceDetails, processObservation: 'observed' };
 }
 
-export async function observeProcessRows(): Promise<ProcessRow[]> {
+/** null when the process table could not be read: callers must not treat it as an idle host. */
+export async function observeProcessRows(): Promise<ProcessRow[] | null> {
   const args = process.platform === 'darwin' ? ['-axo', 'pid,ppid,%cpu,%mem,etime,command'] : ['-eo', 'pid,ppid,%cpu,%mem,etime,args'];
   const stdout = await runProbe('ps', args);
-  return stdout ? parseProcessTable(stdout) : [];
+  if (!stdout) return null;
+  const rows = parseProcessTable(stdout);
+  return rows.length ? rows : null;
+}
+export async function observeWorkloadsResult(options: ExclusionOptions & { rows?: readonly ProcessRow[] | null } = {}): Promise<ObservedWorkloads> {
+  const rows = options.rows === undefined ? await observeProcessRows() : options.rows;
+  if (!rows) return { uncoordinatedHeavy: 0, dexServices: 0, uncoordinatedDetails: [], dexServiceDetails: [], processObservation: 'unknown' };
+  return classifyObservedWorkloads(rows, options);
 }
 
-export async function observeWorkloads(options: { leasedPids?: readonly number[]; rows?: readonly ProcessRow[] } = {}): Promise<ObservedWorkloads> {
-  return classifyObservedWorkloads(options.rows ?? await observeProcessRows(), options);
+export async function observeWorkloads(options: ExclusionOptions & { rows?: readonly ProcessRow[] } = {}): Promise<ObservedWorkloads> {
+  return observeWorkloadsResult(options);
 }

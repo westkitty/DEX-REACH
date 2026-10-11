@@ -1,0 +1,2614 @@
+{
+  "schemaVersion": 1,
+  "kind": "C14-E bounded stress smoke",
+  "status": "PASS",
+  "generatedAtUtc": "2026-10-10T03:30:09.685Z",
+  "startedAtUtc": "2026-10-10T03:28:54.330Z",
+  "source": {
+    "branch": "c14-chaos-recovery",
+    "commit": "69fadec67a314117398037438b7f87b6fa22ae6e"
+  },
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v26.11.0",
+    "cpuCount": 8,
+    "totalMemoryBytes": 8589934592,
+    "initialFreeMemoryBytes": 108314624,
+    "initialLoadAverage": [
+      7.07958984375,
+      4.28564453125,
+      3.85986328125
+    ]
+  },
+  "limits": {
+    "durationSeconds": 75,
+    "maxOperations": 25000,
+    "concurrency": 2,
+    "maxRssBytes": 536870912,
+    "sampleIntervalMs": 5000,
+    "resultTtlMs": 60000
+  },
+  "run": {
+    "elapsedMs": 75357.439916,
+    "stopReason": "duration reached",
+    "completedCycles": 721,
+    "failedCycles": 0,
+    "sequence": 400,
+    "normalTasks": 289,
+    "failedTasks": 72,
+    "ambiguousTasks": 39
+  },
+  "resources": {
+    "finalRssBytes": 192912000,
+    "finalHeapUsedBytes": 21738448,
+    "finalExternalBytes": 4518465,
+    "cpu": {
+      "user": 24553515,
+      "system": 10295600
+    }
+  },
+  "timeSeries": [
+    {
+      "elapsedMs": 5020.606291,
+      "completedCycles": 55,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 33,
+          "failures": 0,
+          "medianMs": 30.49324999999999,
+          "p95Ms": 53.67616599999974
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 31,
+          "failures": 0,
+          "medianMs": 14.242042000000083,
+          "p95Ms": 50.26412500000015
+        },
+        "task.create-ambiguous": {
+          "count": 3,
+          "failures": 0,
+          "medianMs": 27.730790999999954,
+          "p95Ms": 61.13429199999973
+        },
+        "task.create": {
+          "count": 22,
+          "failures": 0,
+          "medianMs": 23.716750000000047,
+          "p95Ms": 78.87641600000006
+        },
+        "task.preparing-ambiguous": {
+          "count": 3,
+          "failures": 0,
+          "medianMs": 29.664166999999907,
+          "p95Ms": 35.406499999999994
+        },
+        "task.running-ambiguous": {
+          "count": 3,
+          "failures": 0,
+          "medianMs": 42.532708000000184,
+          "p95Ms": 62.17062499999997
+        },
+        "task.preparing": {
+          "count": 22,
+          "failures": 0,
+          "medianMs": 36.493625000000065,
+          "p95Ms": 76.95262500000013
+        },
+        "task.running": {
+          "count": 21,
+          "failures": 0,
+          "medianMs": 26.875083999999788,
+          "p95Ms": 76.5575829999998
+        },
+        "result.write": {
+          "count": 21,
+          "failures": 0,
+          "medianMs": 25.04270899999983,
+          "p95Ms": 33.24841699999979
+        },
+        "task.bind-result": {
+          "count": 21,
+          "failures": 0,
+          "medianMs": 36.921959000000015,
+          "p95Ms": 122.92512500000021
+        },
+        "task.complete": {
+          "count": 21,
+          "failures": 0,
+          "medianMs": 23.699749999999767,
+          "p95Ms": 60.882292000000234
+        },
+        "result.read-bound": {
+          "count": 21,
+          "failures": 0,
+          "medianMs": 0.5725419999998849,
+          "p95Ms": 1.2143750000000182
+        },
+        "task.event-append": {
+          "count": 55,
+          "failures": 0,
+          "medianMs": 15.291541999999936,
+          "p95Ms": 64.25562499999978
+        },
+        "boot.reconcile": {
+          "count": 3,
+          "failures": 0,
+          "medianMs": 107.65641700000015,
+          "p95Ms": 108.58399999999983
+        },
+        "task.read-indexed": {
+          "count": 25,
+          "failures": 0,
+          "medianMs": 0.4853339999999662,
+          "p95Ms": 0.9018329999998969
+        },
+        "task.list": {
+          "count": 25,
+          "failures": 0,
+          "medianMs": 0.5634589999999662,
+          "p95Ms": 1.576332999999977
+        },
+        "event.page": {
+          "count": 25,
+          "failures": 0,
+          "medianMs": 0.2501249999995707,
+          "p95Ms": 0.4021250000000691
+        },
+        "task.create-failed": {
+          "count": 6,
+          "failures": 0,
+          "medianMs": 25.417958999999883,
+          "p95Ms": 71.17274999999995
+        },
+        "task.preparing-failed": {
+          "count": 6,
+          "failures": 0,
+          "medianMs": 23.823167000000012,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 6,
+          "failures": 0,
+          "medianMs": 23.91924999999992,
+          "p95Ms": 78.44883299999947
+        },
+        "task.failed": {
+          "count": 6,
+          "failures": 0,
+          "medianMs": 28.07824999999957,
+          "p95Ms": 63.12012500000003
+        }
+      },
+      "rssBytes": 79945152,
+      "heapUsedBytes": 16495616,
+      "externalBytes": 9403145,
+      "cpuUserMicros": 802922,
+      "cpuSystemMicros": 959072,
+      "activeLeases": 2,
+      "queuedTickets": 0,
+      "nonterminalTasks": 4,
+      "ambiguousTasks": 3,
+      "taskStoreBytes": 50877,
+      "resultStoreBytes": 10265,
+      "eventLogBytes": 56260,
+      "coordinatorHistoryBytes": 15533,
+      "eventWindowCount": 66
+    },
+    {
+      "elapsedMs": 10017.561583,
+      "completedCycles": 105,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 62,
+          "failures": 0,
+          "medianMs": 25.670458000000508,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 59,
+          "failures": 0,
+          "medianMs": 13.289165999999568,
+          "p95Ms": 50.26412500000015
+        },
+        "task.create-ambiguous": {
+          "count": 6,
+          "failures": 0,
+          "medianMs": 27.730790999999954,
+          "p95Ms": 90.5225419999997
+        },
+        "task.create": {
+          "count": 43,
+          "failures": 0,
+          "medianMs": 23.716750000000047,
+          "p95Ms": 78.87641600000006
+        },
+        "task.preparing-ambiguous": {
+          "count": 6,
+          "failures": 0,
+          "medianMs": 29.664166999999907,
+          "p95Ms": 88.85041699999965
+        },
+        "task.running-ambiguous": {
+          "count": 6,
+          "failures": 0,
+          "medianMs": 42.532708000000184,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 42,
+          "failures": 0,
+          "medianMs": 39.34133399999973,
+          "p95Ms": 86.06999999999971
+        },
+        "task.running": {
+          "count": 42,
+          "failures": 0,
+          "medianMs": 25.999707999999373,
+          "p95Ms": 87.76445899999999
+        },
+        "result.write": {
+          "count": 41,
+          "failures": 0,
+          "medianMs": 23.286584000000175,
+          "p95Ms": 33.24841699999979
+        },
+        "task.bind-result": {
+          "count": 41,
+          "failures": 0,
+          "medianMs": 44.12250000000131,
+          "p95Ms": 122.92512500000021
+        },
+        "task.complete": {
+          "count": 41,
+          "failures": 0,
+          "medianMs": 23.01208399999996,
+          "p95Ms": 89.8553750000001
+        },
+        "result.read-bound": {
+          "count": 41,
+          "failures": 0,
+          "medianMs": 0.5690420000000813,
+          "p95Ms": 1.590249999999287
+        },
+        "task.event-append": {
+          "count": 105,
+          "failures": 0,
+          "medianMs": 14.273208000000523,
+          "p95Ms": 74.91729200000009
+        },
+        "boot.reconcile": {
+          "count": 6,
+          "failures": 0,
+          "medianMs": 108.58399999999983,
+          "p95Ms": 198.29162499999984
+        },
+        "task.read-indexed": {
+          "count": 47,
+          "failures": 0,
+          "medianMs": 0.5664170000000013,
+          "p95Ms": 1.223624999999629
+        },
+        "task.list": {
+          "count": 47,
+          "failures": 0,
+          "medianMs": 0.6684580000001006,
+          "p95Ms": 1.576332999999977
+        },
+        "event.page": {
+          "count": 47,
+          "failures": 0,
+          "medianMs": 0.2625000000007276,
+          "p95Ms": 0.6117080000003625
+        },
+        "task.create-failed": {
+          "count": 11,
+          "failures": 0,
+          "medianMs": 25.417958999999883,
+          "p95Ms": 156.69445799999994
+        },
+        "task.preparing-failed": {
+          "count": 11,
+          "failures": 0,
+          "medianMs": 24.95258300000023,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 11,
+          "failures": 0,
+          "medianMs": 24.139500000000226,
+          "p95Ms": 78.44883299999947
+        },
+        "task.failed": {
+          "count": 11,
+          "failures": 0,
+          "medianMs": 25.257125000000087,
+          "p95Ms": 63.12012500000003
+        }
+      },
+      "rssBytes": 95859264,
+      "heapUsedBytes": 17304224,
+      "externalBytes": 4515200,
+      "cpuUserMicros": 1646795,
+      "cpuSystemMicros": 1709366,
+      "activeLeases": 3,
+      "queuedTickets": 0,
+      "nonterminalTasks": 8,
+      "ambiguousTasks": 6,
+      "taskStoreBytes": 97995,
+      "resultStoreBytes": 20579,
+      "eventLogBytes": 109192,
+      "coordinatorHistoryBytes": 29208,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 15018.515583,
+      "completedCycles": 153,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 89,
+          "failures": 0,
+          "medianMs": 26.1465419999995,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 88,
+          "failures": 0,
+          "medianMs": 13.627292000000125,
+          "p95Ms": 40.937583000000814
+        },
+        "task.create-ambiguous": {
+          "count": 10,
+          "failures": 0,
+          "medianMs": 28.19537499999933,
+          "p95Ms": 90.5225419999997
+        },
+        "task.create": {
+          "count": 62,
+          "failures": 0,
+          "medianMs": 23.716750000000047,
+          "p95Ms": 78.87641600000006
+        },
+        "task.preparing-ambiguous": {
+          "count": 10,
+          "failures": 0,
+          "medianMs": 29.664166999999907,
+          "p95Ms": 90.34091699999954
+        },
+        "task.running-ambiguous": {
+          "count": 10,
+          "failures": 0,
+          "medianMs": 34.24424999999974,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 61,
+          "failures": 0,
+          "medianMs": 42.440167000000656,
+          "p95Ms": 86.06999999999971
+        },
+        "task.running": {
+          "count": 61,
+          "failures": 0,
+          "medianMs": 27.882790999999997,
+          "p95Ms": 106.86062499999935
+        },
+        "result.write": {
+          "count": 61,
+          "failures": 0,
+          "medianMs": 24.407874999998967,
+          "p95Ms": 34.34395899999981
+        },
+        "task.bind-result": {
+          "count": 61,
+          "failures": 0,
+          "medianMs": 42.232874999999694,
+          "p95Ms": 122.92512500000021
+        },
+        "task.complete": {
+          "count": 61,
+          "failures": 0,
+          "medianMs": 25.06287499999962,
+          "p95Ms": 81.92645899999843
+        },
+        "result.read-bound": {
+          "count": 61,
+          "failures": 0,
+          "medianMs": 0.5888340000001335,
+          "p95Ms": 1.6062919999999394
+        },
+        "task.event-append": {
+          "count": 153,
+          "failures": 0,
+          "medianMs": 14.305000000000291,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 10,
+          "failures": 0,
+          "medianMs": 111.12225000000035,
+          "p95Ms": 198.29162499999984
+        },
+        "task.read-indexed": {
+          "count": 67,
+          "failures": 0,
+          "medianMs": 0.6931660000009288,
+          "p95Ms": 1.5953329999993002
+        },
+        "task.list": {
+          "count": 67,
+          "failures": 0,
+          "medianMs": 0.8644999999996799,
+          "p95Ms": 1.8297920000004524
+        },
+        "event.page": {
+          "count": 67,
+          "failures": 0,
+          "medianMs": 0.3354170000002341,
+          "p95Ms": 0.7833749999999782
+        },
+        "task.create-failed": {
+          "count": 16,
+          "failures": 0,
+          "medianMs": 30.816291999999976,
+          "p95Ms": 156.69445799999994
+        },
+        "task.preparing-failed": {
+          "count": 16,
+          "failures": 0,
+          "medianMs": 25.790165999998862,
+          "p95Ms": 97.07916599999953
+        },
+        "task.running-failed": {
+          "count": 16,
+          "failures": 0,
+          "medianMs": 23.955458000000363,
+          "p95Ms": 78.44883299999947
+        },
+        "task.failed": {
+          "count": 16,
+          "failures": 0,
+          "medianMs": 24.593582999999853,
+          "p95Ms": 63.12012500000003
+        }
+      },
+      "rssBytes": 108924800,
+      "heapUsedBytes": 22887000,
+      "externalBytes": 10594953,
+      "cpuUserMicros": 2798380,
+      "cpuSystemMicros": 2542670,
+      "activeLeases": 2,
+      "queuedTickets": 0,
+      "nonterminalTasks": 11,
+      "ambiguousTasks": 10,
+      "taskStoreBytes": 143685,
+      "resultStoreBytes": 29745,
+      "eventLogBytes": 162246,
+      "coordinatorHistoryBytes": 42902,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 20021.4345,
+      "completedCycles": 210,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 119,
+          "failures": 0,
+          "medianMs": 26.303165999997873,
+          "p95Ms": 52.107708999999886
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 116,
+          "failures": 0,
+          "medianMs": 13.289165999999568,
+          "p95Ms": 40.937583000000814
+        },
+        "task.create-ambiguous": {
+          "count": 11,
+          "failures": 0,
+          "medianMs": 28.19537499999933,
+          "p95Ms": 90.5225419999997
+        },
+        "task.create": {
+          "count": 85,
+          "failures": 0,
+          "medianMs": 25.073040999999648,
+          "p95Ms": 78.87641600000006
+        },
+        "task.preparing-ambiguous": {
+          "count": 11,
+          "failures": 0,
+          "medianMs": 32.065207999999984,
+          "p95Ms": 90.34091699999954
+        },
+        "task.running-ambiguous": {
+          "count": 11,
+          "failures": 0,
+          "medianMs": 34.24424999999974,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 85,
+          "failures": 0,
+          "medianMs": 41.54604199999994,
+          "p95Ms": 86.06999999999971
+        },
+        "task.running": {
+          "count": 85,
+          "failures": 0,
+          "medianMs": 30.54004200000054,
+          "p95Ms": 112.84104200000002
+        },
+        "result.write": {
+          "count": 85,
+          "failures": 0,
+          "medianMs": 25.170416999997542,
+          "p95Ms": 34.402375000001484
+        },
+        "task.bind-result": {
+          "count": 85,
+          "failures": 0,
+          "medianMs": 38.42716699999983,
+          "p95Ms": 122.92512500000021
+        },
+        "task.complete": {
+          "count": 84,
+          "failures": 0,
+          "medianMs": 25.943250000000262,
+          "p95Ms": 91.382916999999
+        },
+        "result.read-bound": {
+          "count": 84,
+          "failures": 0,
+          "medianMs": 0.616874999999709,
+          "p95Ms": 1.6062919999999394
+        },
+        "task.event-append": {
+          "count": 210,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 10,
+          "failures": 0,
+          "medianMs": 111.12225000000035,
+          "p95Ms": 198.29162499999984
+        },
+        "task.read-indexed": {
+          "count": 95,
+          "failures": 0,
+          "medianMs": 1.0426250000000437,
+          "p95Ms": 2.1816670000007434
+        },
+        "task.list": {
+          "count": 95,
+          "failures": 0,
+          "medianMs": 1.2630000000008295,
+          "p95Ms": 2.6939169999986916
+        },
+        "event.page": {
+          "count": 95,
+          "failures": 0,
+          "medianMs": 0.41450000000077125,
+          "p95Ms": 0.8307080000013229
+        },
+        "task.create-failed": {
+          "count": 21,
+          "failures": 0,
+          "medianMs": 37.7110410000023,
+          "p95Ms": 88.03204100000039
+        },
+        "task.preparing-failed": {
+          "count": 21,
+          "failures": 0,
+          "medianMs": 32.304167000000234,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 21,
+          "failures": 0,
+          "medianMs": 26.29133400000137,
+          "p95Ms": 52.78983299999891
+        },
+        "task.failed": {
+          "count": 21,
+          "failures": 0,
+          "medianMs": 25.473958000000493,
+          "p95Ms": 63.12012500000003
+        }
+      },
+      "rssBytes": 173863168,
+      "heapUsedBytes": 39723384,
+      "externalBytes": 11416214,
+      "cpuUserMicros": 4241470,
+      "cpuSystemMicros": 3339673,
+      "activeLeases": 2,
+      "queuedTickets": 0,
+      "nonterminalTasks": 11,
+      "ambiguousTasks": 10,
+      "taskStoreBytes": 191031,
+      "resultStoreBytes": 41433,
+      "eventLogBytes": 216501,
+      "coordinatorHistoryBytes": 48009,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 25020.893,
+      "completedCycles": 259,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 146,
+          "failures": 0,
+          "medianMs": 26.303165999997873,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 143,
+          "failures": 0,
+          "medianMs": 14.242042000000083,
+          "p95Ms": 44.9476250000007
+        },
+        "task.create-ambiguous": {
+          "count": 13,
+          "failures": 0,
+          "medianMs": 29.71820900000239,
+          "p95Ms": 90.5225419999997
+        },
+        "task.create": {
+          "count": 105,
+          "failures": 0,
+          "medianMs": 26.92395899999974,
+          "p95Ms": 89.56504199999836
+        },
+        "task.preparing-ambiguous": {
+          "count": 13,
+          "failures": 0,
+          "medianMs": 33.39595900000131,
+          "p95Ms": 90.34091699999954
+        },
+        "task.running-ambiguous": {
+          "count": 13,
+          "failures": 0,
+          "medianMs": 34.24424999999974,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 105,
+          "failures": 0,
+          "medianMs": 41.54604199999994,
+          "p95Ms": 86.06999999999971
+        },
+        "task.running": {
+          "count": 104,
+          "failures": 0,
+          "medianMs": 29.54083300000002,
+          "p95Ms": 110.0084169999991
+        },
+        "result.write": {
+          "count": 104,
+          "failures": 0,
+          "medianMs": 24.51354099999662,
+          "p95Ms": 34.60483299999942
+        },
+        "task.bind-result": {
+          "count": 103,
+          "failures": 0,
+          "medianMs": 42.232874999999694,
+          "p95Ms": 122.92512500000021
+        },
+        "task.complete": {
+          "count": 103,
+          "failures": 0,
+          "medianMs": 27.948457999998936,
+          "p95Ms": 91.3864590000012
+        },
+        "result.read-bound": {
+          "count": 103,
+          "failures": 0,
+          "medianMs": 0.672999999998865,
+          "p95Ms": 1.590249999999287
+        },
+        "task.event-append": {
+          "count": 259,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 13,
+          "failures": 0,
+          "medianMs": 116.71291700000074,
+          "p95Ms": 198.29162499999984
+        },
+        "task.read-indexed": {
+          "count": 117,
+          "failures": 0,
+          "medianMs": 1.223624999999629,
+          "p95Ms": 2.8239160000011907
+        },
+        "task.list": {
+          "count": 117,
+          "failures": 0,
+          "medianMs": 1.555000000000291,
+          "p95Ms": 2.8839160000025004
+        },
+        "event.page": {
+          "count": 117,
+          "failures": 0,
+          "medianMs": 0.4381250000005821,
+          "p95Ms": 0.8307080000013229
+        },
+        "task.create-failed": {
+          "count": 26,
+          "failures": 0,
+          "medianMs": 36.21712500000103,
+          "p95Ms": 93.59891699999935
+        },
+        "task.preparing-failed": {
+          "count": 26,
+          "failures": 0,
+          "medianMs": 32.304167000000234,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 26,
+          "failures": 0,
+          "medianMs": 27.177999999999884,
+          "p95Ms": 54.312582999998995
+        },
+        "task.failed": {
+          "count": 26,
+          "failures": 0,
+          "medianMs": 25.93554199999926,
+          "p95Ms": 66.23787500000253
+        }
+      },
+      "rssBytes": 175380992,
+      "heapUsedBytes": 13519744,
+      "externalBytes": 3383624,
+      "cpuUserMicros": 5727010,
+      "cpuSystemMicros": 4039355,
+      "activeLeases": 3,
+      "queuedTickets": 0,
+      "nonterminalTasks": 15,
+      "ambiguousTasks": 13,
+      "taskStoreBytes": 234821,
+      "resultStoreBytes": 50686,
+      "eventLogBytes": 266105,
+      "coordinatorHistoryBytes": 48046,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 30020.231958,
+      "completedCycles": 305,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 172,
+          "failures": 0,
+          "medianMs": 26.36333300000115,
+          "p95Ms": 53.1401249999999
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 171,
+          "failures": 0,
+          "medianMs": 15.086042000000816,
+          "p95Ms": 44.9476250000007
+        },
+        "task.create-ambiguous": {
+          "count": 17,
+          "failures": 0,
+          "medianMs": 30.040999999999258,
+          "p95Ms": 149.24720799999704
+        },
+        "task.create": {
+          "count": 123,
+          "failures": 0,
+          "medianMs": 27.81383300000016,
+          "p95Ms": 94.00812500000029
+        },
+        "task.preparing-ambiguous": {
+          "count": 17,
+          "failures": 0,
+          "medianMs": 33.39595900000131,
+          "p95Ms": 90.34091699999954
+        },
+        "task.running-ambiguous": {
+          "count": 17,
+          "failures": 0,
+          "medianMs": 34.24424999999974,
+          "p95Ms": 149.39324999999735
+        },
+        "task.preparing": {
+          "count": 122,
+          "failures": 0,
+          "medianMs": 40.83499999999913,
+          "p95Ms": 86.06999999999971
+        },
+        "task.running": {
+          "count": 122,
+          "failures": 0,
+          "medianMs": 28.754916999998386,
+          "p95Ms": 106.86062499999935
+        },
+        "result.write": {
+          "count": 122,
+          "failures": 0,
+          "medianMs": 24.51354099999662,
+          "p95Ms": 34.656167000000096
+        },
+        "task.bind-result": {
+          "count": 122,
+          "failures": 0,
+          "medianMs": 42.232874999999694,
+          "p95Ms": 119.37712499999998
+        },
+        "task.complete": {
+          "count": 122,
+          "failures": 0,
+          "medianMs": 29.205207999999402,
+          "p95Ms": 91.3864590000012
+        },
+        "result.read-bound": {
+          "count": 122,
+          "failures": 0,
+          "medianMs": 0.6939999999995052,
+          "p95Ms": 1.3528340000002572
+        },
+        "task.event-append": {
+          "count": 305,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 17,
+          "failures": 0,
+          "medianMs": 119.46466700000019,
+          "p95Ms": 198.29162499999984
+        },
+        "task.read-indexed": {
+          "count": 136,
+          "failures": 0,
+          "medianMs": 1.3925420000014128,
+          "p95Ms": 2.8567910000019765
+        },
+        "task.list": {
+          "count": 136,
+          "failures": 0,
+          "medianMs": 1.695040999999037,
+          "p95Ms": 3.2924590000002354
+        },
+        "event.page": {
+          "count": 136,
+          "failures": 0,
+          "medianMs": 0.44279099999766913,
+          "p95Ms": 0.831624999998894
+        },
+        "task.create-failed": {
+          "count": 31,
+          "failures": 0,
+          "medianMs": 36.21712500000103,
+          "p95Ms": 93.59891699999935
+        },
+        "task.preparing-failed": {
+          "count": 31,
+          "failures": 0,
+          "medianMs": 33.71891700000015,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 31,
+          "failures": 0,
+          "medianMs": 27.32512499999939,
+          "p95Ms": 54.312582999998995
+        },
+        "task.failed": {
+          "count": 31,
+          "failures": 0,
+          "medianMs": 26.009249999999156,
+          "p95Ms": 119.08404100000189
+        }
+      },
+      "rssBytes": 177074752,
+      "heapUsedBytes": 28333424,
+      "externalBytes": 7913846,
+      "cpuUserMicros": 7353316,
+      "cpuSystemMicros": 4719607,
+      "activeLeases": 2,
+      "queuedTickets": 0,
+      "nonterminalTasks": 18,
+      "ambiguousTasks": 17,
+      "taskStoreBytes": 278913,
+      "resultStoreBytes": 59452,
+      "eventLogBytes": 316935,
+      "coordinatorHistoryBytes": 48040,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 35021.587291,
+      "completedCycles": 355,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 199,
+          "failures": 0,
+          "medianMs": 26.023291999998037,
+          "p95Ms": 53.1401249999999
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 197,
+          "failures": 0,
+          "medianMs": 15.216958000000886,
+          "p95Ms": 44.9476250000007
+        },
+        "task.create-ambiguous": {
+          "count": 19,
+          "failures": 0,
+          "medianMs": 32.22916599999917,
+          "p95Ms": 149.24720799999704
+        },
+        "task.create": {
+          "count": 142,
+          "failures": 0,
+          "medianMs": 28.021624999999403,
+          "p95Ms": 94.19733400000041
+        },
+        "task.preparing-ambiguous": {
+          "count": 19,
+          "failures": 0,
+          "medianMs": 35.406499999999994,
+          "p95Ms": 90.34091699999954
+        },
+        "task.running-ambiguous": {
+          "count": 19,
+          "failures": 0,
+          "medianMs": 34.24424999999974,
+          "p95Ms": 149.39324999999735
+        },
+        "task.preparing": {
+          "count": 142,
+          "failures": 0,
+          "medianMs": 41.25274999999965,
+          "p95Ms": 94.84087499999987
+        },
+        "task.running": {
+          "count": 142,
+          "failures": 0,
+          "medianMs": 29.73079200000211,
+          "p95Ms": 101.82920899999954
+        },
+        "result.write": {
+          "count": 142,
+          "failures": 0,
+          "medianMs": 25.04270899999983,
+          "p95Ms": 34.82887499999924
+        },
+        "task.bind-result": {
+          "count": 142,
+          "failures": 0,
+          "medianMs": 46.069917000000714,
+          "p95Ms": 119.37712499999998
+        },
+        "task.complete": {
+          "count": 141,
+          "failures": 0,
+          "medianMs": 29.205207999999402,
+          "p95Ms": 91.382916999999
+        },
+        "result.read-bound": {
+          "count": 141,
+          "failures": 0,
+          "medianMs": 0.7133749999993597,
+          "p95Ms": 1.3528340000002572
+        },
+        "task.event-append": {
+          "count": 355,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 19,
+          "failures": 0,
+          "medianMs": 119.46466700000019,
+          "p95Ms": 198.29162499999984
+        },
+        "task.read-indexed": {
+          "count": 159,
+          "failures": 0,
+          "medianMs": 1.5177499999990687,
+          "p95Ms": 3.076500000002852
+        },
+        "task.list": {
+          "count": 159,
+          "failures": 0,
+          "medianMs": 1.8297920000004524,
+          "p95Ms": 3.426958999996714
+        },
+        "event.page": {
+          "count": 159,
+          "failures": 0,
+          "medianMs": 0.44425000000046566,
+          "p95Ms": 0.8307080000013229
+        },
+        "task.create-failed": {
+          "count": 36,
+          "failures": 0,
+          "medianMs": 33.63420899999619,
+          "p95Ms": 93.59891699999935
+        },
+        "task.preparing-failed": {
+          "count": 36,
+          "failures": 0,
+          "medianMs": 33.71891700000015,
+          "p95Ms": 97.07916599999953
+        },
+        "task.running-failed": {
+          "count": 36,
+          "failures": 0,
+          "medianMs": 27.446957999996812,
+          "p95Ms": 76.82724999999846
+        },
+        "task.failed": {
+          "count": 36,
+          "failures": 0,
+          "medianMs": 26.009249999999156,
+          "p95Ms": 119.08404100000189
+        }
+      },
+      "rssBytes": 179601664,
+      "heapUsedBytes": 19631248,
+      "externalBytes": 4937458,
+      "cpuUserMicros": 9073951,
+      "cpuSystemMicros": 5357887,
+      "activeLeases": 2,
+      "queuedTickets": 0,
+      "nonterminalTasks": 21,
+      "ambiguousTasks": 19,
+      "taskStoreBytes": 322901,
+      "resultStoreBytes": 69192,
+      "eventLogBytes": 366537,
+      "coordinatorHistoryBytes": 48054,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 40021.924875000004,
+      "completedCycles": 400,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 225,
+          "failures": 0,
+          "medianMs": 26.018749999999955,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 223,
+          "failures": 0,
+          "medianMs": 15.216958000000886,
+          "p95Ms": 44.15783299999748
+        },
+        "task.create-ambiguous": {
+          "count": 22,
+          "failures": 0,
+          "medianMs": 32.22916599999917,
+          "p95Ms": 94.99945799999841
+        },
+        "task.create": {
+          "count": 161,
+          "failures": 0,
+          "medianMs": 31.51300000000083,
+          "p95Ms": 97.14024999999674
+        },
+        "task.preparing-ambiguous": {
+          "count": 22,
+          "failures": 0,
+          "medianMs": 35.406499999999994,
+          "p95Ms": 88.85041699999965
+        },
+        "task.running-ambiguous": {
+          "count": 22,
+          "failures": 0,
+          "medianMs": 32.38191699999879,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 161,
+          "failures": 0,
+          "medianMs": 40.83499999999913,
+          "p95Ms": 94.84087499999987
+        },
+        "task.running": {
+          "count": 161,
+          "failures": 0,
+          "medianMs": 30.789709000000585,
+          "p95Ms": 101.82920899999954
+        },
+        "result.write": {
+          "count": 161,
+          "failures": 0,
+          "medianMs": 25.555958000000828,
+          "p95Ms": 35.85141599999952
+        },
+        "task.bind-result": {
+          "count": 160,
+          "failures": 0,
+          "medianMs": 46.630166999999346,
+          "p95Ms": 117.38454199999978
+        },
+        "task.complete": {
+          "count": 160,
+          "failures": 0,
+          "medianMs": 29.939417000001413,
+          "p95Ms": 91.3864590000012
+        },
+        "result.read-bound": {
+          "count": 160,
+          "failures": 0,
+          "medianMs": 0.7476249999999709,
+          "p95Ms": 1.3638339999997697
+        },
+        "task.event-append": {
+          "count": 400,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 22,
+          "failures": 0,
+          "medianMs": 118.70449999999983,
+          "p95Ms": 135.75433300000077
+        },
+        "task.read-indexed": {
+          "count": 178,
+          "failures": 0,
+          "medianMs": 1.7075420000001031,
+          "p95Ms": 3.3201670000016748
+        },
+        "task.list": {
+          "count": 178,
+          "failures": 0,
+          "medianMs": 2.099000000001979,
+          "p95Ms": 3.503375000000233
+        },
+        "event.page": {
+          "count": 178,
+          "failures": 0,
+          "medianMs": 0.4405000000006112,
+          "p95Ms": 0.8307080000013229
+        },
+        "task.create-failed": {
+          "count": 40,
+          "failures": 0,
+          "medianMs": 35.42937499999971,
+          "p95Ms": 88.03204100000039
+        },
+        "task.preparing-failed": {
+          "count": 40,
+          "failures": 0,
+          "medianMs": 35.39741700000013,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 40,
+          "failures": 0,
+          "medianMs": 27.32512499999939,
+          "p95Ms": 76.82724999999846
+        },
+        "task.failed": {
+          "count": 40,
+          "failures": 0,
+          "medianMs": 26.99275000000125,
+          "p95Ms": 83.44275000000198
+        }
+      },
+      "rssBytes": 182536000,
+      "heapUsedBytes": 15919424,
+      "externalBytes": 4473162,
+      "cpuUserMicros": 10811205,
+      "cpuSystemMicros": 5971885,
+      "activeLeases": 2,
+      "queuedTickets": 0,
+      "nonterminalTasks": 24,
+      "ambiguousTasks": 22,
+      "taskStoreBytes": 365345,
+      "resultStoreBytes": 78445,
+      "eventLogBytes": 415143,
+      "coordinatorHistoryBytes": 48066,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 45023.375666,
+      "completedCycles": 447,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 252,
+          "failures": 0,
+          "medianMs": 26.018749999999955,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 250,
+          "failures": 0,
+          "medianMs": 15.216958000000886,
+          "p95Ms": 44.15783299999748
+        },
+        "task.create-ambiguous": {
+          "count": 25,
+          "failures": 0,
+          "medianMs": 41.35070799999812,
+          "p95Ms": 94.99945799999841
+        },
+        "task.create": {
+          "count": 180,
+          "failures": 0,
+          "medianMs": 32.88633299999856,
+          "p95Ms": 96.82683399999951
+        },
+        "task.preparing-ambiguous": {
+          "count": 25,
+          "failures": 0,
+          "medianMs": 35.406499999999994,
+          "p95Ms": 88.85041699999965
+        },
+        "task.running-ambiguous": {
+          "count": 25,
+          "failures": 0,
+          "medianMs": 34.88900000000285,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 180,
+          "failures": 0,
+          "medianMs": 40.73741699999664,
+          "p95Ms": 91.79058300000179
+        },
+        "task.running": {
+          "count": 180,
+          "failures": 0,
+          "medianMs": 31.186957999999777,
+          "p95Ms": 101.82920899999954
+        },
+        "result.write": {
+          "count": 180,
+          "failures": 0,
+          "medianMs": 25.2665829999969,
+          "p95Ms": 34.94620800000121
+        },
+        "task.bind-result": {
+          "count": 179,
+          "failures": 0,
+          "medianMs": 46.630166999999346,
+          "p95Ms": 117.38454199999978
+        },
+        "task.complete": {
+          "count": 179,
+          "failures": 0,
+          "medianMs": 30.16962500000045,
+          "p95Ms": 91.3864590000012
+        },
+        "result.read-bound": {
+          "count": 179,
+          "failures": 0,
+          "medianMs": 0.7527919999993173,
+          "p95Ms": 1.590249999999287
+        },
+        "task.event-append": {
+          "count": 447,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 25,
+          "failures": 0,
+          "medianMs": 119.46466700000019,
+          "p95Ms": 144.41304200000013
+        },
+        "task.read-indexed": {
+          "count": 199,
+          "failures": 0,
+          "medianMs": 2.006375000000844,
+          "p95Ms": 3.73854100000608
+        },
+        "task.list": {
+          "count": 199,
+          "failures": 0,
+          "medianMs": 2.3275829999984126,
+          "p95Ms": 3.503375000000233
+        },
+        "event.page": {
+          "count": 199,
+          "failures": 0,
+          "medianMs": 0.43091699999968114,
+          "p95Ms": 0.8307080000013229
+        },
+        "task.create-failed": {
+          "count": 45,
+          "failures": 0,
+          "medianMs": 36.21712500000103,
+          "p95Ms": 88.03204100000039
+        },
+        "task.preparing-failed": {
+          "count": 45,
+          "failures": 0,
+          "medianMs": 35.51362499999959,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 45,
+          "failures": 0,
+          "medianMs": 27.481000000000677,
+          "p95Ms": 77.57100000000355
+        },
+        "task.failed": {
+          "count": 45,
+          "failures": 0,
+          "medianMs": 28.07824999999957,
+          "p95Ms": 119.08404100000189
+        }
+      },
+      "rssBytes": 176539520,
+      "heapUsedBytes": 13005200,
+      "externalBytes": 15170496,
+      "cpuUserMicros": 12652181,
+      "cpuSystemMicros": 6593169,
+      "activeLeases": 2,
+      "queuedTickets": 0,
+      "nonterminalTasks": 26,
+      "ambiguousTasks": 25,
+      "taskStoreBytes": 407748,
+      "resultStoreBytes": 87698,
+      "eventLogBytes": 465240,
+      "coordinatorHistoryBytes": 48066,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 50024.124666,
+      "completedCycles": 491,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 278,
+          "failures": 0,
+          "medianMs": 26.018749999999955,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 276,
+          "failures": 0,
+          "medianMs": 15.216958000000886,
+          "p95Ms": 44.15783299999748
+        },
+        "task.create-ambiguous": {
+          "count": 29,
+          "failures": 0,
+          "medianMs": 41.35070799999812,
+          "p95Ms": 94.99945799999841
+        },
+        "task.create": {
+          "count": 197,
+          "failures": 0,
+          "medianMs": 35.7233750000014,
+          "p95Ms": 98.31958300000406
+        },
+        "task.preparing-ambiguous": {
+          "count": 29,
+          "failures": 0,
+          "medianMs": 35.50141699999949,
+          "p95Ms": 88.85041699999965
+        },
+        "task.running-ambiguous": {
+          "count": 29,
+          "failures": 0,
+          "medianMs": 34.88900000000285,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 197,
+          "failures": 0,
+          "medianMs": 40.310833000003186,
+          "p95Ms": 91.79058300000179
+        },
+        "task.running": {
+          "count": 197,
+          "failures": 0,
+          "medianMs": 31.81558300000006,
+          "p95Ms": 101.82920899999954
+        },
+        "result.write": {
+          "count": 197,
+          "failures": 0,
+          "medianMs": 25.36174999999639,
+          "p95Ms": 35.85141599999952
+        },
+        "task.bind-result": {
+          "count": 197,
+          "failures": 0,
+          "medianMs": 46.630166999999346,
+          "p95Ms": 115.83899999999994
+        },
+        "task.complete": {
+          "count": 196,
+          "failures": 0,
+          "medianMs": 31.19129199999952,
+          "p95Ms": 91.382916999999
+        },
+        "result.read-bound": {
+          "count": 196,
+          "failures": 0,
+          "medianMs": 0.7643329999991693,
+          "p95Ms": 1.590249999999287
+        },
+        "task.event-append": {
+          "count": 491,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 29,
+          "failures": 0,
+          "medianMs": 119.7712079999983,
+          "p95Ms": 144.41304200000013
+        },
+        "task.read-indexed": {
+          "count": 217,
+          "failures": 0,
+          "medianMs": 2.006375000000844,
+          "p95Ms": 3.7155840000013995
+        },
+        "task.list": {
+          "count": 217,
+          "failures": 0,
+          "medianMs": 2.3275829999984126,
+          "p95Ms": 3.476582999999664
+        },
+        "event.page": {
+          "count": 217,
+          "failures": 0,
+          "medianMs": 0.4300419999999576,
+          "p95Ms": 0.8292080000010174
+        },
+        "task.create-failed": {
+          "count": 50,
+          "failures": 0,
+          "medianMs": 37.7110410000023,
+          "p95Ms": 88.03204100000039
+        },
+        "task.preparing-failed": {
+          "count": 50,
+          "failures": 0,
+          "medianMs": 35.39741700000013,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 50,
+          "failures": 0,
+          "medianMs": 27.521292000001267,
+          "p95Ms": 77.57100000000355
+        },
+        "task.failed": {
+          "count": 50,
+          "failures": 0,
+          "medianMs": 28.07824999999957,
+          "p95Ms": 137.83029200000237
+        }
+      },
+      "rssBytes": 182947136,
+      "heapUsedBytes": 34859296,
+      "externalBytes": 9694422,
+      "cpuUserMicros": 14565199,
+      "cpuSystemMicros": 7215336,
+      "activeLeases": 2,
+      "queuedTickets": 0,
+      "nonterminalTasks": 29,
+      "ambiguousTasks": 29,
+      "taskStoreBytes": 450001,
+      "resultStoreBytes": 95977,
+      "eventLogBytes": 514167,
+      "coordinatorHistoryBytes": 48072,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 55023.273416,
+      "completedCycles": 541,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 304,
+          "failures": 0,
+          "medianMs": 26.018749999999955,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 303,
+          "failures": 0,
+          "medianMs": 15.216958000000886,
+          "p95Ms": 44.15783299999748
+        },
+        "task.create-ambiguous": {
+          "count": 31,
+          "failures": 0,
+          "medianMs": 41.35070799999812,
+          "p95Ms": 94.99945799999841
+        },
+        "task.create": {
+          "count": 217,
+          "failures": 0,
+          "medianMs": 35.02970899999491,
+          "p95Ms": 97.14024999999674
+        },
+        "task.preparing-ambiguous": {
+          "count": 31,
+          "failures": 0,
+          "medianMs": 36.400000000001455,
+          "p95Ms": 88.85041699999965
+        },
+        "task.running-ambiguous": {
+          "count": 31,
+          "failures": 0,
+          "medianMs": 34.88900000000285,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 217,
+          "failures": 0,
+          "medianMs": 40.310833000003186,
+          "p95Ms": 91.29970800000592
+        },
+        "task.running": {
+          "count": 217,
+          "failures": 0,
+          "medianMs": 31.81558300000006,
+          "p95Ms": 95.08754200000112
+        },
+        "result.write": {
+          "count": 217,
+          "failures": 0,
+          "medianMs": 25.2665829999969,
+          "p95Ms": 34.94620800000121
+        },
+        "task.bind-result": {
+          "count": 217,
+          "failures": 0,
+          "medianMs": 46.630166999999346,
+          "p95Ms": 113.11120800000208
+        },
+        "task.complete": {
+          "count": 217,
+          "failures": 0,
+          "medianMs": 31.309667000001355,
+          "p95Ms": 89.8553750000001
+        },
+        "result.read-bound": {
+          "count": 217,
+          "failures": 0,
+          "medianMs": 0.7669160000004922,
+          "p95Ms": 1.3638339999997697
+        },
+        "task.event-append": {
+          "count": 541,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 30,
+          "failures": 0,
+          "medianMs": 119.7712079999983,
+          "p95Ms": 162.87387500000477
+        },
+        "task.read-indexed": {
+          "count": 240,
+          "failures": 0,
+          "medianMs": 2.006375000000844,
+          "p95Ms": 3.7155840000013995
+        },
+        "task.list": {
+          "count": 240,
+          "failures": 0,
+          "medianMs": 2.3275829999984126,
+          "p95Ms": 3.476582999999664
+        },
+        "event.page": {
+          "count": 240,
+          "failures": 0,
+          "medianMs": 0.4300419999999576,
+          "p95Ms": 0.8292080000010174
+        },
+        "task.create-failed": {
+          "count": 54,
+          "failures": 0,
+          "medianMs": 38.17041600000084,
+          "p95Ms": 93.59891699999935
+        },
+        "task.preparing-failed": {
+          "count": 54,
+          "failures": 0,
+          "medianMs": 35.94391700000415,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 54,
+          "failures": 0,
+          "medianMs": 27.961875000000873,
+          "p95Ms": 78.44883299999947
+        },
+        "task.failed": {
+          "count": 54,
+          "failures": 0,
+          "medianMs": 28.086208000000624,
+          "p95Ms": 137.83029200000237
+        }
+      },
+      "rssBytes": 177523456,
+      "heapUsedBytes": 30814760,
+      "externalBytes": 7094665,
+      "cpuUserMicros": 16594303,
+      "cpuSystemMicros": 7831403,
+      "activeLeases": 1,
+      "queuedTickets": 0,
+      "nonterminalTasks": 31,
+      "ambiguousTasks": 30,
+      "taskStoreBytes": 492400,
+      "resultStoreBytes": 105717,
+      "eventLogBytes": 555301,
+      "coordinatorHistoryBytes": 48046,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 60024.088333,
+      "completedCycles": 585,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 329,
+          "failures": 0,
+          "medianMs": 26.018749999999955,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 327,
+          "failures": 0,
+          "medianMs": 15.216958000000886,
+          "p95Ms": 44.15783299999748
+        },
+        "task.create-ambiguous": {
+          "count": 34,
+          "failures": 0,
+          "medianMs": 40.140957999999955,
+          "p95Ms": 94.99945799999841
+        },
+        "task.create": {
+          "count": 235,
+          "failures": 0,
+          "medianMs": 35.02970899999491,
+          "p95Ms": 97.14024999999674
+        },
+        "task.preparing-ambiguous": {
+          "count": 34,
+          "failures": 0,
+          "medianMs": 36.400000000001455,
+          "p95Ms": 88.90845799999806
+        },
+        "task.running-ambiguous": {
+          "count": 34,
+          "failures": 0,
+          "medianMs": 34.24424999999974,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 233,
+          "failures": 0,
+          "medianMs": 40.310833000003186,
+          "p95Ms": 91.29970800000592
+        },
+        "task.running": {
+          "count": 233,
+          "failures": 0,
+          "medianMs": 31.81558300000006,
+          "p95Ms": 95.08754200000112
+        },
+        "result.write": {
+          "count": 233,
+          "failures": 0,
+          "medianMs": 25.2665829999969,
+          "p95Ms": 34.94620800000121
+        },
+        "task.bind-result": {
+          "count": 233,
+          "failures": 0,
+          "medianMs": 46.630166999999346,
+          "p95Ms": 113.11120800000208
+        },
+        "task.complete": {
+          "count": 233,
+          "failures": 0,
+          "medianMs": 31.309667000001355,
+          "p95Ms": 89.8553750000001
+        },
+        "result.read-bound": {
+          "count": 233,
+          "failures": 0,
+          "medianMs": 0.7669160000004922,
+          "p95Ms": 1.3638339999997697
+        },
+        "task.event-append": {
+          "count": 585,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 34,
+          "failures": 0,
+          "medianMs": 120.49387500000012,
+          "p95Ms": 162.87387500000477
+        },
+        "task.read-indexed": {
+          "count": 259,
+          "failures": 0,
+          "medianMs": 2.006375000000844,
+          "p95Ms": 3.7155840000013995
+        },
+        "task.list": {
+          "count": 259,
+          "failures": 0,
+          "medianMs": 2.3275829999984126,
+          "p95Ms": 3.476582999999664
+        },
+        "event.page": {
+          "count": 259,
+          "failures": 0,
+          "medianMs": 0.4300419999999576,
+          "p95Ms": 0.8292080000010174
+        },
+        "task.create-failed": {
+          "count": 59,
+          "failures": 0,
+          "medianMs": 42.11170800000036,
+          "p95Ms": 93.59891699999935
+        },
+        "task.preparing-failed": {
+          "count": 59,
+          "failures": 0,
+          "medianMs": 38.95024999999805,
+          "p95Ms": 94.08087499999965
+        },
+        "task.running-failed": {
+          "count": 59,
+          "failures": 0,
+          "medianMs": 29.00749999999971,
+          "p95Ms": 78.44883299999947
+        },
+        "task.failed": {
+          "count": 59,
+          "failures": 0,
+          "medianMs": 29.358749999999418,
+          "p95Ms": 137.83029200000237
+        }
+      },
+      "rssBytes": 189354304,
+      "heapUsedBytes": 63002568,
+      "externalBytes": 15172390,
+      "cpuUserMicros": 18510508,
+      "cpuSystemMicros": 8414182,
+      "activeLeases": 2,
+      "queuedTickets": 0,
+      "nonterminalTasks": 36,
+      "ambiguousTasks": 34,
+      "taskStoreBytes": 534506,
+      "resultStoreBytes": 113509,
+      "eventLogBytes": 555863,
+      "coordinatorHistoryBytes": 48066,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 65023.616208,
+      "completedCycles": 631,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 353,
+          "failures": 0,
+          "medianMs": 26.018749999999955,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 352,
+          "failures": 0,
+          "medianMs": 15.216958000000886,
+          "p95Ms": 44.15783299999748
+        },
+        "task.create-ambiguous": {
+          "count": 35,
+          "failures": 0,
+          "medianMs": 41.35070799999812,
+          "p95Ms": 94.99945799999841
+        },
+        "task.create": {
+          "count": 253,
+          "failures": 0,
+          "medianMs": 35.02970899999491,
+          "p95Ms": 97.14024999999674
+        },
+        "task.preparing-ambiguous": {
+          "count": 35,
+          "failures": 0,
+          "medianMs": 37.90179199999693,
+          "p95Ms": 88.90845799999806
+        },
+        "task.running-ambiguous": {
+          "count": 35,
+          "failures": 0,
+          "medianMs": 34.88900000000285,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 253,
+          "failures": 0,
+          "medianMs": 40.310833000003186,
+          "p95Ms": 91.29970800000592
+        },
+        "task.running": {
+          "count": 253,
+          "failures": 0,
+          "medianMs": 31.81558300000006,
+          "p95Ms": 95.08754200000112
+        },
+        "result.write": {
+          "count": 253,
+          "failures": 0,
+          "medianMs": 25.2665829999969,
+          "p95Ms": 34.94620800000121
+        },
+        "task.bind-result": {
+          "count": 253,
+          "failures": 0,
+          "medianMs": 46.630166999999346,
+          "p95Ms": 113.11120800000208
+        },
+        "task.complete": {
+          "count": 253,
+          "failures": 0,
+          "medianMs": 31.309667000001355,
+          "p95Ms": 89.8553750000001
+        },
+        "result.read-bound": {
+          "count": 253,
+          "failures": 0,
+          "medianMs": 0.7669160000004922,
+          "p95Ms": 1.3638339999997697
+        },
+        "task.event-append": {
+          "count": 631,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 35,
+          "failures": 0,
+          "medianMs": 120.64995899999485,
+          "p95Ms": 162.87387500000477
+        },
+        "task.read-indexed": {
+          "count": 281,
+          "failures": 0,
+          "medianMs": 2.006375000000844,
+          "p95Ms": 3.7155840000013995
+        },
+        "task.list": {
+          "count": 281,
+          "failures": 0,
+          "medianMs": 2.3275829999984126,
+          "p95Ms": 3.476582999999664
+        },
+        "event.page": {
+          "count": 281,
+          "failures": 0,
+          "medianMs": 0.4300419999999576,
+          "p95Ms": 0.8292080000010174
+        },
+        "task.create-failed": {
+          "count": 63,
+          "failures": 0,
+          "medianMs": 41.59295899999415,
+          "p95Ms": 93.59891699999935
+        },
+        "task.preparing-failed": {
+          "count": 63,
+          "failures": 0,
+          "medianMs": 38.95024999999805,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 63,
+          "failures": 0,
+          "medianMs": 29.061750000000757,
+          "p95Ms": 77.57100000000355
+        },
+        "task.failed": {
+          "count": 63,
+          "failures": 0,
+          "medianMs": 29.358749999999418,
+          "p95Ms": 119.08404100000189
+        }
+      },
+      "rssBytes": 193713664,
+      "heapUsedBytes": 38338488,
+      "externalBytes": 9206535,
+      "cpuUserMicros": 20494395,
+      "cpuSystemMicros": 9030281,
+      "activeLeases": 1,
+      "queuedTickets": 0,
+      "nonterminalTasks": 36,
+      "ambiguousTasks": 35,
+      "taskStoreBytes": 573794,
+      "resultStoreBytes": 123249,
+      "eventLogBytes": 555062,
+      "coordinatorHistoryBytes": 48037,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 70023.882166,
+      "completedCycles": 677,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 378,
+          "failures": 0,
+          "medianMs": 26.018749999999955,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 375,
+          "failures": 0,
+          "medianMs": 15.216958000000886,
+          "p95Ms": 44.15783299999748
+        },
+        "task.create-ambiguous": {
+          "count": 36,
+          "failures": 0,
+          "medianMs": 40.140957999999955,
+          "p95Ms": 94.99945799999841
+        },
+        "task.create": {
+          "count": 272,
+          "failures": 0,
+          "medianMs": 35.02970899999491,
+          "p95Ms": 97.14024999999674
+        },
+        "task.preparing-ambiguous": {
+          "count": 36,
+          "failures": 0,
+          "medianMs": 37.90179199999693,
+          "p95Ms": 88.90845799999806
+        },
+        "task.running-ambiguous": {
+          "count": 36,
+          "failures": 0,
+          "medianMs": 34.88900000000285,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 271,
+          "failures": 0,
+          "medianMs": 40.310833000003186,
+          "p95Ms": 91.29970800000592
+        },
+        "task.running": {
+          "count": 271,
+          "failures": 0,
+          "medianMs": 31.81558300000006,
+          "p95Ms": 95.08754200000112
+        },
+        "result.write": {
+          "count": 271,
+          "failures": 0,
+          "medianMs": 25.2665829999969,
+          "p95Ms": 34.94620800000121
+        },
+        "task.bind-result": {
+          "count": 271,
+          "failures": 0,
+          "medianMs": 46.630166999999346,
+          "p95Ms": 113.11120800000208
+        },
+        "task.complete": {
+          "count": 271,
+          "failures": 0,
+          "medianMs": 31.309667000001355,
+          "p95Ms": 89.8553750000001
+        },
+        "result.read-bound": {
+          "count": 271,
+          "failures": 0,
+          "medianMs": 0.7669160000004922,
+          "p95Ms": 1.3638339999997697
+        },
+        "task.event-append": {
+          "count": 677,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 36,
+          "failures": 0,
+          "medianMs": 120.64995899999485,
+          "p95Ms": 162.87387500000477
+        },
+        "task.read-indexed": {
+          "count": 303,
+          "failures": 0,
+          "medianMs": 2.006375000000844,
+          "p95Ms": 3.7155840000013995
+        },
+        "task.list": {
+          "count": 303,
+          "failures": 0,
+          "medianMs": 2.3275829999984126,
+          "p95Ms": 3.476582999999664
+        },
+        "event.page": {
+          "count": 303,
+          "failures": 0,
+          "medianMs": 0.4300419999999576,
+          "p95Ms": 0.8292080000010174
+        },
+        "task.create-failed": {
+          "count": 68,
+          "failures": 0,
+          "medianMs": 42.61837500000547,
+          "p95Ms": 94.41775000000052
+        },
+        "task.preparing-failed": {
+          "count": 68,
+          "failures": 0,
+          "medianMs": 36.52079199999571,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 68,
+          "failures": 0,
+          "medianMs": 29.116792000000714,
+          "p95Ms": 78.44883299999947
+        },
+        "task.failed": {
+          "count": 68,
+          "failures": 0,
+          "medianMs": 29.888208000003942,
+          "p95Ms": 119.08404100000189
+        }
+      },
+      "rssBytes": 215572736,
+      "heapUsedBytes": 74240184,
+      "externalBytes": 16717170,
+      "cpuUserMicros": 22222001,
+      "cpuSystemMicros": 9629504,
+      "activeLeases": 2,
+      "queuedTickets": 0,
+      "nonterminalTasks": 37,
+      "ambiguousTasks": 36,
+      "taskStoreBytes": 612861,
+      "resultStoreBytes": 132015,
+      "eventLogBytes": 554799,
+      "coordinatorHistoryBytes": 48042,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 75027.39325000001,
+      "completedCycles": 719,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 402,
+          "failures": 0,
+          "medianMs": 26.018749999999955,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 399,
+          "failures": 0,
+          "medianMs": 15.216958000000886,
+          "p95Ms": 44.15783299999748
+        },
+        "task.create-ambiguous": {
+          "count": 39,
+          "failures": 0,
+          "medianMs": 40.140957999999955,
+          "p95Ms": 94.99945799999841
+        },
+        "task.create": {
+          "count": 289,
+          "failures": 0,
+          "medianMs": 35.02970899999491,
+          "p95Ms": 97.14024999999674
+        },
+        "task.preparing-ambiguous": {
+          "count": 39,
+          "failures": 0,
+          "medianMs": 37.37004199999501,
+          "p95Ms": 88.90845799999806
+        },
+        "task.running-ambiguous": {
+          "count": 39,
+          "failures": 0,
+          "medianMs": 34.88900000000285,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 289,
+          "failures": 0,
+          "medianMs": 40.310833000003186,
+          "p95Ms": 91.29970800000592
+        },
+        "task.running": {
+          "count": 288,
+          "failures": 0,
+          "medianMs": 31.81558300000006,
+          "p95Ms": 95.08754200000112
+        },
+        "result.write": {
+          "count": 288,
+          "failures": 0,
+          "medianMs": 25.2665829999969,
+          "p95Ms": 34.94620800000121
+        },
+        "task.bind-result": {
+          "count": 287,
+          "failures": 0,
+          "medianMs": 46.630166999999346,
+          "p95Ms": 113.11120800000208
+        },
+        "task.complete": {
+          "count": 287,
+          "failures": 0,
+          "medianMs": 31.309667000001355,
+          "p95Ms": 89.8553750000001
+        },
+        "result.read-bound": {
+          "count": 287,
+          "failures": 0,
+          "medianMs": 0.7669160000004922,
+          "p95Ms": 1.3638339999997697
+        },
+        "task.event-append": {
+          "count": 719,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 39,
+          "failures": 0,
+          "medianMs": 121.33483299999898,
+          "p95Ms": 162.87387500000477
+        },
+        "task.read-indexed": {
+          "count": 321,
+          "failures": 0,
+          "medianMs": 2.006375000000844,
+          "p95Ms": 3.7155840000013995
+        },
+        "task.list": {
+          "count": 321,
+          "failures": 0,
+          "medianMs": 2.3275829999984126,
+          "p95Ms": 3.476582999999664
+        },
+        "event.page": {
+          "count": 321,
+          "failures": 0,
+          "medianMs": 0.4300419999999576,
+          "p95Ms": 0.8292080000010174
+        },
+        "task.create-failed": {
+          "count": 72,
+          "failures": 0,
+          "medianMs": 43.06820799999696,
+          "p95Ms": 94.41775000000052
+        },
+        "task.preparing-failed": {
+          "count": 72,
+          "failures": 0,
+          "medianMs": 36.52079199999571,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 72,
+          "failures": 0,
+          "medianMs": 29.133832999999868,
+          "p95Ms": 78.44883299999947
+        },
+        "task.failed": {
+          "count": 72,
+          "failures": 0,
+          "medianMs": 29.92566700000316,
+          "p95Ms": 119.08404100000189
+        }
+      },
+      "rssBytes": 186750784,
+      "heapUsedBytes": 52403248,
+      "externalBytes": 11667031,
+      "cpuUserMicros": 24437506,
+      "cpuSystemMicros": 10230217,
+      "activeLeases": 3,
+      "queuedTickets": 0,
+      "nonterminalTasks": 41,
+      "ambiguousTasks": 39,
+      "taskStoreBytes": 651974,
+      "resultStoreBytes": 140294,
+      "eventLogBytes": 555282,
+      "coordinatorHistoryBytes": 48054,
+      "eventWindowCount": 100
+    },
+    {
+      "elapsedMs": 75196.67450000001,
+      "completedCycles": 721,
+      "failedCycles": 0,
+      "operations": {
+        "coordinator.acquire": {
+          "count": 402,
+          "failures": 0,
+          "medianMs": 26.018749999999955,
+          "p95Ms": 52.49091700000008
+        },
+        "coordinator.queue": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 17.755041999999975,
+          "p95Ms": 17.755041999999975
+        },
+        "coordinator.cancel": {
+          "count": 1,
+          "failures": 0,
+          "medianMs": 11.126750000000015,
+          "p95Ms": 11.126750000000015
+        },
+        "coordinator.release": {
+          "count": 401,
+          "failures": 0,
+          "medianMs": 15.216958000000886,
+          "p95Ms": 44.15783299999748
+        },
+        "task.create-ambiguous": {
+          "count": 39,
+          "failures": 0,
+          "medianMs": 40.140957999999955,
+          "p95Ms": 94.99945799999841
+        },
+        "task.create": {
+          "count": 289,
+          "failures": 0,
+          "medianMs": 35.02970899999491,
+          "p95Ms": 97.14024999999674
+        },
+        "task.preparing-ambiguous": {
+          "count": 39,
+          "failures": 0,
+          "medianMs": 37.37004199999501,
+          "p95Ms": 88.90845799999806
+        },
+        "task.running-ambiguous": {
+          "count": 39,
+          "failures": 0,
+          "medianMs": 34.88900000000285,
+          "p95Ms": 116.03733399999965
+        },
+        "task.preparing": {
+          "count": 289,
+          "failures": 0,
+          "medianMs": 40.310833000003186,
+          "p95Ms": 91.29970800000592
+        },
+        "task.running": {
+          "count": 289,
+          "failures": 0,
+          "medianMs": 31.81558300000006,
+          "p95Ms": 95.08754200000112
+        },
+        "result.write": {
+          "count": 289,
+          "failures": 0,
+          "medianMs": 25.2665829999969,
+          "p95Ms": 34.94620800000121
+        },
+        "task.bind-result": {
+          "count": 289,
+          "failures": 0,
+          "medianMs": 46.630166999999346,
+          "p95Ms": 113.11120800000208
+        },
+        "task.complete": {
+          "count": 289,
+          "failures": 0,
+          "medianMs": 31.309667000001355,
+          "p95Ms": 89.8553750000001
+        },
+        "result.read-bound": {
+          "count": 289,
+          "failures": 0,
+          "medianMs": 0.7669160000004922,
+          "p95Ms": 1.3638339999997697
+        },
+        "task.event-append": {
+          "count": 721,
+          "failures": 0,
+          "medianMs": 14.45233300000018,
+          "p95Ms": 73.94416600000022
+        },
+        "boot.reconcile": {
+          "count": 39,
+          "failures": 0,
+          "medianMs": 121.33483299999898,
+          "p95Ms": 162.87387500000477
+        },
+        "task.read-indexed": {
+          "count": 321,
+          "failures": 0,
+          "medianMs": 2.006375000000844,
+          "p95Ms": 3.7155840000013995
+        },
+        "task.list": {
+          "count": 321,
+          "failures": 0,
+          "medianMs": 2.3275829999984126,
+          "p95Ms": 3.476582999999664
+        },
+        "event.page": {
+          "count": 321,
+          "failures": 0,
+          "medianMs": 0.4300419999999576,
+          "p95Ms": 0.8292080000010174
+        },
+        "task.create-failed": {
+          "count": 72,
+          "failures": 0,
+          "medianMs": 43.06820799999696,
+          "p95Ms": 94.41775000000052
+        },
+        "task.preparing-failed": {
+          "count": 72,
+          "failures": 0,
+          "medianMs": 36.52079199999571,
+          "p95Ms": 92.45791700000018
+        },
+        "task.running-failed": {
+          "count": 72,
+          "failures": 0,
+          "medianMs": 29.133832999999868,
+          "p95Ms": 78.44883299999947
+        },
+        "task.failed": {
+          "count": 72,
+          "failures": 0,
+          "medianMs": 29.92566700000316,
+          "p95Ms": 119.08404100000189
+        }
+      },
+      "rssBytes": 189143104,
+      "heapUsedBytes": 66994480,
+      "externalBytes": 16123318,
+      "cpuUserMicros": 24491503,
+      "cpuSystemMicros": 10253464,
+      "activeLeases": 1,
+      "queuedTickets": 0,
+      "nonterminalTasks": 39,
+      "ambiguousTasks": 39,
+      "taskStoreBytes": 652123,
+      "resultStoreBytes": 140781,
+      "eventLogBytes": 554930,
+      "coordinatorHistoryBytes": 48034,
+      "eventWindowCount": 100
+    }
+  ],
+  "cleanup": {
+    "leases": 0,
+    "tickets": 0,
+    "activeTasksAfterSweep": 39,
+    "expectedAmbiguous": 39,
+    "ambiguousAfterSweep": 39,
+    "archivedTerminal": 361,
+    "deletedArchived": 0,
+    "expiredResults": 289,
+    "socketPresent": false,
+    "temporaryStateRemoved": true
+  },
+  "limitations": [
+    "Source-only isolated process; no installed service, gateway, connector, physical device, or human acceptance was exercised.",
+    "Resource stability is bounded to this duration, workload, fixture size, and host.",
+    "Ambiguous tasks remain intentionally preserved as protected active history."
+  ]
+}
