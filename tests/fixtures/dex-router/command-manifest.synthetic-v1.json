@@ -1,0 +1,61 @@
+{
+  "schema": "dex.command-manifest",
+  "contractVersion": "1.0.0",
+  "synthetic": true,
+  "commands": [
+    {
+      "id": "FIXTURE//SESSION_STATUS",
+      "version": "1.0.0",
+      "product": "SESSION",
+      "safetyClass": "PURE_READ_IDEMPOTENT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.trustReport"
+    },
+    {
+      "id": "FIXTURE//DROPZONE_INGEST",
+      "version": "1.0.0",
+      "product": "DROPZONE",
+      "safetyClass": "SIDE_EFFECTING_IDEMPOTENT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "dropzone",
+      "reachOperation": "dex.file.write"
+    },
+    {
+      "id": "FIXTURE//PAIR_READ",
+      "version": "1.0.0",
+      "product": "PAIR",
+      "safetyClass": "PURE_READ_IDEMPOTENT",
+      "dataClass": "PRIVATE",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.file.read"
+    },
+    {
+      "id": "FIXTURE//WITNESS_EXPORT",
+      "version": "1.0.0",
+      "product": "WITNESS",
+      "safetyClass": "PURE_READ_IDEMPOTENT",
+      "dataClass": "SEALED",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.result.read"
+    },
+    {
+      "id": "FIXTURE//REMIX_APPLY",
+      "version": "1.0.0",
+      "product": "REMIX",
+      "safetyClass": "SIDE_EFFECTING_IDEMPOTENT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.file.write"
+    },
+    {
+      "id": "FIXTURE//NOT_CATALOGUED",
+      "version": "1.0.0",
+      "product": "CAPSULE",
+      "safetyClass": "PURE_READ_IDEMPOTENT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "owner",
+      "reachOperation": "dex.invented.operation"
+    }
+  ]
+}
