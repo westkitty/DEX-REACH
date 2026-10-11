@@ -205,3 +205,14 @@ test('a later quarantine run appends only new eligible records and never re-appe
   const s = selectQuarantineCandidates([row('old'), row('new'), row('live', 'AMBIGUOUS_EFFECT', true), row('odd', 'ACTIVE_CONFIRMED')], records, new Set(['old']));
   assert.deepEqual(s.append.map(a => a.task.taskId), ['new']); assert.deepEqual(s.already, ['old']); assert.deepEqual(s.ineligible.sort(), ['live', 'odd']);
 });
+
+import { reloadHelperIdle } from '../scripts/lib/c14-recovery-preflight.js';
+test('the reload helper is idle when exited cleanly or absent from launchd, never when unknown or running', () => {
+  const quiet = '1 /usr/libexec/syslogd\n', reloading = '9 node /x/dist/scripts/reload-launchagents.js --domain gui/501\n';
+  assert.equal(reloadHelperIdle({ output: 'active count = 0\nlast exit code = 0\n' }, quiet), true);
+  assert.equal(reloadHelperIdle({ notFound: true }, quiet), true);
+  assert.equal(reloadHelperIdle({ notFound: true }, reloading), false);
+  assert.equal(reloadHelperIdle({ error: true }, quiet), false);
+  assert.equal(reloadHelperIdle({ output: 'active count = 1\npid = 42\nlast exit code = 0\n' }, quiet), false);
+  assert.equal(reloadHelperIdle({ output: 'active count = 0\nlast exit code = 1\n' }, quiet), false);
+});

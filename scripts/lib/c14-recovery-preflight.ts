@@ -87,3 +87,14 @@ export function evaluatePreflight(f: PreflightFacts) {
   const blockers = Object.entries(checks).filter(([, pass]) => !pass).map(([name]) => name);
   return { mode: 'READ_ONLY', installationExecuted: false, installationCommandAvailable: false, status: blockers.length ? 'BLOCKED' : 'PREREQUISITES_PASS_NO_INSTALLATION', releaseScope: f.releaseScope ?? 'unscoped', e7Verified: false, checks, blockers, recoveryBlockers: baselineBlockers(f.baseline), syntheticIsInstalledProof: false, states: { source: checks.CLEAN_SOURCE && checks.HOSTED_CHECKS ? 'SOURCE_VALIDATED' : 'SOURCE_UNVERIFIED', backup: checks.BACKUP_COVERAGE ? 'PRIVATE_BACKUP_CERTIFIED' : 'PRIVATE_BACKUP_UNVERIFIED', rollback: checks.RECOVERY_BASELINE ? 'ROLLBACK_BASELINE_VERIFIED' : 'ROLLBACK_BASELINE_UNVERIFIED', installation: blockers.length ? 'INSTALLATION_BLOCKED' : 'INSTALLATION_PREREQUISITES_PASS' } };
 }
+/**
+ * The one-shot reload helper is idle when launchd shows it loaded, exited 0 and pid-less, or when launchd
+ * has no such job at all (it is not kept across reboots) and no reload or installer process exists.
+ * Any other launchctl failure is unknown and refuses.
+ */
+export function reloadHelperIdle(print: { output: string } | { notFound: true } | { error: true }, processTable: string): boolean {
+  const reloading = /scripts\/(?:install-macos|rollback-macos|reload-launchagents)\.(?:ts|js)(?:\s|$)/m.test(processTable);
+  if ('error' in print) return false;
+  if ('notFound' in print) return !reloading;
+  return /active count = 0/.test(print.output) && /last exit code = 0/.test(print.output) && !/\bpid = \d+/.test(print.output) && !reloading;
+}
