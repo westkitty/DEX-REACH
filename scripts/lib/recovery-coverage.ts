@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -45,16 +46,28 @@ const opaquePayload = (family: string, relative: string) => family === 'runtime'
 /**
  * `atomicWriteFile` writes `<file>.<pid>.<uuid>.tmp` and removes it in `finally`, so one only survives when its
  * writer process died before the rename commit point. Once that pid is gone the rename can never happen: the
- * bytes are uncommitted residue, never authoritative. A live pid (including a reused one) stays a blocking
- * transient write, failing closed.
+ * bytes are uncommitted residue, never authoritative. A live pid stays a blocking transient write, failing
+ * closed, unless that process provably started after the temp was last written: pids are reused (they restart
+ * from low numbers after a reboot), and a process cannot have written a file before it existed. An unknown
+ * start time is still treated as a live writer.
  */
 const ATOMIC_TEMP = /^(.+)\.([1-9]\d{0,9})\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/;
 export function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
 }
-export function orphanedAtomicTemp(name: string, alive: (pid: number) => boolean = processAlive): boolean {
+/** True only when the process now holding `pid` provably started after `mtimeMs` (ps start is per second). */
+export function processStartedAfter(pid: number, mtimeMs: number): boolean {
+  try {
+    const out = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { timeout: 5000, encoding: 'utf8' }).trim();
+    const started = Date.parse(out);
+    return Number.isFinite(started) && started > mtimeMs + 2000;
+  } catch { return false; }
+}
+export function orphanedAtomicTemp(name: string, alive: (pid: number) => boolean = processAlive, mtimeMs?: number, startedAfter: (pid: number, mtimeMs: number) => boolean = processStartedAfter): boolean {
   const match = name.match(ATOMIC_TEMP);
-  return !!match && !alive(Number(match[2]));
+  if (!match) return false;
+  const pid = Number(match[2]);
+  return !alive(pid) || (mtimeMs !== undefined && Number.isFinite(mtimeMs) && startedAfter(pid, mtimeMs));
 }
 /** The committed file an atomic-write temp belongs to: `store.json.<pid>.<uuid>.tmp` -> `store.json`. */
 export const atomicTempBase = (name: string) => name.match(ATOMIC_TEMP)?.[1];
@@ -122,7 +135,8 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
     directories.push({ root: 'state', relative: parent, mode: st.mode & 0o777, uid: st.uid, gid: st.gid, inode: st.ino, ctimeMs: st.ctimeMs, names });
     for (const name of names) if (!allowed.has(name)) {
       const owner = policy.find(f => f.root === 'state' && f.relative === `${parent}/${atomicTempBase(name)}`);
-      if (owner && orphanedAtomicTemp(name) && (await fs.lstat(path.join(dir, name))).isFile()) residues.set(`${parent}/${name}`, owner.id);
+      const st = owner ? await fs.lstat(path.join(dir, name)) : null;
+      if (owner && st!.isFile() && orphanedAtomicTemp(name, processAlive, st!.mtimeMs)) residues.set(`${parent}/${name}`, owner.id);
       else if (/\.lock$|\.tmp$/.test(name)) problems.push(`${parent}:TRANSIENT_WRITE_OR_LOCK_PRESENT`); else unknownFamily();
     }
   }
@@ -153,7 +167,7 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
         directories.push({ root: family.root, relative, mode: before.mode & 0o777, uid: before.uid, gid: before.gid, inode: before.ino, ctimeMs: before.ctimeMs, names });
         for (const name of names) {
           const childRelative = relative ? `${relative}/${name}` : name;
-          if (!opaquePayload(family.id, childRelative) && /\.lock$|\.tmp$/.test(name) && !(orphanedAtomicTemp(name) && (await fs.lstat(path.join(file, name))).isFile())) { problems.push(`${family.id}:TRANSIENT_WRITE_OR_LOCK_PRESENT`); continue; }
+          if (!opaquePayload(family.id, childRelative) && /\.lock$|\.tmp$/.test(name) && !(await fs.lstat(path.join(file, name)).then(st => st.isFile() && orphanedAtomicTemp(name, processAlive, st.mtimeMs)))) { problems.push(`${family.id}:TRANSIENT_WRITE_OR_LOCK_PRESENT`); continue; }
           await visit(relative ? `${relative}/${name}` : name);
         }
         return;
@@ -162,7 +176,7 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
       const bytes = await safeRead(base, relative, 512 * 1024 * 1024), after = await fs.lstat(file);
       if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ino !== after.ino) { consistent = false; problems.push(`${family.id}:CHANGED_DURING_INSPECTION`); }
       let schema: number | undefined;
-      const residue = !opaquePayload(family.id, relative) && orphanedAtomicTemp(path.basename(relative)) ? { residue: 'ORPHANED_ATOMIC_TEMP' as const } : {};
+      const residue = !opaquePayload(family.id, relative) && orphanedAtomicTemp(path.basename(relative), processAlive, before.mtimeMs) ? { residue: 'ORPHANED_ATOMIC_TEMP' as const } : {};
       if (relative.endsWith('.json') && !opaquePayload(family.id, relative)) {
         const value = JSON.parse(bytes.toString()); schema = value.schemaVersion ?? (typeof value.version === 'number' ? value.version : undefined);
         if (schema !== undefined && (!Number.isInteger(schema) || schema < 1)) throw new Error('SCHEMA');
@@ -232,7 +246,12 @@ export async function verifyCoverage(raw: unknown, roots: Roots, expectedDigest:
   const observed = await inspectCoverage(roots, m.scope, m.linkPolicy);
   if (m.entries.some(e => e.kind === 'link' && (!e.link || e.sha256 !== sha(Buffer.from(e.link.target))))) throw new Error('INVALID_LINK_MANIFEST');
   if (JSON.stringify(observed.volumes) !== JSON.stringify(m.volumes)) throw new Error('VOLUME_IDENTITY_MISMATCH');
-  if (!observed.consistent || observed.problems.length || observed.entries.length !== m.entries.length || observed.directories.length !== m.directories.length) throw new Error('SNAPSHOT_INCOMPLETE_OR_CHANGED');
+  if (!observed.consistent || observed.problems.length || observed.entries.length !== m.entries.length || observed.directories.length !== m.directories.length) {
+    // Name the first problem class (fixed vocabulary, no paths) so a refusal is diagnosable from evidence.
+    const first = observed.problems[0] ?? (observed.entries.length !== m.entries.length ? 'ENTRY_COUNT_CHANGED' : 'DIRECTORY_COUNT_CHANGED');
+    const detail = /^[a-z][a-z-]{0,40}:[A-Z0-9_]{1,80}$/.test(first) ? first : /^[A-Z0-9_]{1,80}$/.test(first) ? `global:${first}` : 'global:UNCLASSIFIED';
+    throw new Error(`SNAPSHOT_INCOMPLETE_OR_CHANGED:${detail}`);
+  }
   for (const e of m.entries) {
     const actual = observed.entries.find(a => a.root === e.root && a.relative === e.relative);
     if (!actual || ['family', 'sha256', 'bytes', 'mode', 'uid', 'gid', 'schema', 'kind', 'residue'].some(k => (actual as any)[k] !== (e as any)[k])) throw new Error('INTEGRITY_PERMISSION_OR_SCHEMA_MISMATCH');
