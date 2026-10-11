@@ -16,13 +16,13 @@ Read from `westkitty/DEX` (private; read-only clone kept outside this repository
 | REACH mapping fields (`reachOperation`, `invokesReach`) | DO NOT EXIST IN DEX | Searched DEX source and docs: none. |
 | Conformance run | PASS | `npm run conformance:dex -- --dex-checkout <path>`: loaded under the production gate, `canonicalCount` 50, `routable` 0, `unroutable` 50, all 12 scopes present, modifiers match REACH's pin. |
 
-The conformance run is local evidence. Hosted CI cannot reach DEX, so CI runs only the synthetic-fixture tests. No DEX source, roster or manifest is stored in this repository, which is public: test fixtures use invented `DEX//FIXTURE_*` commands in the real entry shape.
+The conformance run against the live DEX checkout is local evidence; hosted CI cannot reach DEX. Hosted CI instead loads the owner-approved roster snapshot (`tests/fixtures/dex-router/dex-roster-snapshot-v1.json`, identity and classification only; `aliases`, `effect` and `appCommand` blanked; provenance beside it) through the production gate, and runs the behavioural tests against invented `DEX//FIXTURE_*` commands. No DEX source file is stored in this public repository.
 
 ## 2. Discrepancies found and how they were resolved
 
 | # | Discrepancy | Resolution |
 | --- | --- | --- |
-| A | REACH tested a synthetic `FIXTURE//` schema; DEX has a 50-command roster including `DEX//NEXT`. | Tests now use the real `DexCommandManifestEntry` shape. All canonical identities are preserved by the loader (`canonicalCount`, `routable`, `unroutable`); the real roster is verified by `conformance:dex`, not stored. |
+| A | REACH tested a synthetic `FIXTURE//` schema; DEX has a 50-command roster including `DEX//NEXT`. | Tests now use the real `DexCommandManifestEntry` shape. All canonical identities are preserved by the loader (`canonicalCount`, `routable`, `unroutable`); the real 50-command roster is committed as an owner-approved snapshot and checked for drift by `conformance:dex --check-snapshot`. |
 | B | DEX has ten plus-prefixed modifiers; REACH modelled three unprefixed ones. | REACH pins all ten, in `+X` form, and refuses unprefixed, lowercase, duplicate or undeclared modifiers. |
 | C | DEX entry fields differ from REACH's consumer schema (`invokesReach`, `reachOperation`, `safetyClass`, `dataClass`, `inputOrigin`). | The DEX entry is validated as DEX defines it; REACH-owned fields live in a separate mapping table and are refused inside a DEX entry. |
 | D | DEX product ids are lowercase with adapter `1.0.0`; REACH used eight uppercase ids. | REACH uses DEX's lowercase `DexProductId` for adapters, projections and handoffs. |
@@ -48,4 +48,4 @@ DEX declares no REACH operation for any command and no accepted decision grants 
 - No `dex-command-manifest.v1.json` was generated.
 - No REACH mapping was invented for any DEX command.
 - No integration with a live DEX product is claimed.
-- The DEX roster is not committed here. Committing it would copy private source into a public repository and needs a separate owner decision.
+- Only the roster snapshot (identity and classification) is committed, on the owner's approval. DEX source, descriptive prose, aliases and app commands are not.

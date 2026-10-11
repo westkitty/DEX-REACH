@@ -6,9 +6,8 @@ import { REACH_AUTHORITATIVE_MAPPINGS } from '../src/shared/dex-reach-mappings.j
 import { canonicalRaw, cloneCanonical, cloneMappings, loadFixture, node, refusalOf } from './dex-router-fixtures.js';
 
 // The REACH-side versioned adapter over the canonical DEX command manifest (DEX ADR-0013, manifest 1.0.0).
-// Every manifest here is SYNTHETIC but has the real DexCommandManifestEntry shape. No DEX roster is stored in
-// this repository, so nothing here proves DEX behaviour; scripts/dex-contract-conformance.ts checks a real
-// DEX checkout when one is available.
+// Most manifests here are SYNTHETIC but have the real DexCommandManifestEntry shape; the last tests load the
+// owner-approved snapshot of the real DEX roster. Behavioural proof of REACH logic uses the synthetic ones.
 
 const load = (canonical: unknown) => loadCanonicalManifest(canonical);
 const refusal = (canonical: unknown) => refusalOf(load(canonical));
@@ -239,4 +238,86 @@ test('the mapping table fails closed: it cannot invent a command, a grant, a dow
   // The one sanctioned pairing for an unknown-effect operation is a command DEX itself marks DESTRUCTIVE.
   assert.equal(cloneMappings().mappings[wipe].safetyClass, 'PROCESS_UNKNOWN_EFFECT');
   assert.equal(loadRoutableManifest({ canonical: canonicalRaw, mappings: cloneMappings() }).ok, true);
+});
+
+// --- The real DEX roster (owner-approved snapshot; identity and classification only) -----------------------
+// tests/fixtures/dex-router/dex-roster-snapshot-v1.json is generated from DEX 57693daa by
+// `npm run conformance:dex -- --dex-checkout <path> --write-snapshot`. See its .provenance.json.
+
+const rosterRaw = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('./fixtures/dex-router/dex-roster-snapshot-v1.json', import.meta.url), 'utf8')) as { manifestVersion: string; commands: Array<Record<string, any>> };
+
+test('the real 50-command DEX roster loads under the production gate with every identity preserved', () => {
+  const result = loadCanonicalManifest(rosterRaw, { production: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.manifest.synthetic, false);
+  assert.equal(result.manifest.commands.size, 50);
+  assert.ok(result.manifest.commands.has('DEX//NEXT'));
+  assert.deepEqual([...result.manifest.commands.keys()], rosterRaw.commands.map(c => c.canonical));
+  for (const command of result.manifest.commands.values()) {
+    assert.equal(command.canonical, `DEX//${command.name}`);
+    assert.equal(command.slash, `/${command.name.toLowerCase()}`);
+    // Descriptive DEX prose and commands are not stored in this repository.
+    assert.deepEqual(command.aliases, []);
+    assert.equal(command.effect, '');
+    assert.equal(command.appCommand, null);
+  }
+});
+
+test('the real roster uses all ten modifiers and all twelve scopes, and scope decides product only for the eight product scopes', () => {
+  const result = loadCanonicalManifest(rosterRaw);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const commands = [...result.manifest.commands.values()];
+  assert.deepEqual(new Set(commands.flatMap(c => c.supportedModifiers)), new Set(DEX_MODIFIERS));
+  assert.deepEqual(new Set(commands.map(c => c.scope)), new Set(DEX_SCOPES));
+  for (const command of commands) {
+    const product = productForScope(command.scope);
+    assert.equal(product === null, (DEX_NON_PRODUCT_SCOPES as readonly string[]).includes(command.scope), command.canonical);
+  }
+});
+
+test('with the shipped (empty) mapping table, every command of the real roster is unroutable and refused by name', async () => {
+  const result = loadRoutableManifest({ canonical: rosterRaw, mappings: REACH_AUTHORITATIVE_MAPPINGS, production: true });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.manifest.canonicalCount, 50);
+  assert.equal(result.manifest.commands.size, 0);
+  assert.equal(result.manifest.unroutable.size, 50);
+  for (const command of rosterRaw.commands) {
+    const decision = refusalOf(await routeCommand({
+      manifest: result.manifest,
+      request: { command: command.canonical, nodeId: 'node-a', modifiers: ['+DRY'] },
+      nodes: [node({ nodeId: 'node-a' })]
+    }));
+    assert.equal(decision.code, 'REACH_MAPPING_ABSENT', command.canonical);
+  }
+  // Slash forms, aliases and prose are DEX's parser's job; REACH never resolves them.
+  for (const command of ['/next', 'next', 'dex//next', 'use reach']) {
+    assert.equal(refusalOf(await routeCommand({ manifest: result.manifest, request: { command }, nodes: [] })).code, 'UNKNOWN_COMMAND', command);
+  }
+});
+
+test('a mapping cannot be attached to a real command without stating its authority and fitting its DEX scope and mutation level', () => {
+  const next = rosterRaw.commands.find(c => c.canonical === 'DEX//NEXT')!;
+  assert.equal(next.scope, 'GLOBAL');
+  assert.equal(next.mutationLevel, 'NONE');
+  const mapping = (patch: Record<string, unknown>) => ({
+    schema: 'reach.dex-command-mappings', version: '1.0.0',
+    mappings: [{ command: 'DEX//NEXT', authority: 'test only', invokesReach: true, reachOperation: 'dex.trustReport', product: null, safetyClass: 'PURE_READ_IDEMPOTENT', dataClass: 'PUBLIC', inputOrigin: 'owner', ...patch }]
+  });
+  assert.equal(loadRoutableManifest({ canonical: rosterRaw, mappings: mapping({}) }).ok, true);
+  assert.equal(refusalOf(loadRoutableManifest({ canonical: rosterRaw, mappings: mapping({ product: 'session' }) })).code, 'MANIFEST_INVALID', 'GLOBAL is not a product');
+  assert.equal(refusalOf(loadRoutableManifest({ canonical: rosterRaw, mappings: mapping({ authority: '' }) })).code, 'MANIFEST_INVALID');
+  assert.equal(refusalOf(loadRoutableManifest({ canonical: rosterRaw, mappings: mapping({ reachOperation: 'dex.file.write', safetyClass: 'SIDE_EFFECTING_IDEMPOTENT' }) })).code, 'MANIFEST_INVALID', 'NONE allows only pure reads');
+});
+
+test('the roster snapshot carries its provenance and is not mistaken for a newer contract', async () => {
+  const provenance = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('./fixtures/dex-router/dex-roster-snapshot-v1.provenance.json', import.meta.url), 'utf8'));
+  assert.equal(provenance.repository, 'westkitty/DEX');
+  assert.match(provenance.commit, /^[0-9a-f]{40}$/);
+  assert.match(provenance.fileSha256, /^[0-9a-f]{64}$/);
+  assert.equal(provenance.commandCount, 50);
+  assert.equal(provenance.manifestVersion, rosterRaw.manifestVersion);
+  assert.equal(refusalOf(loadCanonicalManifest({ ...rosterRaw, manifestVersion: '2.0.0' })).code, 'DEX_CONTRACT_MAJOR_MISMATCH');
 });

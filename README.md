@@ -85,7 +85,7 @@ view. See `OPERATIONAL_STATE.md` for the current browser and runtime proof bound
 | OAuth reliability | **Hardened** — dedicated auth router, ChatGPT CIMD + DCR fallback, deterministic expiry→refresh regression, share-safe diagnostics, scheduled active refresh-recovery canary, and immutable installed runtime isolation |
 | Local coordinator daemon | **Verified installed** — `com.stinkyweasel.dex-reach.coordinator` runs persistently and serves queue/capacity state for native and compatibility execution paths |
 | Durable tasks and C14 recovery (source) | **Source-verified, not installed-verified** — task identity, coordinator admission, ambiguous-effect protection and recovery pass the controlled-concurrency suite on synthetic state; C13 NOT PASS, E7 HOST CAPABILITY BLOCKED, C14 PROGRAM PARTIAL, C15 BLOCKED; see `OPERATIONAL_STATE.md` |
-| DEX command contract | **Consumed as data; nothing routable** — the adapter accepts the real DEX 50-command manifest, but no authoritative REACH mapping exists, so every DEX command is refused (`REACH_MAPPING_ABSENT`); see `docs/architecture/dex-contract-alignment.md` |
+| DEX command contract | **Consumed as data; nothing routable** — the adapter accepts the real DEX 50-command roster (committed as an owner-approved snapshot), but no authoritative REACH mapping exists, so every DEX command is refused (`REACH_MAPPING_ABSENT`); see `docs/architecture/dex-contract-alignment.md` |
 
 For the detailed evidence, current limitations, and exact verification matrix, read [`OPERATIONAL_STATE.md`](OPERATIONAL_STATE.md).
 

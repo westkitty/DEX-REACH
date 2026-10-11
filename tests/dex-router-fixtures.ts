@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 // SYNTHETIC fixtures in the real DEX command-manifest shape (DEX `DexCommandManifestEntry`, manifest 1.0.0).
 // The command names are `DEX//FIXTURE_*`: they are not the DEX roster, and nothing here proves DEX behaviour.
-// DEX's real roster is private source and is deliberately not stored in this repository.
+// The real roster is in dex-roster-snapshot-v1.json (owner-approved; identity and classification only).
 
 const dir = path.resolve(import.meta.dirname, 'fixtures/dex-router');
 export const canonicalRaw = JSON.parse(await fs.readFile(path.join(dir, 'canonical-manifest.synthetic-v1.json'), 'utf8')) as Record<string, any>;

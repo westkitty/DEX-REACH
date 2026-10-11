@@ -6,8 +6,8 @@
  * permission or node requirement from a command name, scope or workflow id; those come only from an
  * explicit REACH-owned mapping (see `dex-command-router.ts`).
  *
- * No DEX command roster is stored here. The roster is DEX data from a private repository; this file holds
- * only the contract vocabulary (enumerations) that the shape is validated against.
+ * No DEX command roster is stored in this file; it holds only the contract vocabulary (enumerations) that the
+ * shape is validated against. The owner-approved roster snapshot lives in tests/fixtures/dex-router.
  */
 
 export const DEX_CONTRACT_MAJOR = 1;
