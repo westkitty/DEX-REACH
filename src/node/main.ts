@@ -1,6 +1,7 @@
 import { boundedAdmissionMs, MAX_ADMISSION_MS } from '../shared/request-deadlines.js';
 import { acquireTaskAdmission, waitingStatusWriter } from './task-admission.js';
-import { persistTaskFailure } from './task-failure.js';
+import { persistTaskFailure, persistProcessExitFailure } from './task-failure.js';
+import { ProcessExitError, assertProcessSucceeded } from '../shared/process-outcome.js';
 import fs from 'node:fs/promises';
 import { withFileLock } from '../shared/state-io.js';
 import { requiredCapabilities, requestPaths } from '../shared/capabilities.js';
@@ -301,6 +302,8 @@ async function commitPlan(actor: RequestActor | undefined, args: Record<string, 
   );
   try {
     const value = await executeOperation(plan.operation, plan.args, actor, reservation.decision.effectiveProfile, context);
+    // A committed plan whose process exited nonzero is a failed commit, never a completed one.
+    assertProcessSucceeded(plan.operation, value);
     return {
       planId: plan.id,
       operation: plan.operation,
@@ -385,6 +388,8 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
     }
     const current = await taskStore.read(task.taskId);
     if (current?.state === 'CANCELLED') throw new Error(`task ${task.taskId} was cancelled before completion`);
+    // A numeric nonzero process exit is FAILED with its evidence, not COMPLETED (ADR-0001).
+    assertProcessSucceeded(request.operation, value);
     const stored = await results.boundWithReference(value, task.taskId);
     await taskStore.update(task.taskId, { resultRef: stored.metadata.handle, resultHash: stored.metadata.resultHash });
     await taskStore.transition(task.taskId, 'COMPLETED', 'Task completed with a persisted result reference.');
@@ -409,7 +414,10 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = null;
     if (leaseId) await coordinatedRelease(leaseId).catch(() => undefined);
-    const failed = await persistTaskFailure(taskStore, task.taskId, taskSafety, error, true);
+    // A real nonzero exit is recorded as FAILED with its evidence. If that record cannot be written,
+    // the conservative path applies: the task is not left in an unknown state or marked completed.
+    const exitRecorded = error instanceof ProcessExitError ? await persistProcessExitFailure(taskStore, results, task.taskId, error).catch(() => null) : null;
+    const failed = exitRecorded ?? await persistTaskFailure(taskStore, task.taskId, taskSafety, error, true);
     publishTaskEvent(task.taskId, failed.state === 'COMPLETED' ? 'completed' : 'failed', failed.state, 'Task outcome recorded; retrieve original task status.');
     const message = error instanceof Error ? error.message : String(error);
     const durationMs = Date.now() - started;
@@ -418,6 +426,7 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
     await audit.append({ at: new Date().toISOString(), source: 'node', nodeId: config.nodeId, actor, operation: request.operation, ok: false, durationMs, args: request.args, error: message });
     const receipt = await appendReceipt({ nodeId: config.nodeId, actor, operation: request.operation, args: request.args, ok: false, error: message, durationMs, policy: state.policy }).catch(() => null);
     if (receipt) enqueueSpan({ traceId: failSpan.traceId, spanId: childSpan(failSpan).spanId, parentSpanId: failSpan.spanId, stage: 'receipt', at: new Date().toISOString(), operation: request.operation, nodeId: config.nodeId, taskId: task.taskId, actorKind: actor?.kind, ok: false, receiptId: receipt.receiptId });
+    if (exitRecorded && error instanceof ProcessExitError) return { type: 'response', id: request.id, ok: false, error: message, result: error.outcome, traceId: trace.traceId };
     return { type: 'response', id: request.id, ok: false, error: message, traceId: trace.traceId };
   } finally {
     await releaseBudgetConcurrency(config.nodeId, state.budgetReservationId).catch(() => undefined);

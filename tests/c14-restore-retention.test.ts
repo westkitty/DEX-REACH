@@ -48,7 +48,7 @@ test('retention-evicted history: a quarantined task is accepted under a saturate
     assert.ok(live, 'fixture has a non-terminal task');
     await saturateJournal(w.source.state);
     await assert.rejects(verifyRestoredApplication(w.source), /APPLICATION_EVENT_HISTORY_MISSING/, 'live task without history is refused');
-    await appendQuarantine(w.source.state, [{ task: { taskId: live.taskId, rootTaskId: live.rootTaskId, parentTaskId: live.parentTaskId, actorId: live.actorId, nodeId: live.nodeId, operation: live.operation, idempotencyKey: live.idempotencyKey, payloadSha256: live.payloadSha256, policyHash: live.policyHash }, classification: 'effect-unknown' }], { kind: 'owner-authorization', grantedAt: new Date().toISOString(), scope: 'synthetic-test' });
+    await appendQuarantine(w.source.state, [{ task: { taskId: live.taskId, rootTaskId: live.rootTaskId, parentTaskId: live.parentTaskId, actorId: live.actorId, nodeId: live.nodeId, operation: live.operation, idempotencyKey: live.idempotencyKey, payloadSha256: live.payloadSha256, policyHash: live.policyHash, createdAtUtc: live.createdAtUtc, attemptNumber: live.attemptNumber, state: live.state }, classification: 'effect-unknown' }], { kind: 'owner-authorization', grantedAt: new Date().toISOString(), scope: 'synthetic-test' });
     await verifyRestoredApplication(w.source);
   } finally { await w.cleanup(); }
 });

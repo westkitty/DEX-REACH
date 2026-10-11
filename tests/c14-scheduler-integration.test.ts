@@ -137,6 +137,16 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  await assert.rejects(call('dex.process.run',receiptArgs,10000),/EISDIR/);
  await fs.rm(receiptLog,{recursive:true});await fs.rename(receiptLog+'.saved',receiptLog);
  await call('dex.process.run',receiptArgs);assert.equal(await fs.readFile(path.join(roots,'receipt-oracle.txt'),'utf8'),'receipt-effect');
+// A numeric nonzero exit is FAILED with its real status, never COMPLETED. An identical-key retry is refused by the
+// durable record and the effect oracle shows exactly one execution.
+const exitArgs={command:'printf exit-effect >> exit-oracle.txt; exit 3',cwd:roots,idempotencyKey:'nonzero-exit'};
+const beforeExit=new Set((await store.list()).map(t=>t.taskId));
+await assert.rejects(call('dex.process.run',exitArgs,10000),/process exited with status 3/);
+const exitTasks=(await store.list()).filter(t=>!beforeExit.has(t.taskId));
+assert.equal(exitTasks.length,1);assert.equal(exitTasks[0]!.state,'FAILED');assert.equal(exitTasks[0]!.failureClass,'EXECUTION_FAILED');
+assert.match(JSON.stringify(exitTasks[0]),/process exited with status 3/);
+await assert.rejects(call('dex.process.run',exitArgs,10000),/already ended as FAILED/);
+assert.equal(await fs.readFile(path.join(roots,'exit-oracle.txt'),'utf8'),'exit-effect');
  // Queue identity survives restart. Boot never reconstructs payloads or automatically replays the operation.
  table+='101 1 80 3 00:01:00 /opt/homebrew/bin/claude\n';
  const interrupted=(await start('queued-restart','printf forbidden >> restart-oracle.txt')).result as {taskId:string};
