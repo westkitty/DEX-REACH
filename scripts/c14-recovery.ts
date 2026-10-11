@@ -14,16 +14,17 @@ import { TransactionEvidenceLog, ExpectationStore } from './lib/recovery-evidenc
 import { COMPAT_HOME_PRESERVATION_RULE, defaultLinkPolicy } from './lib/recovery-symlinks.js';
 import { recoveryStorageEstimate } from './lib/recovery-storage.js';
 import type { DestinationFacts } from './lib/recovery-destination.js';
-import { reloadHelperIdle, C14_ROOT, RETAINED_RELEASE, RETAINED_TREE, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
+import { reloadHelperIdle, isCanonicalRepository, readReleaseHostedEvidence, RELEASE_LINE, RELEASE_ROOT, RETAINED_RELEASE, RETAINED_TREE, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
 import { parseCaptureExclusionFlags } from './lib/recovery-capture-flags.js';
 
 const runFile = promisify(execFile);
-async function run(bin: string, args: string[]): Promise<string> { return (await runFile(bin, args, { cwd: C14_ROOT, timeout: 20_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } })).stdout.trim(); }
+async function run(bin: string, args: string[]): Promise<string> { return (await runFile(bin, args, { cwd: RELEASE_ROOT, timeout: 20_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } })).stdout.trim(); }
 export async function assertLiveTarget(): Promise<void> {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  if (root !== C14_ROOT || os.hostname() !== 'MacBook-Air.local' || os.platform() !== 'darwin' || os.arch() !== 'arm64' || os.userInfo().username !== 'andrew' || process.geteuid?.() !== 501 || os.homedir() !== '/Users/andrew' || process.env.DEX_REACH_STATE_DIR && process.env.DEX_REACH_STATE_DIR !== '/Users/andrew/.dex-reach') throw new Error('WRONG_ENVIRONMENT');
-  if (await run('/usr/bin/git', ['branch', '--show-current']) !== 'c14-chaos-recovery') throw new Error('WRONG_BRANCH');
-  if (await run('/usr/sbin/sysctl', ['-n', 'hw.model']) !== 'MacBookAir10,1' || await run('/usr/bin/git', ['rev-parse', '--show-toplevel']) !== C14_ROOT || await run('/usr/bin/git', ['remote', 'get-url', 'origin']) !== 'git@github.com:westkitty/DEX-REACH.git') throw new Error('WRONG_HOST_OR_REPOSITORY');
+  if (root !== RELEASE_ROOT || os.hostname() !== 'MacBook-Air.local' || os.platform() !== 'darwin' || os.arch() !== 'arm64' || os.userInfo().username !== 'andrew' || process.geteuid?.() !== 501 || os.homedir() !== '/Users/andrew' || process.env.DEX_REACH_STATE_DIR && process.env.DEX_REACH_STATE_DIR !== '/Users/andrew/.dex-reach') throw new Error('WRONG_ENVIRONMENT');
+  // The release worktree is detached at main's tip (or on main itself); REMOTE_PARITY then pins the exact SHA.
+  if (!['', RELEASE_LINE].includes(await run('/usr/bin/git', ['branch', '--show-current']))) throw new Error('WRONG_BRANCH');
+  if (await run('/usr/sbin/sysctl', ['-n', 'hw.model']) !== 'MacBookAir10,1' || await run('/usr/bin/git', ['rev-parse', '--show-toplevel']) !== RELEASE_ROOT || !isCanonicalRepository(await run('/usr/bin/git', ['remote', 'get-url', 'origin']))) throw new Error('WRONG_HOST_OR_REPOSITORY');
 }
 const liveRoots = { state: '/Users/andrew/.dex-reach', agents: '/Users/andrew/Library/LaunchAgents', worker: '/Users/andrew/.dex-reach-worker' };
 export async function liveTaskReport() {
@@ -43,9 +44,11 @@ async function livePreflight() {
   await assertLiveTarget();
   const head = await run('/usr/bin/git', ['rev-parse', 'HEAD']);
   const branch = await run('/usr/bin/git', ['branch', '--show-current']);
-  const remoteHead = (await run('/usr/bin/git', ['ls-remote', 'origin', 'refs/heads/c14-chaos-recovery'])).split(/\s/)[0] ?? '';
+  const remoteHead = (await run('/usr/bin/git', ['ls-remote', 'origin', `refs/heads/${RELEASE_LINE}`])).split(/\s/)[0] ?? '';
   const dirty = !!await run('/usr/bin/git', ['status', '--porcelain']);
-  const pr = JSON.parse(await run('gh', ['pr', 'view', '16', '--repo', 'westkitty/DEX-REACH', '--json', 'headRefOid,statusCheckRollup,isDraft,baseRefName']));
+  // Hosted evidence for this exact commit only: its check runs and its CodeQL push workflow run.
+  const hosted = await readReleaseHostedEvidence(head, endpoint => run('gh', ['api', endpoint]));
+  const ciRows = hosted.rows;
   const rows = await liveTaskReport();
   const releaseRoot = path.join(liveRoots.state, 'runtime/releases', RETAINED_RELEASE);
   let observedDigest = '', installedIntact = false;
@@ -73,17 +76,17 @@ async function livePreflight() {
   let claimsKnown = true, claimsCount = 0;
   for (const name of ['leases', 'queue']) { try { const dir = path.join(liveRoots.state, 'coordinator', name); await realDirectory(dir); claimsCount += (await fs.readdir(dir)).length; } catch { claimsKnown = false; } }
   const stat = await fs.statfs(liveRoots.state), freeBytes = stat.bavail * stat.bsize;
-  const pkg = JSON.parse(await fs.readFile(path.join(C14_ROOT, 'package.json'), 'utf8'));
+  const pkg = JSON.parse(await fs.readFile(path.join(RELEASE_ROOT, 'package.json'), 'utf8'));
   const store = JSON.parse(await fs.readFile(path.join(liveRoots.state, 'tasks', 'store.json'), 'utf8')) as { records: Record<string, QuarantinedTaskIdentity> };
   const authorization = await readWindowAuthorization();
-  const window = await verifyWindowEvidence({ head, sourceRoot: C14_ROOT, nodeId: 'macbook-air.local', roots: liveRoots, tasks: rows, storeRecords: store.records, authorization, captureTransactionId: await readCapturePointer() });
-  const ciChecks = aggregateCheckRuns(pr.statusCheckRollup);
+  const window = await verifyWindowEvidence({ head, sourceRoot: RELEASE_ROOT, nodeId: 'macbook-air.local', roots: liveRoots, tasks: rows, storeRecords: store.records, authorization, captureTransactionId: await readCapturePointer() });
+  const ciChecks = aggregateCheckRuns(ciRows);
   // The exact-head synthetic capture/restore suites run inside the hosted validate job.
-  const syntheticAtHead = pr.headRefOid === head && ciChecks.validate === 'SUCCESS';
+  const syntheticAtHead = ciChecks.validate === 'SUCCESS';
   const approved = !!authorization && authorization.approvedSha === head;
   const facts: PreflightFacts = {
-    hostname: os.hostname(), model: 'MacBookAir10,1', platform: os.platform(), arch: os.arch(), user: os.userInfo().username, uid: process.geteuid!(), home: os.homedir(), root: C14_ROOT, branch, head, remoteHead, dirty,
-    candidateVersion: pkg.version, ciHead: pr.headRefOid, ciChecks,
+    hostname: os.hostname(), model: 'MacBookAir10,1', platform: os.platform(), arch: os.arch(), user: os.userInfo().username, uid: process.geteuid!(), home: os.homedir(), root: RELEASE_ROOT, repositoryUrl: await run('/usr/bin/git', ['remote', 'get-url', 'origin']), branch, head, remoteHead, dirty,
+    candidateVersion: pkg.version, ciHead: ciRows.length ? head : '', ciChecks,
     ...(approved ? { approvedSha: authorization!.approvedSha, approvedVersion: authorization!.approvedVersion } : {}),
     installedIntact, installedRelease: RETAINED_RELEASE, servicesVerified, backupCertified: window.backupCertified,
     baseline: { previousReleaseId: RETAINED_RELEASE, previousDigest: RETAINED_TREE, observedDigest, previousExists: installedIntact, provenance: 'journal-bound', legacyProvenanceApproved: approved && authorization!.retainC13, transactionId: window.backupCertified ? window.captureTransactionId! : '', state: window.backupCertified ? 'prepared' : 'uncertain', fresh: window.backupCertified, serviceReleaseIds, configVerified: window.provenance?.configDigest === window.provenance?.expectedConfigDigest && !!window.provenance, inventoryVerified: window.ownerPreservationVerified, helperIdle: helperIdle && !recoveryActive, rollbackActive: recoveryActive, ...(window.provenance ? { provenanceDetails: window.provenance } : {}) },
@@ -94,9 +97,14 @@ async function livePreflight() {
     exactLegacyPairingVerified: window.exactLegacyPairingVerified, credentialsCompatible: window.exactLegacyPairingVerified,
     // E7 (hosted connector interruption) is unavailable; only the owner-approved local/runtime-only scope is admissible.
     requiredHostCapabilityAvailable: approved && authorization!.releaseScope === 'local-runtime-only',
-    maintenanceAuthorized: approved && authorization!.maintenanceWindow, releaseScope: 'local-runtime-only', boundary: window.boundary
+    maintenanceAuthorized: approved && authorization!.maintenanceWindow, ...(approved ? { releaseScope: authorization!.releaseScope } : {}), boundary: window.boundary
   };
-  return { ...evaluatePreflight(facts), head, installedTreeVerified: installedIntact, freeBytes, spaceEstimate: window.spaceMeasured ? 'MEASURED_FROM_CERTIFIED_CAPTURE' : 'PLANNING_ONLY_REQUIRES_OWNER_BUDGET', windowBlockers: window.blockers, quarantined: window.quarantined, tasks: publicTaskReport(rows), prDraft: pr.isDraft, prBase: pr.baseRefName };
+  // CI/capture reads can take time. Reject drift that occurred while collecting their evidence.
+  const finalHead = await run('/usr/bin/git', ['rev-parse', 'HEAD']);
+  const finalRemote = (await run('/usr/bin/git', ['ls-remote', 'origin', `refs/heads/${RELEASE_LINE}`])).split(/\s/)[0];
+  facts.dirty = dirty || !!await run('/usr/bin/git', ['status', '--porcelain']) || finalHead !== head;
+  facts.remoteHead = finalRemote ?? '';
+  return { ...evaluatePreflight(facts), head, installedTreeVerified: installedIntact, freeBytes, spaceEstimate: window.spaceMeasured ? 'MEASURED_FROM_CERTIFIED_CAPTURE' : 'PLANNING_ONLY_REQUIRES_OWNER_BUDGET', windowBlockers: window.blockers, quarantined: window.quarantined, tasks: publicTaskReport(rows), releaseLine: RELEASE_LINE, hostedCheckRows: ciRows.length };
 }
 /**
  * Owner-run offline capture of the STOPPED installation. Flags are the owner's approval of one exact
@@ -126,9 +134,9 @@ async function offlineCaptureCommand(args: string[]): Promise<number> {
     mountIdentity: await info('VolumeUUID'), approvedMountIdentity: approvedVolume!, ownerUid: st.uid, expectedUid: 501, mode: st.mode & 0o777,
     writable: await fs.access(root, fs.constants.W_OK).then(() => true, () => false), cloudSynced, cloudApproved: false,
     encrypted: await info('FileVault') === 'true', durable: await info('FilesystemType') === 'apfs', freeBytes: volume.bavail * volume.bsize, measured: true,
-    space: recoveryStorageEstimate(await inspectCoverage(liveRoots, 'inspection', linkPolicy, { ownerExclusions: exclusions.ownerPolicy, runtimeReleases: exclusions.runtimeReleases })), sources: liveRoots, gitRoots: [C14_ROOT, '/Users/andrew/DEX-REACH', '/Users/andrew/DEX']
+    space: recoveryStorageEstimate(await inspectCoverage(liveRoots, 'inspection', linkPolicy, { ownerExclusions: exclusions.ownerPolicy, runtimeReleases: exclusions.runtimeReleases })), sources: liveRoots, gitRoots: [RELEASE_ROOT, '/Users/andrew/DEX-REACH', '/Users/andrew/DEX']
   };
-  const forbidden = [...Object.values(liveRoots), root, C14_ROOT];
+  const forbidden = [...Object.values(liveRoots), root, RELEASE_ROOT];
   const log = await TransactionEvidenceLog.open(evidenceRoot!, 'macbook-air.local', forbidden);
   const expectations = await ExpectationStore.open(expectationRoot!, 'macbook-air.local', [...forbidden, log.root]);
   const sourceSha = await run('/usr/bin/git', ['rev-parse', 'HEAD']);

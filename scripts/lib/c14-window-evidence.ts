@@ -41,7 +41,7 @@ export async function readWindowAuthorization(file = WINDOW.authorization): Prom
   let raw: string;
   try { raw = await privateFile(file); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
   const a = JSON.parse(raw) as WindowAuthorization; const { digest, ...body } = a;
-  if (a.version !== 1 || a.grantedBy !== 'owner' || a.releaseScope !== 'local-runtime-only' || !/^[a-f0-9]{40}$/.test(a.approvedSha) || !a.statement?.trim() || !Number.isFinite(Date.parse(a.grantedAt)) || authorizationDigest(body) !== digest) throw new Error('WINDOW_AUTHORIZATION_INVALID');
+  if (a.version !== 1 || a.grantedBy !== 'owner' || a.releaseScope !== 'local-runtime-only' || !/^[a-f0-9]{40}$/.test(a.approvedSha) || !a.statement?.trim() || !Number.isFinite(Date.parse(a.grantedAt)) || typeof a.approvedVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(a.approvedVersion) || typeof a.candidateReleaseId !== 'string' || !a.candidateReleaseId.startsWith(`${a.approvedVersion}-${a.approvedSha.slice(0,12)}-`) || ['compatHomeLinkPolicy', 'historicalTaskQuarantine', 'retainC13', 'maintenanceWindow'].some(key => typeof a[key as keyof WindowAuthorization] !== 'boolean') || authorizationDigest(body) !== digest) throw new Error('WINDOW_AUTHORIZATION_INVALID');
   return Object.freeze(a);
 }
 export async function readCapturePointer(file = WINDOW.capture): Promise<string | null> {

@@ -28,6 +28,12 @@ jobs:
       # the toolchain stays reproducible; raise it deliberately.
       - run: npm install -g npm@11.19.1
       - run: npm ci
+      - name: Establish isolated validation state
+        run: |
+          validation_state="$(mktemp -d "$RUNNER_TEMP/dex-reach-validation.XXXXXX")"
+          test -d "$validation_state"
+          case "$validation_state" in "$RUNNER_TEMP"/dex-reach-validation.*) ;; *) exit 1 ;; esac
+          printf 'DEX_REACH_STATE_DIR=%s\n' "$validation_state" >> "$GITHUB_ENV"
       - run: npm run typecheck
       - run: npm run invariants -- --check
       - run: npm test
