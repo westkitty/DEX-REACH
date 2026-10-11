@@ -15,6 +15,10 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(normalize(value));
 }
 
+/**
+ * SHA-256 digest of the canonical JSON form. This is a content/integrity digest of structured records
+ * (policy snapshots, manifests, receipts, inventories). It is never used to store or verify a password.
+ */
 export function hashValue(value: unknown): string {
-  return crypto.createHash('sha256').update(canonicalJson(value)).digest('hex');
+  return crypto.hash('sha256', canonicalJson(value), 'hex');
 }
