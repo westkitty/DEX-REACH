@@ -58,7 +58,7 @@ import { TaskEventLog } from '../shared/task-events.js';
 import { taskStreamPage } from '../shared/task-stream.js';
 import { NodeTaskStore } from './task-store.js';
 import { classifyFailure, classifyOperationSafety, defaultAttemptBudget, decideExistingTask, deriveIdempotencyKey, unstartedFailureOutcome, type SafetyClass } from '../shared/durable-execution.js';
-import { reconcileBootTasks } from './boot-recovery.js';
+import { reconcileBootTasks, superviseAmbiguousTasks } from './boot-recovery.js';
 import type { ProcessExecutionContext } from '../shared/activity.js';
 import { durableCapabilityRefusal, NodeNegotiation } from '../shared/protocol-negotiation.js';
 import { CheckpointAdmissionClosedError, checkpointControlFromEnv, processCheckpoint } from '../shared/checkpoint.js';
@@ -635,6 +635,8 @@ async function publishStatus(): Promise<void> {
 
 const statusTimer = setInterval(() => void processCheckpoint().skipWhileHeld(publishStatus).catch(() => undefined), 2000);
 statusTimer.unref();
+// Orphans of AMBIGUOUS tasks are observed, never re-run. This only refreshes or annotates; it never transitions.
+const orphanSupervisorTimer = setInterval(() => void superviseAmbiguousTasks(taskStore).catch(() => undefined), 30_000);
 const planSweepTimer = setInterval(() => void processCheckpoint().skipWhileHeld(sweepExpiredPlans).catch(() => undefined), 60_000);
 planSweepTimer.unref();
 

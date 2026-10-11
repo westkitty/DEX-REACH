@@ -13,6 +13,7 @@ import { acquireWork, releaseWork, coordinatorSocketPath, readCoordinatorState, 
 import { classifyObservedWorkloads, parseProcessTable } from '../src/shared/machine-capacity.js';
 import { createGrant, loadAccessState, updateAccessState } from '../src/shared/access.js';
 import { NodeTaskStore } from '../src/node/task-store.js';
+import { listProcessActivities } from '../src/shared/activity.js';
 import { TaskEventLog } from '../src/shared/task-events.js';
 const actor={kind:'other' as const,clientId:'scheduler-fixture',clientName:'fixture'};
 const repo=path.resolve(import.meta.dirname,'..');
@@ -182,15 +183,29 @@ assert.equal(await fs.readFile(path.join(roots,'exit-oracle.txt'),'utf8'),'exit-
  assert.deepEqual(await crashNodeOnly(child),{code:null,signal:'SIGKILL'});
  await until(async()=>registry.listNodes().length===0);child=launch();
  await until(ready);
- // Boot found the orphan alive through its activity row, lease and pid: REATTACH keeps the task RUNNING without replay.
- assert.equal((await store.read(crashed.taskId))?.state,'RUNNING');
- // Identical-key retrieval returns the same task and never spawns again (a second spawn would append a second 'started').
- const again=(await start('crash-restart',crashCommand)).result as {taskId:string,state:string};
- assert.equal(again.taskId,crashed.taskId);assert.equal(again.state,'RUNNING');
+ // Boot found the orphan alive through its identity-verified activity row and lease. Contract (repair C): the task is
+ // recorded AMBIGUOUS and the orphan is monitored. It is never left RUNNING and never completed or replayed.
+ const crashedRecord=await store.read(crashed.taskId);
+ assert.equal(crashedRecord?.state,'AMBIGUOUS');assert.equal(crashedRecord?.failureClass,'AMBIGUOUS_EFFECT');
+ // Identity is captured at spawn on Linux, so the orphan is a strong, identity-bound record; elsewhere it stays legacy-weak.
+ const orphan=(await listProcessActivities({includeFinished:true})).find(a=>a.taskId===crashed.taskId);
+ assert.ok(orphan,'the orphan has a durable activity row');
+ if(process.platform==='linux')assert.equal(orphan.identity?.platform,'linux');
+ // Identical-key retrieval is refused as ambiguous and never spawns again (a second spawn would append a second 'started').
+ await assert.rejects(start('crash-restart',crashCommand),/AMBIGUOUS/);
  assert.equal(await fs.readFile(path.join(roots,'crash-restart.txt'),'utf8'),'started');
  assert.equal(await fs.access(path.join(roots,'crash-effect.txt')).then(()=>true,()=>false),false);
- // Only now release the orphaned shell. Its completion is not observed by the restarted node: the outcome is not asserted here.
+ // Release the orphaned shell. The file it writes is the observable completion; the node does not observe its exit status.
  await fs.writeFile(path.join(roots,'crash-release.txt'),'release');
+ await until(async()=>fs.access(path.join(roots,'crash-effect.txt')).then(()=>true,()=>false));
+ assert.equal(await fs.readFile(path.join(roots,'crash-effect.txt'),'utf8'),'effect');
+ // After the orphan is gone, a restarted node still never completes or replays the task.
+ await until(async()=>(await listProcessActivities({includeFinished:true})).find(a=>a.taskId===crashed.taskId)?.state!=='running');
+ await stopGraceful(child);await until(async()=>registry.listNodes().length===0);child=launch();await until(ready);
+ assert.equal((await store.read(crashed.taskId))?.state,'AMBIGUOUS');
+ await assert.rejects(start('crash-restart',crashCommand),/AMBIGUOUS/);
+ assert.equal(await fs.readFile(path.join(roots,'crash-restart.txt'),'utf8'),'started');
+ assert.equal(await fs.readFile(path.join(roots,'crash-effect.txt'),'utf8'),'effect');
 
  }finally{
  await stopGraceful(child);registry.shutdown();await new Promise<void>(r=>server.close(()=>r()));await new Promise<void>(r=>coordinator.close(()=>r()));await fs.rm(socketPath,{force:true});

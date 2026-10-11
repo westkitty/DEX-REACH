@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { machineStateDir } from './local-env.js';
 import { atomicWriteFile, withFileLock } from './state-io.js';
 import { collectExcludedPids, dexServiceLabel, isDexServiceCommand, looksHeavy, parseProcessTable, type ProcessRow } from './machine-capacity.js';
+import { assertIdentityBindingUnchanged, captureProcessIdentity, parseProcessIdentity, verifyProcessIdentity, type ProcessIdentity } from './process-identity.js';
 
 const execFileAsync = promisify(execFile);
 const MAX_ACTIVITY_RECORDS = 200;
@@ -56,6 +57,8 @@ export type ProcessActivity = {
   /** Present only when the child ended by a signal. The exit code is then absent, never invented. */
   exitCode?: number;
   signal?: string;
+  /** Platform start identity captured at spawn. Absent on legacy records, which are never strong proof of life. */
+  identity?: ProcessIdentity;
 };
 
 export type ProcessObservation = {
@@ -102,6 +105,10 @@ function validRecord(raw: unknown): ProcessActivity | null {
   if (value.phase !== undefined && (typeof value.phase !== 'string' || value.phase.length > 64)) return null;
   if (value.exitCode !== undefined && (typeof value.exitCode !== 'number' || !Number.isInteger(value.exitCode))) return null;
   if (value.signal !== undefined && (typeof value.signal !== 'string' || !/^SIG[A-Z0-9]{1,16}$/.test(value.signal))) return null;
+  // An identity of an unknown version or shape is refused, never ignored or silently upgraded.
+  const identity = parseProcessIdentity(value.identity);
+  if (identity === null) return null;
+  if (identity && identity.pid !== value.pid) return null;
   for (const [timestamp, label] of [[value.lastStdoutAt, 'lastStdoutAt'], [value.lastResourceAt, 'lastResourceAt']] as const) {
     if (timestamp !== undefined && (typeof timestamp !== 'string' || !Number.isFinite(Date.parse(timestamp)))) return null;
   }
@@ -128,10 +135,26 @@ async function writeRecordsUnlocked(records: ProcessActivity[]): Promise<void> {
   await atomicWriteFile(activityFile(), JSON.stringify(bounded, null, 2) + '\n');
 }
 
+/** The bindings a record may never change after creation: process identity, PID, task and attempt. */
+function bindingSnapshot(records: readonly ProcessActivity[]): Map<string, ProcessActivity> {
+  return new Map(records.map(record => [record.id, { ...record }]));
+}
+
+function assertBindingsUnchanged(before: Map<string, ProcessActivity>, after: readonly ProcessActivity[]): void {
+  for (const record of after) {
+    const prior = before.get(record.id);
+    if (!prior) continue;
+    if (prior.pid !== record.pid || prior.taskId !== record.taskId || prior.attempt !== record.attempt) throw new Error('process activity binding is immutable');
+    assertIdentityBindingUnchanged(prior.identity, record.identity);
+  }
+}
+
 async function mutateRecords<T>(fn: (records: ProcessActivity[]) => Promise<T> | T): Promise<T> {
   return withFileLock(activityLockFile(), async () => {
     const records = await readRecordsUnlocked();
+    const before = bindingSnapshot(records);
     const result = await fn(records);
+    assertBindingsUnchanged(before, records);
     await writeRecordsUnlocked(records);
     return result;
   });
@@ -150,6 +173,8 @@ export async function startProcessActivity(input: {
 }): Promise<ProcessActivity> {
   const context = validateProcessExecutionContext({ taskId: input.taskId, attempt: input.attempt, phase: input.phase });
   const now = new Date().toISOString();
+  // Captured immediately after spawn. When the platform cannot prove identity, the record stays legacy-weak.
+  const identity = await captureProcessIdentity(input.pid).catch(() => null);
   const record: ProcessActivity = {
     id: `activity-${crypto.randomUUID()}`,
     kind: input.kind,
@@ -163,7 +188,8 @@ export async function startProcessActivity(input: {
     ...(input.cwd ? { cwd: input.cwd } : {}),
     ...(input.externalId ? { externalId: input.externalId } : {}),
     startedAt: now,
-    updatedAt: now
+    updatedAt: now,
+    ...(identity ? { identity } : {})
   };
   await mutateRecords(records => { records.push(record); });
   return record;
@@ -232,7 +258,9 @@ async function reconcileRunning(records: ProcessActivity[]): Promise<boolean> {
   const now = new Date().toISOString();
   for (const record of records) {
     if (record.state !== 'running') continue;
-    if (processAlive(record.pid)) continue;
+    // Identity, not a bare PID: a live SAME or unverifiable record is kept running; GONE or REUSED has ended.
+    const verdict = await verifyProcessIdentity(record.identity, record.pid);
+    if (verdict === 'SAME' || verdict === 'UNVERIFIABLE') continue;
     record.state = 'exited';
     record.finishedAt = now;
     record.updatedAt = now;
