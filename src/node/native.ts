@@ -12,6 +12,7 @@ import { workspaceSafeOperationRefusal } from '../shared/profiles.js';
 import { stateDir } from '../shared/local-env.js';
 import { NO_SECRETS, requestedSecretAliases, resolveSecrets, scrubSecretValues, secretInjectionRefusal, type ResolvedSecrets } from '../shared/secrets.js';
 import { describeOperation } from '../shared/operations.js';
+import { withLockPatience } from '../shared/state-io.js';
 import { finishProcessActivity, startProcessActivity, updateProcessActivity, type ProcessExecutionContext } from '../shared/activity.js';
 import { ProcessSignalTerminationError } from '../shared/durable-execution.js';
 
@@ -137,6 +138,8 @@ export function nodeShell(): string {
   return process.platform === 'darwin' ? '/bin/zsh' : '/bin/sh';
 }
 
+const ACTIVITY_LOCK_PATIENCE_MS = 30_000;
+
 /**
  * Run a bounded local command.
  *
@@ -181,7 +184,10 @@ export async function nativeProcess(
   const scrub = (text: string) => scrubSecretValues(redactKnownEnvironmentSecrets(text), secrets.values);
   const program = readonly ? readonly.program : shell!;
   const childArgs = readonly ? readonly.args : ['-lc', command];
-  return new Promise((resolve, reject) => {
+  // Activity rows are the evidence boot and the orphan supervisor use to prove a process ended. Losing one to a
+  // 5 s lock wait under fsync contention left an ended orphan's lease held until stale reclaim. The writes run
+  // alongside the child, off any latency path, so they wait out contention instead of dropping evidence.
+  return withLockPatience(ACTIVITY_LOCK_PATIENCE_MS, () => new Promise((resolve, reject) => {
     const child = execFile(program, childArgs, { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env }, async (error, stdout, stderr) => {
       const activity = await activityPromise.catch(() => null);
       if (activity && (stdout || stderr)) await updateProcessActivity(activity.id, { updatedAt: new Date().toISOString(), lastStdoutAt: new Date().toISOString() }).catch(() => undefined);
@@ -225,7 +231,7 @@ export async function nativeProcess(
     // rejection that terminated the node mid-task. The command continues without an activity record,
     // which recovery already treats as UNKNOWN, never as proof the process ended.
     activityPromise.catch(error => console.error(`DEX//REACH process activity not recorded: ${error instanceof Error ? error.message : 'unknown error'}`));
-  });
+  }));
 }
 
 /**

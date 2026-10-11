@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -143,6 +144,17 @@ async function recoverAndAcquire(file: string, staleMs: number): Promise<HeldLoc
 }
 
 /**
+ * A scoped default lock wait for work that is decisive but not latency-sensitive (node boot reconciliation).
+ * Under fsync contention a 5 s wait killed the node at boot, and launchd then crash-looped it. Only calls that
+ * pass no explicit timeoutMs, inside this async context, are affected.
+ */
+const lockPatience = new AsyncLocalStorage<number>();
+export function withLockPatience<T>(timeoutMs: number, fn: () => Promise<T>): Promise<T> {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) throw new Error('lock patience must be 1..300000 ms');
+  return lockPatience.run(timeoutMs, fn);
+}
+
+/**
  * Cross-process lock for short DEX state mutations. A crashed owner is recoverable; a live owner is
  * never evicted merely for being slow. Recovery is serialized and normal acquirers re-check the
  * recovery guard after creation, preventing a stale-lock waiter from deleting a replacement lock.
@@ -152,7 +164,7 @@ export async function withFileLock<T>(
   fn: () => Promise<T>,
   options: { timeoutMs?: number; staleMs?: number } = {}
 ): Promise<T> {
-  const timeoutMs = options.timeoutMs ?? 5000;
+  const timeoutMs = options.timeoutMs ?? lockPatience.getStore() ?? 5000;
   const staleMs = options.staleMs ?? 60_000;
   const started = Date.now();
   const recoveryFile = `${file}.recovery`;
