@@ -15,6 +15,7 @@ import { COMPAT_HOME_PRESERVATION_RULE, defaultLinkPolicy } from './lib/recovery
 import { recoveryStorageEstimate } from './lib/recovery-storage.js';
 import type { DestinationFacts } from './lib/recovery-destination.js';
 import { C14_ROOT, RETAINED_RELEASE, RETAINED_TREE, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
+import { parseCaptureExclusionFlags } from './lib/recovery-capture-flags.js';
 
 const runFile = promisify(execFile);
 async function run(bin: string, args: string[]): Promise<string> { return (await runFile(bin, args, { cwd: C14_ROOT, timeout: 20_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } })).stdout.trim(); }
@@ -117,7 +118,7 @@ async function offlineCaptureCommand(args: string[]): Promise<number> {
   const info = (key: string) => run('/usr/sbin/diskutil', ['info', '-plist', mount]).then(xml => xml.match(new RegExp(`<key>${key}</key>\\s*<(string|true|false)\\s*/?>([^<]*)`))).then(m => !m ? '' : m[1] === 'string' ? m[2]! : m[1]!);
   const home = os.userInfo().homedir, cloudSynced = [path.join(home, 'Library/Mobile Documents'), path.join(home, 'Library/CloudStorage')].some(c => root === c || root.startsWith(c + path.sep)) || /Dropbox|Google Drive|OneDrive/i.test(root);
   // Opt-in exclusions, both off by default. Each is visible in the manifest and the outcome.
-  const exclusions = { ownerPolicy: args.includes('--exclude-owner-policy'), runtimeReleases: args.includes('--exclude-superseded-runtime') ? 'current-and-rollback' as const : 'all' as const };
+  const exclusions = parseCaptureExclusionFlags(args);
   const linkPolicy = args.includes('--preserve-compat-home-links') ? { version: 1 as const, rules: [COMPAT_HOME_PRESERVATION_RULE] } : defaultLinkPolicy();
   const destination: DestinationFacts = {
     root, approvedRoot: root, approved: true, device: st.dev, approvedDevice: Number(approvedDevice), inode: st.ino, approvedInode: Number(approvedInode),

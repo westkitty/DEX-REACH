@@ -46,10 +46,25 @@ const OWNER_RULES: readonly OwnerRule[] = Object.freeze([
 for (const rule of OWNER_RULES) assertExclusionPrefixAllowed(rule.hint);
 
 /**
- * Basenames that are authority-bearing anywhere. Finding one inside an excluded subtree refuses the
- * capture: an excluded name must never silently hide authoritative state.
+ * Names that are authority wherever they appear, including inside an excluded cache tree. Finding one there
+ * refuses the capture: an excluded name must never silently hide authoritative state.
  */
-const AUTHORITATIVE_BASENAME = /^(secrets\.env|node-auth\.json|revoked-nodes\.json|oauth[^/]*\.json|oauth-canary[^/]*\.json|store\.json|events\.jsonl|audit\.jsonl|.*\.access\.json|.*\.ed25519(\.pub)?\.pem|com\.stinkyweasel\.dex-reach\..+\.plist|install-macos\.status\.json|retained-evidence\.json|c13-maintenance\.json|macbook-air\.local\..*)$/;
+const AUTHORITY_NAME_ANYWHERE = /^(secrets\.env|node-auth\.json|revoked-nodes\.json|oauth[^/]*\.json|oauth-canary[^/]*\.json|.*\.access\.json|.*\.ed25519(\.pub)?\.pem|com\.stinkyweasel\.dex-reach\..+\.plist|install-macos\.status\.json|retained-evidence\.json|c13-maintenance\.json|macbook-air\.local\..*)$/;
+/** Generic names that are authority only at their exact owner-state location. */
+const AUTHORITY_AT_OWNER_LOCATION: ReadonlySet<string> = new Set(['tasks/store.json', 'tasks/events.jsonl', 'audit.jsonl', 'coordinator/history/events.jsonl']);
+const AUTHORITY_UNDER_OWNER_LOCATION = /^receipts\/[^/]+\.jsonl$/;
+/**
+ * Cache trees hold third-party tool content. A `store.json` or `events.jsonl` inside pnpm, npm or a Library
+ * cache is ordinary cache content, not owner authority, so it is judged by location, not by basename.
+ */
+const CACHE_TREES: readonly string[] = Object.freeze(['compat-home/']);
+
+/** Source- and path-aware authority test for one entry, identified by its path relative to the state root. */
+export function isAuthoritativeEntry(relative: string): boolean {
+  if (AUTHORITY_NAME_ANYWHERE.test(path.posix.basename(relative))) return true;
+  if (CACHE_TREES.some(tree => relative.startsWith(tree))) return false;
+  return AUTHORITY_AT_OWNER_LOCATION.has(relative) || AUTHORITY_UNDER_OWNER_LOCATION.test(relative);
+}
 
 export function exclusionRuleFor(family: string, relative: string, ctx: ExclusionContext): { id: string; reason: string } | undefined {
   if (ctx.owner) {
@@ -76,7 +91,7 @@ export async function scanExcludedSubtree(base: string, relative: string, device
     const st = await fs.lstat(path.join(base, rel));
     if (st.dev !== device) throw new Error('CROSS_VOLUME');
     const kind = st.isSymbolicLink() ? 'link' : st.isDirectory() ? 'directory' : st.isFile() ? 'file' : 'other';
-    if (AUTHORITATIVE_BASENAME.test(path.basename(rel))) authoritative.push(rel);
+    if (isAuthoritativeEntry(rel)) authoritative.push(rel);
     lines.push(`${kind}\t${rel}\t${st.size}\t${st.mode & 0o777}`);
     if (kind === 'file') { totals.files++; totals.bytes += st.size; }
     else if (kind === 'link') totals.links++;
