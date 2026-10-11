@@ -17,7 +17,13 @@ import { TaskEventLog } from '../src/shared/task-events.js';
 const actor={kind:'other' as const,clientId:'scheduler-fixture',clientName:'fixture'};
 const repo=path.resolve(import.meta.dirname,'..');
 async function until(fn:()=>Promise<boolean>,ms=15000){const end=Date.now()+ms;while(Date.now()<end){if(await fn())return;await new Promise(r=>setTimeout(r,50));}throw new Error('fixture condition timed out');}
-async function stop(child:ChildProcess){if(child.exitCode!==null)return;const done=new Promise<void>(r=>child.once('exit',()=>r()));try{process.kill(-child.pid!,'SIGTERM');}catch{}await done;}
+type Exit={code:number|null;signal:NodeJS.Signals|null};
+// Resolves immediately when the child already ended, by exit code or by signal. Waiting only for 'exit' after a signal death would hang.
+function exited(child:ChildProcess):Promise<Exit>{if(child.exitCode!==null||child.signalCode!==null)return Promise.resolve({code:child.exitCode,signal:child.signalCode as NodeJS.Signals|null});return new Promise(r=>child.once('exit',(code,signal)=>r({code,signal})));}
+// Graceful stop: SIGTERM to the whole process group, as a service manager stops a service. The node runs its shutdown path and the in-flight shell child receives the same signal.
+async function stopGraceful(child:ChildProcess):Promise<Exit>{const done=exited(child);try{process.kill(-child.pid!,'SIGTERM');}catch{}return done;}
+// Crash: SIGKILL to the node process only. No shutdown path runs and the in-flight shell child is not signalled.
+async function crashNodeOnly(child:ChildProcess):Promise<Exit>{const done=exited(child);child.kill('SIGKILL');return done;}
 test('real registry, node and coordinator: capacity/refusal, durable queue, authority, disconnect and restart', {timeout:90000},async()=>{
  const dir=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'dex-scheduler-e2e-')));
  const stateDir=path.join(dir,'state');await fs.mkdir(stateDir);
@@ -135,14 +141,14 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  table+='101 1 80 3 00:01:00 /opt/homebrew/bin/claude\n';
  const interrupted=(await start('queued-restart','printf forbidden >> restart-oracle.txt')).result as {taskId:string};
  await until(async()=>(await readCoordinatorState()).tickets.some(t=>t.taskId===interrupted.taskId));
- await stop(child);await until(async()=>registry.listNodes().length===0);child=launch();
+ await stopGraceful(child);await until(async()=>registry.listNodes().length===0);child=launch();
  await until(ready);
  assert.equal((await store.read(interrupted.taskId))?.state,'PREPARING');
  await start('queued-restart','printf forbidden >> restart-oracle.txt');
  assert.equal(await fs.access(path.join(roots,'restart-oracle.txt')).then(()=>true,()=>false),false);
  await control('cancel',interrupted.taskId);table=table.split('\n')[0]+'\n';
  // Restart retains completed identity and task-bound result without a second effect.
- await stop(child);await until(async()=>registry.listNodes().length===0);child=launch();
+ await stopGraceful(child);await until(async()=>registry.listNodes().length===0);child=launch();
  await until(ready);
  await control('result',running.taskId);assert.equal(await fs.readFile(path.join(roots,'disconnected.txt'),'utf8'),'effect');
  assert.equal((await store.list()).filter(t=>t.taskId===running.taskId).length,1);
@@ -151,15 +157,33 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  const active=(await start('active-restart',activeCommand)).result as {taskId:string};
  // The shell's `>>` creates the file before printf writes: wait for the marker itself, not the empty file.
  await until(async()=>(await fs.readFile(path.join(roots,'active-restart.txt'),'utf8').catch(()=>''))==='started');
- await stop(child);await until(async()=>registry.listNodes().length===0);child=launch();
+ assert.deepEqual(await stopGraceful(child),{code:0,signal:null});await until(async()=>registry.listNodes().length===0);child=launch();
  await until(ready);
  assert.equal((await store.read(active.taskId))?.state,'AMBIGUOUS');
  await assert.rejects(start('active-restart',activeCommand),/AMBIGUOUS/);
  assert.equal(await fs.readFile(path.join(roots,'active-restart.txt'),'utf8'),'started');
  assert.equal(await fs.access(path.join(roots,'active-effect.txt')).then(()=>true,()=>false),false);
+ // Crash the node alone. The shell is orphaned, still held by its release marker; the task must still be AMBIGUOUS, never replayed.
+ const crashCommand='printf started >> crash-restart.txt; while ! test -f crash-release.txt; do sleep 0.1; done; printf effect >> crash-effect.txt';
+ // The graceful step's lease must be gone before the crash task is admitted, or it queues behind a dead holder.
+ await until(async()=>(await readCoordinatorState()).leases.length===0);
+ const crashed=(await start('crash-restart',crashCommand)).result as {taskId:string};
+ await until(async()=>(await fs.readFile(path.join(roots,'crash-restart.txt'),'utf8').catch(()=>''))==='started');
+ assert.deepEqual(await crashNodeOnly(child),{code:null,signal:'SIGKILL'});
+ await until(async()=>registry.listNodes().length===0);child=launch();
+ await until(ready);
+ // Boot found the orphan alive through its activity row, lease and pid: REATTACH keeps the task RUNNING without replay.
+ assert.equal((await store.read(crashed.taskId))?.state,'RUNNING');
+ // Identical-key retrieval returns the same task and never spawns again (a second spawn would append a second 'started').
+ const again=(await start('crash-restart',crashCommand)).result as {taskId:string,state:string};
+ assert.equal(again.taskId,crashed.taskId);assert.equal(again.state,'RUNNING');
+ assert.equal(await fs.readFile(path.join(roots,'crash-restart.txt'),'utf8'),'started');
+ assert.equal(await fs.access(path.join(roots,'crash-effect.txt')).then(()=>true,()=>false),false);
+ // Only now release the orphaned shell. Its completion is not observed by the restarted node: the outcome is not asserted here.
+ await fs.writeFile(path.join(roots,'crash-release.txt'),'release');
 
  }finally{
- await stop(child);registry.shutdown();await new Promise<void>(r=>server.close(()=>r()));await new Promise<void>(r=>coordinator.close(()=>r()));await fs.rm(socketPath,{force:true});
+ await stopGraceful(child);registry.shutdown();await new Promise<void>(r=>server.close(()=>r()));await new Promise<void>(r=>coordinator.close(()=>r()));await fs.rm(socketPath,{force:true});
  if(previous===undefined)delete process.env.DEX_REACH_STATE_DIR;else process.env.DEX_REACH_STATE_DIR=previous;
  await fs.rm(dir,{recursive:true,force:true});
  }
