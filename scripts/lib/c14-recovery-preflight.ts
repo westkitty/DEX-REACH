@@ -1,5 +1,12 @@
 import { isVerifiedWindowEvidence } from './c14-window-evidence.js';
-export const C14_ROOT = '/Users/andrew/dex-reach-c13-worker-repair';
+/**
+ * The release candidate runs from a dedicated worktree checked out detached at the exact origin/main tip.
+ * (main itself stays checked out in the owner's primary checkout, which holds unrelated uncommitted work.)
+ */
+export const RELEASE_ROOT = '/Users/andrew/dex-reach-release';
+export const RELEASE_LINE = 'main';
+/** @deprecated The C14 working branch is closed; kept as an alias so older evidence readers still resolve. */
+export const C14_ROOT = RELEASE_ROOT;
 export const RETAINED_RELEASE = '0.3.2-87a99494ebb3-2f44ae46b11b';
 export const RETAINED_TREE = 'fcb78a6b99db10aac565a1b2b4af90faf142ef5bd5162523a662febeafd36b12';
 export const RETAINED_SOURCE = '87a99494ebb3471d3ecc3a79acd630ec18858a92';
@@ -45,6 +52,28 @@ export function requiredFreeBytes(p: SpacePlan): number {
   if (!Number.isSafeInteger(total)) throw new Error('SPACE_PLAN_OVERFLOW');
   return total;
 }
+/** The hosted gates a release candidate needs, read for its exact commit. */
+export const REQUIRED_HOSTED_CHECKS = ['validate', 'runtime-proof', 'reproducible-build', 'analyze', 'CodeQL'] as const;
+/**
+ * Normalise exact-SHA evidence from GitHub's REST API into aggregateCheckRuns rows. Check runs give the CI jobs and
+ * CodeQL's analyze job. A push to main has no separate "CodeQL" code-scanning check, so that gate is the CodeQL
+ * workflow run for the same commit. Only runs whose head_sha is exactly `sha` count; anything else is ignored.
+ */
+export function exactShaCheckRows(sha: string, checkRuns: unknown, workflowRuns: unknown): Array<{ name: string; status: string; conclusion: string }> {
+  if (!/^[a-f0-9]{40}$/.test(sha)) return [];
+  const rows: Array<{ name: string; status: string; conclusion: string }> = [];
+  const runs = (checkRuns as { check_runs?: Array<Record<string, unknown>> })?.check_runs;
+  for (const r of Array.isArray(runs) ? runs : []) {
+    if (r.head_sha !== sha || typeof r.name !== 'string' || r.name === 'CodeQL') continue;
+    rows.push({ name: r.name, status: String(r.status ?? '').toUpperCase(), conclusion: String(r.conclusion ?? '').toUpperCase() });
+  }
+  const workflows = (workflowRuns as { workflow_runs?: Array<Record<string, unknown>> })?.workflow_runs;
+  for (const w of Array.isArray(workflows) ? workflows : []) {
+    if (w.head_sha !== sha || w.name !== 'CodeQL' || w.event !== 'push' || w.head_branch !== RELEASE_LINE) continue;
+    rows.push({ name: 'CodeQL', status: String(w.status ?? '').toUpperCase(), conclusion: String(w.conclusion ?? '').toUpperCase() });
+  }
+  return rows;
+}
 /** Each required check must appear exactly once and be completed; a duplicate name can never mask another run. */
 export function aggregateCheckRuns(rows: unknown): Record<string, string> {
   const seen: Record<string, string> = {};
@@ -62,11 +91,12 @@ export function evaluatePreflight(f: PreflightFacts) {
   const checks: Record<string, boolean> = {
     EXACT_HOST: f.hostname === 'MacBook-Air.local' && f.model === 'MacBookAir10,1' && f.platform === 'darwin' && f.arch === 'arm64',
     EXACT_ACCOUNT: f.user === 'andrew' && f.uid === 501 && f.home === '/Users/andrew',
-    EXACT_REPOSITORY: f.root === C14_ROOT,
-    AUTHORIZED_BRANCH: f.branch === 'c14-chaos-recovery',
+    EXACT_REPOSITORY: f.root === RELEASE_ROOT,
+    // The release line is main: either main itself or a detached HEAD, and REMOTE_PARITY pins it to main's exact tip.
+    AUTHORIZED_BRANCH: f.branch === RELEASE_LINE || f.branch === '',
     CLEAN_SOURCE: !f.dirty && /^[a-f0-9]{40}$/.test(f.head),
     REMOTE_PARITY: f.head === f.remoteHead,
-    HOSTED_CHECKS: f.ciHead === f.head && ['validate', 'runtime-proof', 'reproducible-build', 'analyze', 'CodeQL'].every(k => f.ciChecks[k] === 'SUCCESS'),
+    HOSTED_CHECKS: f.ciHead === f.head && REQUIRED_HOSTED_CHECKS.every(k => f.ciChecks[k] === 'SUCCESS'),
     APPROVED_SHA: f.approvedSha === f.head,
     INSTALLED_IDENTITY: f.installedIntact && f.installedRelease === RETAINED_RELEASE,
     FIVE_SERVICES: f.servicesVerified,

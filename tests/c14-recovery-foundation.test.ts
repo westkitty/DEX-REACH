@@ -12,7 +12,7 @@ import { NodeAuthStore } from '../src/gateway/node-auth.js';
 import { classifyTask, inspectTasks, publicTaskReport, safeRead, type Evidence } from '../scripts/lib/recovery-reconciliation.js';
 import { inspectCoverage, verifyCoverage, manifestDigest, publicCoverage, type Manifest } from '../scripts/lib/recovery-coverage.js';
 import { createSyntheticWorkspace, rehearseRestore, type SyntheticWorkspace } from '../scripts/lib/recovery-rehearsal.js';
-import { C14_ROOT, RETAINED_RELEASE, RETAINED_TREE, baselineBlockers, evaluatePreflight, requiredFreeBytes, type PreflightFacts } from '../scripts/lib/c14-recovery-preflight.js';
+import { RELEASE_ROOT, RETAINED_RELEASE, RETAINED_TREE, baselineBlockers, evaluatePreflight, requiredFreeBytes, type PreflightFacts } from '../scripts/lib/c14-recovery-preflight.js';
 
 const nodeId = 'macbook-air.local', hash = 'a'.repeat(64);
 const evidence: Evidence = { result: 'missing', activity: false, lease: false, ticket: false, process: 'absent', sharedProcess: false, stale: true, complete: true, eventState: 'PREPARING' };
@@ -91,7 +91,7 @@ test('recomputed integrity cannot hide incompatible application state; original 
   } finally { await w.cleanup(); }
 });
 function goodFacts(): PreflightFacts {
-  return { hostname: 'MacBook-Air.local', model: 'MacBookAir10,1', platform: 'darwin', arch: 'arm64', user: 'andrew', uid: 501, home: '/Users/andrew', root: C14_ROOT, branch: 'c14-chaos-recovery', head: 'a'.repeat(40), remoteHead: 'a'.repeat(40), dirty: false, approvedSha: 'a'.repeat(40), candidateVersion: '0.3.2', approvedVersion: '0.3.2', ciHead: 'a'.repeat(40), ciChecks: Object.fromEntries(['validate', 'runtime-proof', 'reproducible-build', 'analyze', 'CodeQL'].map(k => [k, 'SUCCESS'])), installedIntact: true, installedRelease: RETAINED_RELEASE, servicesVerified: true, backupCertified: true,
+  return { hostname: 'MacBook-Air.local', model: 'MacBookAir10,1', platform: 'darwin', arch: 'arm64', user: 'andrew', uid: 501, home: '/Users/andrew', root: RELEASE_ROOT, branch: '', head: 'a'.repeat(40), remoteHead: 'a'.repeat(40), dirty: false, approvedSha: 'a'.repeat(40), candidateVersion: '0.3.2', approvedVersion: '0.3.2', ciHead: 'a'.repeat(40), ciChecks: Object.fromEntries(['validate', 'runtime-proof', 'reproducible-build', 'analyze', 'CodeQL'].map(k => [k, 'SUCCESS'])), installedIntact: true, installedRelease: RETAINED_RELEASE, servicesVerified: true, backupCertified: true,
     baseline: { previousReleaseId: RETAINED_RELEASE, previousDigest: RETAINED_TREE, observedDigest: RETAINED_TREE, previousExists: true, provenance: 'manifest-verified', legacyProvenanceApproved: false, transactionId: '12345678-1234-4234-8234-123456789abc', state: 'prepared', fresh: true, serviceReleaseIds: Array(5).fill(RETAINED_RELEASE), configVerified: true, inventoryVerified: true, helperIdle: true, rollbackActive: false, provenanceDetails: { sourceSha: '87a99494ebb3471d3ecc3a79acd630ec18858a92', installTransaction: '9bf5079f-397e-4cd8-af35-99f1550d3d68', dependencyDigest: hash, configDigest: hash, expectedConfigDigest: hash, policyDigest: hash, expectedPolicyDigest: hash, ownerManifestDigest: hash, trustedManifestDigest: hash, snapshotComplete: true, metadataVerified: true, reserveVerified: true } },
     restoreProof: { scope: 'synthetic', sourceSha: 'a'.repeat(40), passed: true }, taskCount: 0, taskUnresolved: 0, claimsKnown: true, claimsCount: 0, ownerPreservationVerified: true, freeBytes: 10 * 1024 ** 3, spaceMeasured: true, space: { candidateBytes: 100, dependencyBytes: 100, retainedBytes: 100, backupBytes: 100, restoreBytes: 100, stagingBytes: 100, reserveBytes: 2 * 1024 ** 3 }, exactLegacyPairingVerified: true, credentialsCompatible: true, requiredHostCapabilityAvailable: true, maintenanceAuthorized: true };
 }
@@ -101,7 +101,7 @@ test('twenty source prerequisites cannot bypass missing live boundary proof and 
   assert.throws(() => requiredFreeBytes({ ...f.space, reserveBytes: 0 }));
 });
 const faults: Array<[string, (f: PreflightFacts) => void]> = [
-  ['wrong host', f => { f.hostname = 'bigmac'; }], ['wrong branch', f => { f.branch = 'main'; }], ['dirty', f => { f.dirty = true; }], ['candidate changed', f => { f.head = 'b'.repeat(40); }], ['stale CI', f => { f.ciHead = 'b'.repeat(40); }], ['missing previous', f => { f.baseline.previousExists = false; }], ['wrong capsule', f => { f.baseline.previousReleaseId = 'similar-release'; }], ['changed digest', f => { f.baseline.observedDigest = 'b'.repeat(64); }], ['unknown process', f => { f.servicesVerified = false; }], ['mixed service', f => { f.baseline.serviceReleaseIds[2] = 'other'; }], ['ambiguous task', f => { f.taskUnresolved = 1; }], ['running task', f => { f.taskCount = 1; }], ['uncertain claims', f => { f.claimsKnown = false; }], ['incomplete backup', f => { f.backupCertified = false; }], ['missing config', f => { f.baseline.configVerified = false; }], ['insufficient disk', f => { f.freeBytes = 1; }], ['unknown installer', f => { f.baseline.state = 'uncertain'; }], ['partial activation', f => { f.baseline.state = 'partial'; }], ['rollback active', f => { f.baseline.rollbackActive = true; }], ['credential incompatible', f => { f.credentialsCompatible = false; }], ['host capability', f => { f.requiredHostCapabilityAvailable = false; }], ['no authority', f => { f.maintenanceAuthorized = false; }], ['unapproved version', f => { delete f.approvedVersion; }]
+  ['wrong host', f => { f.hostname = 'bigmac'; }], ['wrong branch', f => { f.branch = 'c14-chaos-recovery'; }], ['dirty', f => { f.dirty = true; }], ['candidate changed', f => { f.head = 'b'.repeat(40); }], ['stale CI', f => { f.ciHead = 'b'.repeat(40); }], ['missing previous', f => { f.baseline.previousExists = false; }], ['wrong capsule', f => { f.baseline.previousReleaseId = 'similar-release'; }], ['changed digest', f => { f.baseline.observedDigest = 'b'.repeat(64); }], ['unknown process', f => { f.servicesVerified = false; }], ['mixed service', f => { f.baseline.serviceReleaseIds[2] = 'other'; }], ['ambiguous task', f => { f.taskUnresolved = 1; }], ['running task', f => { f.taskCount = 1; }], ['uncertain claims', f => { f.claimsKnown = false; }], ['incomplete backup', f => { f.backupCertified = false; }], ['missing config', f => { f.baseline.configVerified = false; }], ['insufficient disk', f => { f.freeBytes = 1; }], ['unknown installer', f => { f.baseline.state = 'uncertain'; }], ['partial activation', f => { f.baseline.state = 'partial'; }], ['rollback active', f => { f.baseline.rollbackActive = true; }], ['credential incompatible', f => { f.credentialsCompatible = false; }], ['host capability', f => { f.requiredHostCapabilityAvailable = false; }], ['no authority', f => { f.maintenanceAuthorized = false; }], ['unapproved version', f => { delete f.approvedVersion; }]
 ];
 for (const [name, alter] of faults) test(`preflight refuses ${name} without mutating evidence or invoking installation`, () => {
   const f = goodFacts(); alter(f); const before = JSON.stringify(f); const report = evaluatePreflight(f); assert.equal(report.status, 'BLOCKED'); assert.equal(report.installationExecuted, false); assert.equal(JSON.stringify(f), before); assert.ok(report.blockers.length);
@@ -156,4 +156,26 @@ test('unreadable policy cannot be certified or restored', async () => {
 test('unmeasured space estimates and invalid transaction binding fail closed', () => {
   const f = goodFacts(); f.spaceMeasured = false; assert.ok(evaluatePreflight(f).blockers.includes('FREE_SPACE'));
   f.baseline.transactionId = 'not-a-transaction'; assert.ok(baselineBlockers(f.baseline).includes('CAPSULE_INCOMPLETE_OR_UNCERTAIN'));
+});
+
+import { exactShaCheckRows, aggregateCheckRuns, REQUIRED_HOSTED_CHECKS } from '../scripts/lib/c14-recovery-preflight.js';
+test('hosted evidence is read for the exact commit only, with CodeQL from its push workflow on main', () => {
+  const sha = 'a'.repeat(40), other = 'b'.repeat(40);
+  const run = (name: string, head = sha, conclusion = 'success') => ({ name, head_sha: head, status: 'completed', conclusion });
+  const checks = { check_runs: [run('validate'), run('runtime-proof'), run('reproducible-build'), run('analyze'), run('validate', other, 'failure'), run('CodeQL', sha, 'success')] };
+  const wf = (extra: Record<string, unknown>) => ({ workflow_runs: [{ name: 'CodeQL', head_sha: sha, event: 'push', head_branch: 'main', status: 'completed', conclusion: 'success', ...extra }] });
+  const all = aggregateCheckRuns(exactShaCheckRows(sha, checks, wf({})));
+  assert.ok(REQUIRED_HOSTED_CHECKS.every(k => all[k] === 'SUCCESS'), JSON.stringify(all));
+  // A pull_request CodeQL run, another branch, another commit, or an unfinished run never satisfies the push gate.
+  for (const bad of [{ event: 'pull_request' }, { head_branch: 'c14-chaos-recovery' }, { head_sha: other }]) assert.notEqual(aggregateCheckRuns(exactShaCheckRows(sha, checks, wf(bad))).CodeQL, 'SUCCESS');
+  assert.equal(aggregateCheckRuns(exactShaCheckRows(sha, checks, wf({ status: 'in_progress', conclusion: null }))).CodeQL, 'INCOMPLETE');
+  // A second validate run for the same commit is ambiguous, never a pass.
+  assert.equal(aggregateCheckRuns(exactShaCheckRows(sha, { check_runs: [...checks.check_runs, run('validate')] }, wf({}))).validate, 'AMBIGUOUS');
+  assert.deepEqual(exactShaCheckRows('not-a-sha', checks, wf({})), []);
+});
+test('the release line accepts only main or a detached HEAD, and the release worktree root', () => {
+  for (const branch of ['', 'main']) { const f = goodFacts(); f.branch = branch; assert.equal(evaluatePreflight(f).checks.AUTHORIZED_BRANCH, true); }
+  for (const branch of ['c14-chaos-recovery', 'release/0.4.0-prep']) { const f = goodFacts(); f.branch = branch; assert.equal(evaluatePreflight(f).checks.AUTHORIZED_BRANCH, false); }
+  const f = goodFacts(); f.root = '/Users/andrew/dex-reach-c13-worker-repair'; assert.equal(evaluatePreflight(f).checks.EXACT_REPOSITORY, false);
+  assert.equal(Object.keys(evaluatePreflight(goodFacts()).checks).length, 30);
 });
