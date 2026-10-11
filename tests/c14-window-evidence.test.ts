@@ -155,3 +155,44 @@ test('candidate compatibility signs with the real private key and authenticates 
     await assert.rejects(verifyLegacyCompatibility(w.source), /LEGACY_TRANSPORT_PROOF_REFUSED/);
   } finally { await w.cleanup(); }
 });
+
+for (const [name, mutate, ok] of [
+  ['an exactly bound result expired by retention is accepted', (m: any, _h: string) => m, true],
+  ['an expired result whose remaining blob changed is refused', (m: any) => m, false],
+  ['an expired result bound to another task is refused', (m: any, h: string) => { m.records[h].taskId = 'rtsk_other'; return m; }, false]
+] as const) test(`application restore: ${name}`, async () => {
+  const w = await expandedFixture(); try {
+    const file = path.join(w.source.state, 'results/manifest.json'), m = JSON.parse(await fs.readFile(file, 'utf8'));
+    const handle = Object.keys(m.records)[0]!; m.records[handle].expiresAt = '2020-01-01T00:00:00.000Z';
+    await fs.writeFile(file, JSON.stringify((mutate as any)(m, handle)));
+    if (name.includes('blob changed')) await fs.appendFile(path.join(w.source.state, `results/${handle}.json`), ' ');
+    if (ok) await verifyRestoredApplication(w.source); else await assert.rejects(verifyRestoredApplication(w.source), /APPLICATION_RESULT_BINDING/);
+  } finally { await w.cleanup(); }
+});
+
+import { TASK_EVENT_LIMIT } from '../src/shared/task-events.js';
+test('application restore accepts retention-evicted history only for terminal tasks in a saturated journal', async () => {
+  const w = await expandedFixture(); try {
+    const store = JSON.parse(await fs.readFile(path.join(w.source.state, 'tasks/store.json'), 'utf8'));
+    const ids = Object.keys(store.records), journal = path.join(w.source.state, 'tasks/events.jsonl');
+    const original = (await fs.readFile(journal, 'utf8')).split('\n').filter(Boolean);
+    // Evict every event of the fixture's tasks, as a long-running journal does.
+    const filler = Array.from({ length: TASK_EVENT_LIMIT }, (_, i) => JSON.stringify({ eventId: `tev_f${i}`, at: new Date().toISOString(), taskId: 'rtsk_filler', kind: 'updated' }));
+    await fs.writeFile(journal, filler.join('\n') + '\n');
+    const terminal = ids.every(id => ['COMPLETED', 'FAILED', 'CANCELLED', 'RECONCILED', 'AMBIGUOUS'].includes(store.records[id].state));
+    if (terminal) await verifyRestoredApplication(w.source);
+    else await assert.rejects(verifyRestoredApplication(w.source), /APPLICATION_EVENT_HISTORY_MISSING/);
+    // An unsaturated journal never excuses missing history.
+    await fs.writeFile(journal, original.filter(l => !ids.some(id => l.includes(id))).join('\n') + '\n');
+    await assert.rejects(verifyRestoredApplication(w.source), /APPLICATION_EVENT_HISTORY_MISSING/);
+  } finally { await w.cleanup(); }
+});
+
+test('application restore treats an absent revocation list as empty but refuses an invalid one', async () => {
+  const w = await expandedFixture(); try {
+    await fs.rm(path.join(w.source.state, 'revoked-nodes.json'));
+    await verifyRestoredApplication(w.source);
+    await fs.writeFile(path.join(w.source.state, 'revoked-nodes.json'), '{"not":"a list"}');
+    await assert.rejects(verifyRestoredApplication(w.source), /APPLICATION_REVOCATIONS/);
+  } finally { await w.cleanup(); }
+});

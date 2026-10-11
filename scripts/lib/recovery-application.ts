@@ -1,5 +1,8 @@
 import { RETAINED_RELEASE, RETAINED_SOURCE, RETAINED_TRANSACTION, RETAINED_TREE } from './c14-recovery-preflight.js';
 import crypto from 'node:crypto';
+import { TASK_EVENT_LIMIT } from '../../src/shared/task-events.js';
+import { readQuarantine } from '../../src/shared/task-quarantine.js';
+const TERMINAL_OR_AMBIGUOUS = ['COMPLETED', 'FAILED', 'CANCELLED', 'RECONCILED', 'AMBIGUOUS'];
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { loadRevokedNodes } from '../../src/shared/revoked-nodes.js';
@@ -25,9 +28,17 @@ export async function verifyRestoredApplication(roots: Roots): Promise<void> {
   const tasks = await new NodeTaskStore(roots.state).list({ includeArchived: true });
   if (!tasks.length || tasks.some(t => t.nodeId !== nodeId)) throw new Error('APPLICATION_TASK_IDENTITY');
   const events = new TaskEventLog(roots.state), results = new ResultStore(64 * 1024, 30 * 60 * 1000, roots.state);
+  // The task journal has bounded retention. When it is at its cap, older tasks' events were evicted by
+  // design; such a task may have no retained history only if it is terminal or owner-quarantined.
+  const journalLines = (await safeRead(roots.state, 'tasks/events.jsonl', 64 * 1024 * 1024).then(b => b.toString()).catch(e => { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return ''; throw e; })).split('\n').filter(Boolean).length;
+  const journalSaturated = journalLines >= TASK_EVENT_LIMIT;
+  const quarantined = await readQuarantine(roots.state);
   for (const task of tasks) {
     const history = await events.list(task.taskId, 2000, true);
-    if (!history.length) throw new Error('APPLICATION_EVENT_HISTORY_MISSING');
+    if (!history.length) {
+      if (journalSaturated && (TERMINAL_OR_AMBIGUOUS.includes(task.state) || quarantined.has(task.taskId))) continue;
+      throw new Error('APPLICATION_EVENT_HISTORY_MISSING');
+    }
     if (history.some(e => e.actorId && e.actorId !== task.actorId || e.nodeId && e.nodeId !== task.nodeId || e.operation && e.operation !== task.operation || e.attempt !== undefined && e.attempt !== task.attemptNumber)) throw new Error('APPLICATION_EVENT_BINDING');
     const lastState = history.filter(e => e.state || e.toState).at(-1);
     if (!lastState || (lastState.toState ?? lastState.state) !== task.state) throw new Error('APPLICATION_EVENT_STATE');
@@ -37,7 +48,7 @@ export async function verifyRestoredApplication(roots: Roots): Promise<void> {
     if (task.resultRef || task.resultHash) {
       if (!task.resultRef || !task.resultHash) throw new Error('APPLICATION_RESULT_BINDING');
       if (task.state === 'COMPLETED' && own.kind !== 'RETURN_RESULT') throw new Error('APPLICATION_RESULT_AUTHORITY');
-      await results.readValueForTask(task.resultRef, task.taskId, task.resultHash);
+      await verifyResultBinding(roots, results, task.resultRef, task.taskId, task.resultHash);
     } else if (task.state === 'COMPLETED') throw new Error('APPLICATION_COMPLETION_UNPROVEN');
     for (const identity of [{ actorId: 'wrong-actor', nodeId }, { actorId: task.actorId, nodeId: 'wrong-node' }]) {
       const decision = decideExistingTask({ existing: task, ...identity, operation: task.operation, payloadSha256: task.payloadSha256, policyHash: task.policyHash ?? 'unknown-policy' });
@@ -66,7 +77,8 @@ export async function verifyRestoredApplication(roots: Roots): Promise<void> {
   const transportPrivate = await safeRead(roots.state, `nodes/${nodeId}.transport.ed25519.pem`), transportPublic = (await safeRead(roots.state, `nodes/${nodeId}.transport.ed25519.pub.pem`)).toString();
   const enrollment = auth.nodes?.[nodeId];
   if (auth.version !== 2 || !enrollment || enrollment.revoked !== false || enrollment.authMode !== 'asymmetric' || enrollment.active !== null || enrollment.transport?.publicKey !== transportPublic || worker.version !== 1 || worker.nodeId !== nodeId || !Array.isArray(worker.allowedRoots) || !worker.allowedRoots.length || worker.allowedRoots.some((r: unknown) => typeof r !== 'string' || !path.isAbsolute(r)) || worker.rootsHash !== workspaceWorkerRootsHash(worker.allowedRoots) || crypto.createPublicKey(transportPrivate).export({ type: 'spki', format: 'pem' }).toString() !== transportPublic) throw new Error('APPLICATION_ENROLLMENT');
-  const revoked = JSON.parse((await safeRead(roots.state, 'revoked-nodes.json')).toString());
+  // Optional family: absent means no revocation was ever recorded. Present must be valid.
+  const revoked = JSON.parse((await safeRead(roots.state, 'revoked-nodes.json').catch(e => { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.from('[]'); throw e; })).toString());
   if (!Array.isArray(revoked) || revoked.some(r => typeof r !== 'string' || !r) || (await loadRevokedNodes(roots.state)).has(nodeId)) throw new Error('APPLICATION_REVOCATIONS');
   for (const name of await fs.readdir(path.join(roots.state, 'plans'))) {
     if (!name.endsWith('.json') || name === 'fixture.json') continue;
@@ -106,4 +118,18 @@ export async function verifyRestoredApplication(roots: Roots): Promise<void> {
     const claim = JSON.parse((await safeRead(roots.state, `coordinator/${name}/${file}`)).toString());
     if (!claim.id || !Number.isInteger(claim.pid) || claim.pid < 1 || !Number.isFinite(Date.parse(claim.heartbeatAt)) || !Number.isFinite(Date.parse(name === 'leases' ? claim.createdAt : claim.enqueuedAt)) || !WORK_EXECUTORS.includes(claim.executor) || !WORK_ACCESS_CLASSES.includes(claim.access) || !WORK_WORKLOAD_CLASSES.includes(claim.workload) || !tasks.some(t => t.taskId === claim.taskId && t.attemptNumber === claim.attempt)) throw new Error('APPLICATION_COORDINATION_CLAIM');
   }
+}
+
+/**
+ * A task-bound result must be exactly bound to its task. Results have bounded retention, so in real owner
+ * state a completed task's result is normally expired: its metadata must still bind exactly, and a
+ * remaining blob must still hash correctly. A missing record or any mismatch refuses.
+ */
+async function verifyResultBinding(roots: Roots, results: ResultStore, handle: string, taskId: string, hash: string): Promise<void> {
+  const manifest = JSON.parse((await safeRead(roots.state, 'results/manifest.json')).toString()) as { records?: Record<string, { taskId?: string; resultHash?: string; expiresAt?: string }> };
+  const record = manifest.records?.[handle];
+  if (!record || record.taskId !== taskId || record.resultHash !== hash || !Number.isFinite(Date.parse(record.expiresAt ?? ''))) throw new Error('APPLICATION_RESULT_BINDING');
+  if (Date.parse(record.expiresAt!) > Date.now()) { await results.readValueForTask(handle, taskId, hash); return; }
+  const blob = await safeRead(roots.state, `results/${handle}.json`, 64 * 1024 * 1024).catch(e => { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null; throw e; });
+  if (blob && crypto.createHash('sha256').update(blob).digest('hex') !== hash) throw new Error('APPLICATION_RESULT_BINDING');
 }
