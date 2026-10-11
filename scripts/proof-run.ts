@@ -744,7 +744,11 @@ async function main(): Promise<void> {
 
   if (!skipLive) {
     try {
-      livePair = await startLivePair({ repoRoot, workspace: path.join(workspace, 'live'), nodeIds: ['proof-node-a'], profile: 'workspace-safe' });
+      // The live-pair proofs establish protocol, profile and authority behaviour, not host load. The
+      // production coordinator daemon still owns tickets, locks and leases; only its host sensor is fixed,
+      // so a CI runner's own agent cannot fail a profile proof as an 'uncoordinated heavy workload'.
+      // Physical admission is proven by the classifier suites and the installed-host chaos pass.
+      livePair = await startLivePair({ repoRoot, workspace: path.join(workspace, 'live'), nodeIds: ['proof-node-a'], profile: 'workspace-safe', capacityObservation: 'synthetic' });
       const proofPair = livePair;
       admissionDiagnostic = async () => {
         const nodePid = [...proofPair.nodes.values()][0]?.child.pid, rows = await observeProcessRows();
@@ -760,7 +764,7 @@ async function main(): Promise<void> {
         };
         return seen.length ? seen.map(w => `${w.processLabel}${entry(w.pid)} (cpu ${w.cpu}%, mem ${w.mem}%, by ${w.matchedBy})`).join('; ') : 'none';
       };
-      liveEnvironment = { available: true, reason: `a gateway and a node agent are running as separate processes on ${livePair.baseUrl.origin}` };
+      liveEnvironment = { available: true, reason: `a gateway and a node agent are running as separate processes on ${livePair.baseUrl.origin}; coordinator host sensor ${livePair.capacityObservation}` };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // Unverified, not failed. A pair that could not start says nothing about whether the routing
