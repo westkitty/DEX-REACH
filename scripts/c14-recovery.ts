@@ -14,7 +14,7 @@ import { TransactionEvidenceLog, ExpectationStore } from './lib/recovery-evidenc
 import { COMPAT_HOME_PRESERVATION_RULE, defaultLinkPolicy } from './lib/recovery-symlinks.js';
 import { recoveryStorageEstimate } from './lib/recovery-storage.js';
 import type { DestinationFacts } from './lib/recovery-destination.js';
-import { C14_ROOT, RETAINED_RELEASE, RETAINED_TREE, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
+import { reloadHelperIdle, C14_ROOT, RETAINED_RELEASE, RETAINED_TREE, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
 
 const runFile = promisify(execFile);
 async function run(bin: string, args: string[]): Promise<string> { return (await runFile(bin, args, { cwd: C14_ROOT, timeout: 20_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } })).stdout.trim(); }
@@ -66,7 +66,8 @@ async function livePreflight() {
       } else if (!/last exit code = 0/.test(loaded) || /\bpid = \d+/.test(loaded)) servicesVerified = false;
     } catch { servicesVerified = false; serviceReleaseIds.push('unknown'); }
   }
-  try { const helper = await run('/bin/launchctl', ['print', 'gui/501/com.stinkyweasel.dex-reach.install-reloader-once']); helperIdle = /active count = 0/.test(helper) && /last exit code = 0/.test(helper) && !/\bpid = \d+/.test(helper); } catch { /* Unknown helper refuses. */ }
+  const helperPrint = await runFile('/bin/launchctl', ['print', 'gui/501/com.stinkyweasel.dex-reach.install-reloader-once'], { timeout: 20_000 }).then(r => ({ output: r.stdout }), (e: { stderr?: string; stdout?: string; killed?: boolean }) => !e.killed && /Could not find service/.test(`${e.stderr ?? ''}${e.stdout ?? ''}`) ? { notFound: true as const } : { error: true as const });
+  helperIdle = reloadHelperIdle(helperPrint, processTable);
   const recoveryActive = /scripts\/(?:install-macos|rollback-macos|reload-launchagents)\.(?:ts|js)(?:\s|$)/m.test(processTable);
   let claimsKnown = true, claimsCount = 0;
   for (const name of ['leases', 'queue']) { try { const dir = path.join(liveRoots.state, 'coordinator', name); await realDirectory(dir); claimsCount += (await fs.readdir(dir)).length; } catch { claimsKnown = false; } }
