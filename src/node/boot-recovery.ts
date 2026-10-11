@@ -191,7 +191,8 @@ export async function reconcileBootTasks(taskStore: NodeTaskStore, results: Resu
       await keepLeaseWhileOrphanRuns(lease?.id, options);
     } else if (decision.kind === 'AMBIGUOUS' || decision.kind === 'DEGRADED') {
       if (task.state === 'RUNNING') {
-        if (decision.kind === 'AMBIGUOUS') await taskStore.update(task.taskId, { failureClass: 'AMBIGUOUS_EFFECT' });
+        // DEGRADED (contradictory or unverifiable evidence) leaves the effect just as unknown as AMBIGUOUS does.
+        await taskStore.update(task.taskId, { failureClass: 'AMBIGUOUS_EFFECT' });
         await taskStore.transition(task.taskId, 'AMBIGUOUS', decision.reason);
       }
       else if (task.summary.status !== decision.reason) await taskStore.update(task.taskId, { status: decision.reason });

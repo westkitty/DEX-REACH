@@ -54,3 +54,24 @@ test('a live recovery guard is waited on only until the timeout, never forever',
     await fs.stat(`${lock}.recovery`); // A fresh guard is not removed.
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
+
+import { withLockPatience } from '../src/shared/state-io.js';
+test('scoped lock patience lets decisive work wait out contention; elsewhere the 5 s default still applies', { timeout: 30_000 }, async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-patience-')); try {
+    const lock = path.join(dir, 'x.lock');
+    let release!: () => void; const held = new Promise<void>(r => { release = r; }); let ready!: () => void; const fenced = new Promise<void>(r => { ready = r; });
+    const holder = withFileLock(lock, async () => { ready(); await held; });
+    await fenced; setTimeout(() => release(), 7_000);
+    const outside = withFileLock(lock, async () => 'outside');
+    const inside = withLockPatience(30_000, () => withFileLock(lock, async () => 'inside'));
+    await assert.rejects(outside, /timed out waiting for DEX state lock/);
+    assert.equal(await inside, 'inside');
+    await holder;
+    // An explicit timeout is never overridden by patience.
+    let r2!: () => void; const h2 = new Promise<void>(r => { r2 = r; }); let ok2!: () => void; const f2 = new Promise<void>(r => { ok2 = r; });
+    const holder2 = withFileLock(lock, async () => { ok2(); await h2; }); await f2;
+    await assert.rejects(withLockPatience(30_000, () => withFileLock(lock, async () => 'x', { timeoutMs: 200 })), /timed out/);
+    r2(); await holder2;
+    assert.throws(() => withLockPatience(0, async () => 1), /lock patience/);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});

@@ -3,7 +3,7 @@ import { acquireTaskAdmission, waitingStatusWriter } from './task-admission.js';
 import { persistTaskFailure, persistProcessExitFailure } from './task-failure.js';
 import { ProcessExitError, assertProcessSucceeded } from '../shared/process-outcome.js';
 import fs from 'node:fs/promises';
-import { withFileLock } from '../shared/state-io.js';
+import { withFileLock, withLockPatience } from '../shared/state-io.js';
 import { requiredCapabilities, requestPaths } from '../shared/capabilities.js';
 import { parseRepoInspection } from '../shared/repo-inspection.js';
 import WebSocket from 'ws';
@@ -95,7 +95,9 @@ let lastStatusJson = '';
 // Reconcile durable tasks before advertising execution readiness. The recovery pass preserves
 // contradictory coordinator/process evidence and never replays an uncertain side effect.
 const activeTasks = await taskStore.loadActiveTasks();
-const bootRecovery = await reconcileBootTasks(taskStore, results);
+// Boot writes are decisive and run before readiness: tolerate lock contention instead of dying on it.
+const BOOT_LOCK_PATIENCE_MS = 60_000;
+const bootRecovery = await withLockPatience(BOOT_LOCK_PATIENCE_MS, () => reconcileBootTasks(taskStore, results));
 await backend.start(config.allowedRoots);
 await sweepExpiredPlans();
 // Writer checkpoint participation is opt-in; without explicit configuration the gate stays IDLE.

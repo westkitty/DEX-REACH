@@ -29,7 +29,7 @@ export async function materializeManifest(manifest: Manifest, source: Roots, sta
   for (const d of manifest.directories) { const target = path.join(roots[d.root], d.relative); await fs.mkdir(target, { recursive: true, mode: d.mode }); await realDirectory(target); await fs.chmod(target, d.mode); }
   for (const e of manifest.entries.filter(e => e.kind !== 'link')) {
     await beforeFile(); await fs.mkdir(path.dirname(path.join(roots[e.root], e.relative)), { recursive: true, mode: 0o700 }); await realDirectory(path.dirname(path.join(roots[e.root], e.relative)));
-    durableWriteSync(path.join(roots[e.root], e.relative), safeReadSync(source[e.root], e.relative, 512 * 1024 * 1024), e.mode);
+    durableWriteSync(path.join(roots[e.root], e.relative), safeReadSync(source[e.root], e.relative, 512 * 1024 * 1024), e.mode, e.mtimeMs);
   }
   for (const e of manifest.entries.filter(e => e.kind === 'link')) { if (!e.link) throw new Error('LINK_MANIFEST'); await realDirectory(path.dirname(path.join(roots[e.root], e.relative))); await fs.symlink(e.link.target, path.join(roots[e.root], e.relative)); }
   return roots;
@@ -44,11 +44,12 @@ export async function syncDirectories(directory: string): Promise<void> {
   const handle = await fs.open(directory, 'r'); try { await handle.sync(); } finally { await handle.close(); }
 }
 /** Exclusive create, write, chmod, fsync, close: synchronous so no completion can be lost mid-copy. */
-export function durableWriteSync(file: string, bytes: Buffer, mode: number): void {
+/** `mtimeMs` keeps the source modification time, so time-based classification holds on copies too. */
+export function durableWriteSync(file: string, bytes: Buffer, mode: number, mtimeMs?: number): void {
   const parent = path.dirname(file), real = fsSync.realpathSync(parent);
   if (real !== parent || !fsSync.lstatSync(parent).isDirectory()) throw new Error('SYMLINK_ROOT_REFUSED');
   const fd = fsSync.openSync(file, 'wx', mode);
-  try { fsSync.writeFileSync(fd, bytes); fsSync.fchmodSync(fd, mode); fsSync.fsyncSync(fd); } finally { fsSync.closeSync(fd); }
+  try { fsSync.writeFileSync(fd, bytes); fsSync.fchmodSync(fd, mode); if (mtimeMs !== undefined) fsSync.futimesSync(fd, mtimeMs / 1000, mtimeMs / 1000); fsSync.fsyncSync(fd); } finally { fsSync.closeSync(fd); }
 }
 export async function durableWrite(file: string, bytes: Buffer, mode: number) {
   await realDirectory(path.dirname(file)); const h = await fs.open(file, 'wx', mode);

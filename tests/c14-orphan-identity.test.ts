@@ -182,6 +182,8 @@ test('orphan killed or gone at restart: the task is AMBIGUOUS and not completed'
     const [report] = await reconcileBootTasks(store, results, { coordinator: leaseFor(task), transportConnected: true, activities: [activityFor(task, UNUSED_PID, 'exited')], verify: async () => 'GONE' });
     assert.ok(report?.decision.kind === 'DEGRADED' || report?.decision.kind === 'AMBIGUOUS');
     assert.equal((await store.read(task.taskId))?.state, 'AMBIGUOUS');
+    // Whichever path, the effect is unknown and recorded as such.
+    assert.equal((await store.read(task.taskId))?.failureClass, 'AMBIGUOUS_EFFECT');
     // With no lease, the same gone process resolves to AMBIGUOUS directly.
     const other = await runningTask(store, 'orphan-gone-no-lease');
     const reports = await reconcileBootTasks(store, results, { coordinator: { leases: [], tickets: [] } as unknown as WorkStatus, transportConnected: true, activities: [activityFor(task, UNUSED_PID, 'exited'), activityFor(other, UNUSED_PID, 'exited')], verify: async () => 'GONE' });
@@ -189,6 +191,7 @@ test('orphan killed or gone at restart: the task is AMBIGUOUS and not completed'
     // An activity row with no lease is contradictory (DEGRADED); either way the task is AMBIGUOUS and not completed.
     assert.ok(clean?.decision.kind === 'DEGRADED' || clean?.decision.kind === 'AMBIGUOUS');
     assert.equal((await store.read(other.taskId))?.state, 'AMBIGUOUS');
+    assert.equal((await store.read(other.taskId))?.failureClass, 'AMBIGUOUS_EFFECT');
     // No activity and no lease for a RUNNING task: nothing proves an effect, so it is AMBIGUOUS directly.
     const bare = await runningTask(store, 'orphan-gone-no-evidence');
     const bareReports = await reconcileBootTasks(store, results, { coordinator: { leases: [], tickets: [] } as unknown as WorkStatus, transportConnected: true, activities: [] });
