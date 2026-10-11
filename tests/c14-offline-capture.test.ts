@@ -141,3 +141,17 @@ test('the synchronous copy read keeps every safety refusal of the async read', a
     assert.throws(() => safeReadSync(linkedRoot, 'audit.jsonl'), /SYMLINK_ROOT_REFUSED/);
   } finally { await s.w.cleanup(); }
 });
+
+import { recoveryStorageEstimate } from '../scripts/lib/recovery-storage.js';
+test('dead-owner locks left by an interrupted capture are reclaimed by the next fence, which then certifies', async () => {
+  const s = await setup(); try {
+    // Locks naming a dead pid, exactly as a killed capture leaves them.
+    const { spawnSync } = await import('node:child_process'); const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+    for (const lock of ['tasks/admission.lock', 'results/results.lock', 'coordinator/coordinator.lock', 'revoked-nodes.json.lock']) await fs.writeFile(path.join(s.w.source.state, lock), JSON.stringify({ pid: dead, createdAt: Date.now() - 1000, token: crypto.randomUUID() }), { mode: 0o600 });
+    const pre = await inspectCoverage(s.w.source, 'inspection');
+    assert.ok(pre.problems.length > 0, 'the pre-fence scan sees them');
+    const outcome = await captureOffline(s.request({ destination: { ...s.destination, space: recoveryStorageEstimate(pre) } }));
+    assert.equal(outcome.status, 'OFFLINE_BACKUP_CERTIFIED', outcome.reason);
+    for (const lock of ['tasks/admission.lock', 'results/results.lock', 'coordinator/coordinator.lock']) await assert.rejects(fs.stat(path.join(s.w.source.state, lock)), /ENOENT/);
+  } finally { await s.w.cleanup(); }
+});

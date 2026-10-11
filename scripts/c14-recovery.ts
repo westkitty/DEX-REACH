@@ -12,7 +12,7 @@ import { readCapturePointer, readWindowAuthorization, verifyWindowEvidence, WIND
 import { appendQuarantine, type QuarantinedTaskIdentity } from '../src/shared/task-quarantine.js';
 import { TransactionEvidenceLog, ExpectationStore } from './lib/recovery-evidence.js';
 import { COMPAT_HOME_PRESERVATION_RULE, defaultLinkPolicy } from './lib/recovery-symlinks.js';
-import { recoveryStoragePlan } from './lib/recovery-storage.js';
+import { recoveryStorageEstimate } from './lib/recovery-storage.js';
 import type { DestinationFacts } from './lib/recovery-destination.js';
 import { C14_ROOT, RETAINED_RELEASE, RETAINED_TREE, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
 
@@ -122,7 +122,7 @@ async function offlineCaptureCommand(args: string[]): Promise<number> {
     mountIdentity: await info('VolumeUUID'), approvedMountIdentity: approvedVolume!, ownerUid: st.uid, expectedUid: 501, mode: st.mode & 0o777,
     writable: await fs.access(root, fs.constants.W_OK).then(() => true, () => false), cloudSynced, cloudApproved: false,
     encrypted: await info('FileVault') === 'true', durable: await info('FilesystemType') === 'apfs', freeBytes: volume.bavail * volume.bsize, measured: true,
-    space: recoveryStoragePlan(await inspectCoverage(liveRoots, 'inspection', linkPolicy)), sources: liveRoots, gitRoots: [C14_ROOT, '/Users/andrew/DEX-REACH', '/Users/andrew/DEX']
+    space: recoveryStorageEstimate(await inspectCoverage(liveRoots, 'inspection', linkPolicy)), sources: liveRoots, gitRoots: [C14_ROOT, '/Users/andrew/DEX-REACH', '/Users/andrew/DEX']
   };
   const forbidden = [...Object.values(liveRoots), root, C14_ROOT];
   const log = await TransactionEvidenceLog.open(evidenceRoot!, 'macbook-air.local', forbidden);
