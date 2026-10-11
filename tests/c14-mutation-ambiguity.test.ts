@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { startCoordinatorServer } from '../src/coordinator/main.js';
+import { createCoordinatorHandler, startCoordinatorServer } from '../src/coordinator/main.js';
+import { fixedHostSnapshot } from './helpers/fixed-host.js';
 import { coordinatedAcquire, coordinatedRelease, coordinatedStatus } from '../src/coordinator/client.js';
 import { reconcileBootTasks } from '../src/node/boot-recovery.js';
 import { NodeTaskStore } from '../src/node/task-store.js';
@@ -46,7 +47,7 @@ test('C14-B preserves an uncertain mutation and refuses every replay path after 
   let executionCount = 0;
 
   try {
-    coordinator = await startCoordinatorServer();
+    coordinator = await startCoordinatorServer(createCoordinatorHandler(fixedHostSnapshot));
     const unrelatedLease = await coordinatedAcquire({ executor: 'other', access: 'read', workload: 'light', phase: 'unrelated-ambiguity-fixture' }, { requireDaemon: true });
     assert.equal(unrelatedLease.status, 'acquired');
     if (unrelatedLease.status !== 'acquired') throw new Error('isolated coordinator failed to admit unrelated lease');
