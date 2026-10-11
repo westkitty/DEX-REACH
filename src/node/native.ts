@@ -175,6 +175,7 @@ export async function nativeProcess(
     throw new Error(`the ${profile} profile does not inject stored secrets; it admits only commands that have no use for a credential`);
   }
   const timeout = Math.max(100, Math.min(timeoutMs, 60_000));
+  if (!Number.isFinite(timeout) || timeout < 100 || timeout > 60_000) throw new Error('invalid process time limit');
   const readonly = profile === 'read-only' ? parseReadonlyCommand(command, roots) : null;
   const shell = profile === 'read-only' ? null : nodeShell();
   // safeChildEnvironment strips the node's own credential-shaped variables first; the broker's
@@ -188,7 +189,7 @@ export async function nativeProcess(
   catch { throw new Error('process could not be started (invalid working directory)'); }
   // This fixed POSIX shim waits on its private stdin. No user command is evaluated until
   // intent and the waiting process identity have been persisted. exec keeps the same PID.
-  const barrier = 'IFS= read -r gate || exit 125; [ "$gate" = "execute" ] || exit 125; exec "$@"';
+  const barrier = 'exec "$@"\n';
   return withLockPatience(ACTIVITY_LOCK_PATIENCE_MS, async () => {
     const intent = await recordProcessIntent({ kind: 'native-process', operation: 'dex.process.run', command, cwd, ...context });
     let child!: ReturnType<typeof execFile>;
@@ -196,7 +197,7 @@ export async function nativeProcess(
     let deadline: ReturnType<typeof setTimeout>;
     const stopAtDeadline = () => { timedOut = true; child.kill(); };
     const outcome = new Promise<{ error: Error | null; stdout: string; stderr: string }>(resolve => {
-      child = execFile('/bin/sh', ['-c', barrier, 'dex-reach-launch', program, ...childArgs],
+      child = execFile('/bin/sh', ['-s', '--', program, ...childArgs],
         { cwd, maxBuffer: 2 * 1024 * 1024, env }, (error, stdout, stderr) => { clearTimeout(deadline); resolve({ error, stdout, stderr }); });
       deadline = setTimeout(stopAtDeadline, ACTIVITY_LOCK_PATIENCE_MS + 5000);
     });
@@ -209,7 +210,7 @@ export async function nativeProcess(
       if (child.exitCode !== null || child.signalCode !== null || !child.stdin || pipeError) throw new Error('PROCESS_BARRIER_ENDED');
       clearTimeout(deadline!);
       deadline = setTimeout(stopAtDeadline, timeout);
-      await new Promise<void>((resolve, reject) => child.stdin!.write('execute\n', error => { if (error) reject(error); else { child.stdin!.end(); resolve(); } }));
+      await new Promise<void>((resolve, reject) => child.stdin!.write(barrier, error => { if (error) reject(error); else { child.stdin!.end(); resolve(); } }));
     } catch {
       // This handle belongs to our child; never signal a PID obtained from the ledger.
       child.kill();

@@ -37,6 +37,11 @@ test('intent persistence failure prevents spawn and does not complete execution'
  await assert.rejects(nativeProcess('printf once > effect', work, 'full-local', 5000, [work]), /JSON|Unexpected|Expected/);
  await assert.rejects(fs.access(path.join(work, 'effect')));
 }));
+test('non-finite time limit refuses before intent or side effect', async () => fixture(async (_root, work) => {
+ await assert.rejects(nativeProcess('printf once > effect', work, 'full-local', NaN, [work]), /invalid process time limit/);
+ await assert.rejects(fs.access(path.join(work, 'effect')));
+ assert.deepEqual(await readProcessActivities({ includeFinished: true }), []);
+}));
 for (const phase of ['intent', 'binding']) test(`crash at ${phase} preserves uncertainty, task binding and no replay`, { timeout: 20000 }, async () => fixture(async (_root, work) => {
  const { store, task } = await runningTask();
  // Fault injection at the real atomic persistence boundary; no production hook or alternate executor.
