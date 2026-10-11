@@ -47,7 +47,8 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  const control=(action:'get'|'result'|'cancel',taskId:string,who=actor)=>registry.requestWithTrace('scheduler-fixture','dex.task',{},who,undefined,2000,{action,taskId});
  const start=(key:string,command:string)=>registry.requestWithTrace('scheduler-fixture','dex.task',{},actor,undefined,2000,{action:'start',operation:'dex.process.run',args:{command,cwd:roots,idempotencyKey:key}});
  try{
- await until(ready);
+ // Boot recovery may wait up to 30 s for the activity lock under load; allow for it.
+ await until(ready,45000);
  // Idle resident desktop is not an independent workload. Actual native operation runs.
  await call('dex.process.run',{command:'printf healthy > healthy.txt',cwd:roots,idempotencyKey:'healthy'});
  assert.equal(await fs.readFile(path.join(roots,'healthy.txt'),'utf8'),'healthy');
@@ -95,7 +96,8 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  (registry as unknown as {nodes:Map<string,{socket:import('ws').default}>}).nodes.get('scheduler-fixture')!.socket.close();
  await fs.writeFile(path.join(roots,'release.txt'),'release');
  await until(async()=>(await store.read(running.taskId))?.state==='COMPLETED');
- await until(ready);
+ // Boot recovery may wait up to 30 s for the activity lock under load; allow for it.
+ await until(ready,45000);
  await start('disconnect','printf started >> started.txt; while ! test -f release.txt; do sleep 0.1; done; printf effect >> disconnected.txt');
  assert.equal(await fs.readFile(path.join(roots,'disconnected.txt'),'utf8'),'effect');
  // A synchronous response is lost after execution starts. The task survives; same-key retrieval never replays.
@@ -106,7 +108,8 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  assert.match((await lost)!.message,/uncertain|disconnect|connection/i);
  await fs.writeFile(path.join(roots,'sync-release.txt'),'release');
  await until(async()=>(await store.list()).filter(t=>t.state==='COMPLETED').length>=4);
- await until(ready);
+ // Boot recovery may wait up to 30 s for the activity lock under load; allow for it.
+ await until(ready,45000);
  await call('dex.process.run',lostArgs);assert.equal(await fs.readFile(path.join(roots,'sync-oracle.txt'),'utf8'),'sync-effect');
  // Lose the durable acknowledgement itself, then recover its original key without another effect.
  const ackArgs={command:'printf ack-effect >> ack-oracle.txt',cwd:roots,idempotencyKey:'lost-ack'};
@@ -136,14 +139,16 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  const interrupted=(await start('queued-restart','printf forbidden >> restart-oracle.txt')).result as {taskId:string};
  await until(async()=>(await readCoordinatorState()).tickets.some(t=>t.taskId===interrupted.taskId));
  await stop(child);await until(async()=>registry.listNodes().length===0);child=launch();
- await until(ready);
+ // Boot recovery may wait up to 30 s for the activity lock under load; allow for it.
+ await until(ready,45000);
  assert.equal((await store.read(interrupted.taskId))?.state,'PREPARING');
  await start('queued-restart','printf forbidden >> restart-oracle.txt');
  assert.equal(await fs.access(path.join(roots,'restart-oracle.txt')).then(()=>true,()=>false),false);
  await control('cancel',interrupted.taskId);table=table.split('\n')[0]+'\n';
  // Restart retains completed identity and task-bound result without a second effect.
  await stop(child);await until(async()=>registry.listNodes().length===0);child=launch();
- await until(ready);
+ // Boot recovery may wait up to 30 s for the activity lock under load; allow for it.
+ await until(ready,45000);
  await control('result',running.taskId);assert.equal(await fs.readFile(path.join(roots,'disconnected.txt'),'utf8'),'effect');
  assert.equal((await store.list()).filter(t=>t.taskId===running.taskId).length,1);
  // Interrupt RUNNING execution. Restart retains uncertainty and refuses identical-key replay.
@@ -152,7 +157,8 @@ test('real registry, node and coordinator: capacity/refusal, durable queue, auth
  // The shell's `>>` creates the file before printf writes: wait for the marker itself, not the empty file.
  await until(async()=>(await fs.readFile(path.join(roots,'active-restart.txt'),'utf8').catch(()=>''))==='started');
  await stop(child);await until(async()=>registry.listNodes().length===0);child=launch();
- await until(ready);
+ // Boot recovery may wait up to 30 s for the activity lock under load; allow for it.
+ await until(ready,45000);
  assert.equal((await store.read(active.taskId))?.state,'AMBIGUOUS');
  await assert.rejects(start('active-restart',activeCommand),/AMBIGUOUS/);
  assert.equal(await fs.readFile(path.join(roots,'active-restart.txt'),'utf8'),'started');
