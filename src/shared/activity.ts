@@ -233,12 +233,14 @@ async function reconcileRunning(records: ProcessActivity[]): Promise<boolean> {
 export async function listProcessActivities(options: {
   includeFinished?: boolean;
   limit?: number;
+  /** Lock wait bound. Boot recovery is not latency-sensitive and must not die on brief I/O contention. */
+  timeoutMs?: number;
 } = {}): Promise<ProcessActivity[]> {
   const records = await withFileLock(activityLockFile(), async () => {
     const current = await readRecordsUnlocked();
     if (await reconcileRunning(current)) await writeRecordsUnlocked(current);
     return current;
-  });
+  }, { timeoutMs: options.timeoutMs ?? 5000 });
   const includeFinished = options.includeFinished ?? false;
   const limit = Math.max(1, Math.min(options.limit ?? 50, MAX_ACTIVITY_RECORDS));
   return records

@@ -99,3 +99,17 @@ test('boot recovery leaves quarantined records byte-identical and still reconcil
     assert.ok(reports.some(r => r.taskId === other.taskId && !/Owner-quarantined/.test(r.decision.reason)));
   } finally { await w.cleanup(); }
 });
+
+import { withFileLock } from '../src/shared/state-io.js';
+import { activityLockFile } from '../src/shared/activity.js';
+test('boot recovery waits out brief activity-lock contention instead of failing the node boot', { timeout: 30_000 }, async () => {
+  const w = await world(); try {
+    await w.make('a', 'PREPARING');
+    let release!: () => void; const held = new Promise<void>(r => { release = r; }); let ready!: () => void; const fenced = new Promise<void>(r => { ready = r; });
+    await fs.mkdir(path.dirname(activityLockFile()), { recursive: true, mode: 0o700 });
+    const holder = withFileLock(activityLockFile(), async () => { ready(); await held; });
+    await fenced; setTimeout(() => release(), 6_000);
+    const reports = await reconcileBootTasks(w.store, new ResultStore(64 * 1024, 60_000, w.dir));
+    await holder; assert.equal(reports.length, 1);
+  } finally { await w.cleanup(); }
+});

@@ -36,7 +36,8 @@ async function hasVerifiedResult(task: ReachTaskRecord, results: ResultStore): P
 export async function reconcileBootTasks(taskStore: NodeTaskStore, results: ResultStore): Promise<BootRecoveryReport[]> {
   const tasks = await taskStore.loadActiveTasks();
   if (!tasks.length) return [];
-  const activities = await listProcessActivities({ includeFinished: true, limit: 500 });
+  // A 5 s wait killed the node at boot under fsync contention; launchd then crash-looped it.
+  const activities = await listProcessActivities({ includeFinished: true, limit: 500, timeoutMs: 30_000 });
   let coordinator: WorkStatus | null = null;
   let transportConnected = true;
   try { coordinator = await coordinatedStatus(); }
