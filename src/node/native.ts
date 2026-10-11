@@ -174,8 +174,7 @@ export async function nativeProcess(
   if (secrets.values.length && (profile === 'read-only' || profile === 'workspace-safe')) {
     throw new Error(`the ${profile} profile does not inject stored secrets; it admits only commands that have no use for a credential`);
   }
-  const timeout = Math.max(100, Math.min(timeoutMs, 60_000));
-  if (!Number.isFinite(timeout) || timeout < 100 || timeout > 60_000) throw new Error('invalid process time limit');
+  if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs)) throw new Error('invalid process time limit');
   const readonly = profile === 'read-only' ? parseReadonlyCommand(command, roots) : null;
   const shell = profile === 'read-only' ? null : nodeShell();
   // safeChildEnvironment strips the node's own credential-shaped variables first; the broker's
@@ -191,6 +190,9 @@ export async function nativeProcess(
   // intent and the waiting process identity have been persisted. exec keeps the same PID.
   const barrier = 'exec "$@"\n';
   return withLockPatience(ACTIVITY_LOCK_PATIENCE_MS, async () => {
+    const timeout = Math.max(100, Math.min(timeoutMs, 60_000));
+    // Keep the resource bound in the closure that allocates the timer, before any launch evidence.
+    if (timeout < 100 || timeout > 60_000) throw new Error('invalid process time limit');
     const intent = await recordProcessIntent({ kind: 'native-process', operation: 'dex.process.run', command, cwd, ...context });
     let child!: ReturnType<typeof execFile>;
     let timedOut = false;
@@ -295,7 +297,7 @@ export async function nativeCall(nodeId: string, operation: string, args: Record
       // the invocation, so a value is in memory for the shortest window the design allows and never
       // while the request is still being authorized, planned, traced or recorded.
       const secrets = await resolveSecrets(nodeId, requestedSecretAliases(args));
-      return nativeProcess(String(args.command || ''), cwd, profile, Number(args.timeoutMs || 15000), roots, secrets, context);
+      return nativeProcess(String(args.command || ''), cwd, profile, (args.timeoutMs === undefined ? 15000 : args.timeoutMs) as number, roots, secrets, context);
     }
     default:
       throw new Error(`unknown native operation: ${operation}`);

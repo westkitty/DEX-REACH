@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { nativeProcess } from '../src/node/native.js';
+import { nativeCall, nativeProcess } from '../src/node/native.js';
 import { NO_SECRETS } from '../src/shared/secrets.js';
 import { activityFile, activityLockFile, readProcessActivities, recordProcessIntent, bindProcessIntent } from '../src/shared/activity.js';
 import { withFileLock } from '../src/shared/state-io.js';
@@ -41,6 +41,62 @@ test('non-finite time limit refuses before intent or side effect', async () => f
  await assert.rejects(nativeProcess('printf once > effect', work, 'full-local', NaN, [work]), /invalid process time limit/);
  await assert.rejects(fs.access(path.join(work, 'effect')));
  assert.deepEqual(await readProcessActivities({ includeFinished: true }), []);
+}));
+for (const [label, input] of [
+ ['NaN', NaN], ['positive infinity', Infinity], ['negative infinity', -Infinity],
+ ['numeric string', '100'], ['null', null], ['boolean', true], ['object', {}], ['array', []]
+] as const) test(`malformed timeout ${label} refuses both executor and runtime API before launch`, async () => fixture(async (_root, work) => {
+ await assert.rejects(nativeProcess('printf once > effect', work, 'full-local', input as number, [work]), /invalid process time limit/);
+ await assert.rejects(nativeCall('test-node', 'dex.process.run', {command:'printf once > effect',cwd:work,timeoutMs:input}, [work], 'full-local'), /invalid process time limit/);
+ await assert.rejects(fs.access(path.join(work, 'effect')));
+ assert.deepEqual(await readProcessActivities({includeFinished:true}), []);
+}));
+
+async function observeProcessTimers(fn: () => Promise<void>) {
+ const originalSet = globalThis.setTimeout, originalClear = globalThis.clearTimeout;
+ const durations: (number | undefined)[] = [], active = new Set<ReturnType<typeof setTimeout>>();
+ globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+  const handle = originalSet(...args);
+  if (args[0].name === 'stopAtDeadline') { durations.push(args[1]); active.add(handle); }
+  return handle;
+ }) as typeof setTimeout;
+ globalThis.clearTimeout = (handle => { active.delete(handle as ReturnType<typeof setTimeout>); originalClear(handle); }) as typeof clearTimeout;
+ try { await fn(); assert.equal(active.size,0,'every process deadline must be cancelled after settlement'); }
+ finally { globalThis.setTimeout=originalSet; globalThis.clearTimeout=originalClear; }
+ return durations;
+}
+for (const [input, expected] of [[-1,100],[0,100],[99,100],[100,100],[60000,60000],[60001,60000],[Number.MAX_VALUE,60000]]) {
+ test(`finite timeout ${input} arms the supported ${expected}ms deadline after binding`, async () => fixture(async (_root, work) => {
+  const durations=await observeProcessTimers(async () => {
+   assert.equal((await nativeProcess('printf done',work,'full-local',input!,[work])).exitCode,0);
+  });
+  assert.deepEqual(durations,[35000,expected]);
+ }));
+}
+for (const [command, cause, state] of [['exec sleep 10','time-limit','timed-out'],['kill -TERM $$','signal','terminated']] as const) {
+ test(`${cause} termination cleans timers and retains unknown effect`, async () => fixture(async (_root,work) => {
+  await observeProcessTimers(async () => {
+   await assert.rejects(nativeProcess(command,work,'full-local',100,[work]), (error: unknown) => {
+    assert.ok(error instanceof Error); assert.equal(error.name,'ProcessSignalTerminationError'); assert.match(error.message,/uncertain/); return true;
+   });
+  });
+  const [row]=await readProcessActivities({includeFinished:true}); assert.equal(row!.state,state); assert.equal(row!.exitCode,undefined);
+ }));
+}
+test('failed identity binding kills the waiting child and cancels its deadline without effect', async () => fixture(async (_root,work) => {
+ const originalRename=fs.rename;
+ fs.rename=async (a,b) => {
+  if(b===activityFile() && JSON.parse(await fs.readFile(a,'utf8')).some((row:{state:string})=>row.state==='running')) throw new Error('binding fault');
+  return originalRename(a,b);
+ };
+ try {
+  const durations=await observeProcessTimers(async () => {
+   await assert.rejects(nativeProcess('printf once > effect',work,'full-local',5000,[work]), /uncertain/);
+  });
+  assert.deepEqual(durations,[35000]);
+  await assert.rejects(fs.access(path.join(work,'effect')));
+  const [row]=await readProcessActivities({includeFinished:true}); assert.equal(row!.state,'starting'); assert.equal(row!.pid,0);
+ } finally { fs.rename=originalRename; }
 }));
 for (const phase of ['intent', 'binding']) test(`crash at ${phase} preserves uncertainty, task binding and no replay`, { timeout: 20000 }, async () => fixture(async (_root, work) => {
  const { store, task } = await runningTask();
