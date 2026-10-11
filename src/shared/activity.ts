@@ -53,7 +53,9 @@ export type ProcessActivity = {
   lastStdoutAt?: string;
   lastResourceAt?: string;
   finishedAt?: string;
+  /** Present only when the child ended by a signal. The exit code is then absent, never invented. */
   exitCode?: number;
+  signal?: string;
 };
 
 export type ProcessObservation = {
@@ -98,6 +100,8 @@ function validRecord(raw: unknown): ProcessActivity | null {
   if (value.taskId !== undefined && (typeof value.taskId !== 'string' || !/^rtsk_[0-9a-f]{11,13}_[0-9a-f]{16,32}$/.test(value.taskId))) return null;
   if (value.attempt !== undefined && (!Number.isInteger(value.attempt) || Number(value.attempt) < 1 || Number(value.attempt) > 100)) return null;
   if (value.phase !== undefined && (typeof value.phase !== 'string' || value.phase.length > 64)) return null;
+  if (value.exitCode !== undefined && (typeof value.exitCode !== 'number' || !Number.isInteger(value.exitCode))) return null;
+  if (value.signal !== undefined && (typeof value.signal !== 'string' || !/^SIG[A-Z0-9]{1,16}$/.test(value.signal))) return null;
   for (const [timestamp, label] of [[value.lastStdoutAt, 'lastStdoutAt'], [value.lastResourceAt, 'lastResourceAt']] as const) {
     if (timestamp !== undefined && (typeof timestamp !== 'string' || !Number.isFinite(Date.parse(timestamp)))) return null;
   }
@@ -167,7 +171,7 @@ export async function startProcessActivity(input: {
 
 export async function updateProcessActivity(
   id: string,
-  patch: Partial<Pick<ProcessActivity, 'state' | 'updatedAt' | 'finishedAt' | 'exitCode' | 'externalId' | 'lastStdoutAt' | 'lastResourceAt'>>
+  patch: Partial<Pick<ProcessActivity, 'state' | 'updatedAt' | 'finishedAt' | 'exitCode' | 'signal' | 'externalId' | 'lastStdoutAt' | 'lastResourceAt'>>
 ): Promise<boolean> {
   return mutateRecords(records => {
     const record = records.find(entry => entry.id === id);
@@ -192,10 +196,17 @@ export async function updateProcessActivityByPid(
 export async function finishProcessActivity(
   id: string,
   state: Exclude<ProcessActivityState, 'running'>,
-  exitCode?: number
+  exitCode?: number,
+  signal?: string
 ): Promise<boolean> {
   const now = new Date().toISOString();
-  return updateProcessActivity(id, { state, finishedAt: now, updatedAt: now, ...(exitCode !== undefined ? { exitCode } : {}) });
+  return updateProcessActivity(id, {
+    state,
+    finishedAt: now,
+    updatedAt: now,
+    ...(exitCode !== undefined ? { exitCode } : {}),
+    ...(signal !== undefined ? { signal } : {})
+  });
 }
 
 export async function finishProcessActivityByPid(
@@ -303,6 +314,7 @@ export function shareSafeActivity(records: readonly ProcessActivity[]): Array<Re
     ...(record.lastStdoutAt ? { lastStdoutAt: record.lastStdoutAt } : {}),
     ...(record.lastResourceAt ? { lastResourceAt: record.lastResourceAt } : {}),
     ...(record.finishedAt ? { finishedAt: record.finishedAt } : {}),
-    ...(record.exitCode !== undefined ? { exitCode: record.exitCode } : {})
+    ...(record.exitCode !== undefined ? { exitCode: record.exitCode } : {}),
+    ...(record.signal !== undefined ? { signal: record.signal } : {})
   }));
 }

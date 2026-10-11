@@ -45,6 +45,20 @@ export function deriveIdempotencyKey(input: {
   return { key, payloadHash };
 }
 
+/**
+ * A child process ended without an observable exit code: it was killed by a signal (including a
+ * SIGTERM sent during node shutdown) or it was stopped by the node's own time limit. Neither exit
+ * code nor effect is known, so the outcome is uncertain. This is never a success and never carries
+ * an invented exit code. `exitCode` is always null; `signal` is the signal the child reported.
+ */
+export class ProcessSignalTerminationError extends Error {
+  readonly exitCode = null;
+  constructor(readonly signal: NodeJS.Signals | null, readonly cause: 'signal' | 'time-limit', message: string) {
+    super(message);
+    this.name = 'ProcessSignalTerminationError';
+  }
+}
+
 export function classifyFailure(input: {
   error?: unknown;
   safety: SafetyClass;
@@ -57,6 +71,9 @@ export function classifyFailure(input: {
   if (input.corruptState) return 'CORRUPT_STATE';
   if (input.policyRefused) return 'AUTHORITY_REFUSAL';
   if (input.targetChanged) return 'TARGET_CHANGED';
+  // Checked before message matching: the message of a signal termination mentions SIGTERM, which the
+  // generic rule below would otherwise read as a deliberate cancellation and record as a FAILED task.
+  if (input.error instanceof ProcessSignalTerminationError) return 'AMBIGUOUS_EFFECT';
   if (input.transportTimedOut) return input.safety === 'PURE_READ_IDEMPOTENT' ? 'TRANSIENT_TRANSPORT' : 'AMBIGUOUS_EFFECT';
   if (input.executionTimedOut) return input.safety === 'PURE_READ_IDEMPOTENT' ? 'DEADLINE_EXCEEDED' : 'AMBIGUOUS_EFFECT';
   const message = input.error instanceof Error ? input.error.message.toLowerCase() : String(input.error ?? '').toLowerCase();
