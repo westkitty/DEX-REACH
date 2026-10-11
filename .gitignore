@@ -10,3 +10,18 @@ coverage/
 release/
 # Local browser evidence can include private task identifiers.
 output/playwright/
+
+# Local temporary files that are never source: bytecode, worktree scratch, test and browser captures.
+__pycache__/
+*.py[cod]
+.claude/worktrees/
+.playwright-mcp/
+playwright-report/
+test-results/
+
+# Credentials and key material stay out of Git whatever directory they appear in.
+secrets.env
+*.pem
+*.key
+*.p8
+*.p12

@@ -5,11 +5,14 @@ import type { ExecutionFingerprint } from './protocol.js';
 
 const execFileAsync = promisify(execFile);
 
+export const FINGERPRINT_CAPTURE_TIMEOUT_MS = 4_000;
+export const FINGERPRINT_MAX_CAPTURES = 4;
+
 async function capture(command: string, args: string[], cwd?: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(command, args, {
       cwd,
-      timeout: 4000,
+      timeout: FINGERPRINT_CAPTURE_TIMEOUT_MS,
       maxBuffer: 1024 * 1024
     });
     return stdout.trim() || null;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { nativeCall, safeChildEnvironment } from '../src/node/native.js';
+import { adbDevices, nativeCall, safeChildEnvironment } from '../src/node/native.js';
 
 test('DEX-native file and process paths enforce scope and guardrails', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-native-'));
@@ -26,6 +26,24 @@ test('DEX-native file and process paths enforce scope and guardrails', async () 
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test('ADB discovery retries a transient probe failure before reporting unavailable', async () => {
+  let deviceAttempts = 0;
+  const result = await adbDevices(async (command, args) => {
+    assert.equal(command, 'adb');
+    if (args[0] === 'devices') {
+      deviceAttempts += 1;
+      if (deviceAttempts === 1) throw new Error('transient adb startup failure');
+      return 'List of devices attached\nserial-1 device product:test\n';
+    }
+    if (args[0] === 'mdns') return 'List of discovered mdns services\n';
+    throw new Error(`unexpected adb args: ${args.join(' ')}`);
+  }) as { available: boolean; devices: string[] };
+
+  assert.equal(deviceAttempts, 2);
+  assert.equal(result.available, true);
+  assert.deepEqual(result.devices, ['serial-1 device product:test']);
 });
 
 test('node shell selection is platform-aware and overridable', async () => {

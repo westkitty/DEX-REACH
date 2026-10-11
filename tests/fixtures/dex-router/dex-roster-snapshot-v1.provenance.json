@@ -1,0 +1,9 @@
+{
+  "note": "Roster snapshot of the DEX command manifest: identity and classification only. aliases, effect and appCommand are blanked.",
+  "repository": "westkitty/DEX",
+  "file": "packages/router/src/manifest.ts",
+  "commit": "57693daafc038e1631bb387819234dd8f9b0647c",
+  "fileSha256": "a6b6151223429769bfd2b0eb73412fbc81d7972220e41929f4e11e1ff1219eb5",
+  "manifestVersion": "1.0.0",
+  "commandCount": 50
+}

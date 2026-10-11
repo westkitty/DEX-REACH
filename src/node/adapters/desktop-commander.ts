@@ -200,7 +200,7 @@ export class DesktopCommanderAdapter {
   }
 
   async close(): Promise<void> {
-    const client = this.client;
+    const client = this.client, pid = this.transport?.pid ?? null;
     this.client = null;
     this.transport = null;
     if (!client) return;
@@ -213,5 +213,19 @@ export class DesktopCommanderAdapter {
     } finally {
       if (timer) clearTimeout(timer);
     }
+    // The SDK escalates to SIGTERM only after its own 2 s stdin wait, later than this bound, so a node
+    // stopping right after close() orphaned the adapter. Terminate the child explicitly.
+    if (pid) await terminateAdapterChild(pid, 1000);
   }
+}
+
+const childAlive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; } };
+/** SIGTERM, then SIGKILL after `graceMs` if the adapter child is still running. Bounded; never waits forever. */
+export async function terminateAdapterChild(pid: number, graceMs: number): Promise<void> {
+  if (!Number.isInteger(pid) || pid < 2 || !childAlive(pid)) return;
+  try { process.kill(pid, 'SIGTERM'); } catch { return; }
+  const end = Date.now() + graceMs;
+  while (Date.now() < end) { if (!childAlive(pid)) return; await new Promise(r => setTimeout(r, 50)); }
+  try { process.kill(pid, 'SIGKILL'); } catch { return; }
+  for (let i = 0; i < 20 && childAlive(pid); i++) await new Promise(r => setTimeout(r, 25));
 }

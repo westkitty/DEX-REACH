@@ -37,7 +37,7 @@ test('boot recovery finishes only verified results and never replays uncertain e
     hasMatchingLiveActivity: true, hasMatchingLease: true, processAlive: true,
     hasMatchingQueueTicket: false,
     transportConnected: true, contradictoryEvidence: false
-  }).kind, 'REATTACH');
+  }).kind, 'MONITOR_ORPHAN');
   assert.equal(decideBootRecovery({
     state: 'RUNNING', safetyClass: 'PROCESS_UNKNOWN_EFFECT', hasDurableResult: false,
     hasMatchingLiveActivity: false, hasMatchingLease: false, processAlive: false,

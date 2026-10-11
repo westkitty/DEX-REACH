@@ -45,6 +45,20 @@ export function deriveIdempotencyKey(input: {
   return { key, payloadHash };
 }
 
+/**
+ * A child process ended without an observable exit code: it was killed by a signal (including a
+ * SIGTERM sent during node shutdown) or it was stopped by the node's own time limit. Neither exit
+ * code nor effect is known, so the outcome is uncertain. This is never a success and never carries
+ * an invented exit code. `exitCode` is always null; `signal` is the signal the child reported.
+ */
+export class ProcessSignalTerminationError extends Error {
+  readonly exitCode = null;
+  constructor(readonly signal: NodeJS.Signals | null, readonly cause: 'signal' | 'time-limit', message: string) {
+    super(message);
+    this.name = 'ProcessSignalTerminationError';
+  }
+}
+
 export function classifyFailure(input: {
   error?: unknown;
   safety: SafetyClass;
@@ -57,6 +71,9 @@ export function classifyFailure(input: {
   if (input.corruptState) return 'CORRUPT_STATE';
   if (input.policyRefused) return 'AUTHORITY_REFUSAL';
   if (input.targetChanged) return 'TARGET_CHANGED';
+  // Checked before message matching: the message of a signal termination mentions SIGTERM, which the
+  // generic rule below would otherwise read as a deliberate cancellation and record as a FAILED task.
+  if (input.error instanceof ProcessSignalTerminationError) return 'AMBIGUOUS_EFFECT';
   if (input.transportTimedOut) return input.safety === 'PURE_READ_IDEMPOTENT' ? 'TRANSIENT_TRANSPORT' : 'AMBIGUOUS_EFFECT';
   if (input.executionTimedOut) return input.safety === 'PURE_READ_IDEMPOTENT' ? 'DEADLINE_EXCEEDED' : 'AMBIGUOUS_EFFECT';
   const message = input.error instanceof Error ? input.error.message.toLowerCase() : String(input.error ?? '').toLowerCase();
@@ -67,10 +84,72 @@ export function classifyFailure(input: {
   return 'EXECUTION_FAILED';
 }
 
+/**
+ * Failure before execution began. The node only executes after the RUNNING transition is durably
+ * committed, so a task whose persisted state is still ACCEPTED or PREPARING (and whose execution was
+ * never started) cannot have produced an external effect: it is a definite non-execution, never
+ * AMBIGUOUS_EFFECT. Returns null whenever execution may have started; that path keeps its uncertainty.
+ * PREPARING ends FAILED (a legal terminal transition). ACCEPTED cannot become FAILED; it legally ends CANCELLED with definite pre-execution evidence.
+ */
+export function unstartedFailureOutcome(input: { error: unknown; safety: SafetyClass; persistedState: string | undefined; executionStarted: boolean }): { failureClass: FailureClass; next: 'FAILED' | 'CANCELLED' } | null {
+  if (input.executionStarted || (input.persistedState !== 'ACCEPTED' && input.persistedState !== 'PREPARING')) return null;
+  const message = input.error instanceof Error ? input.error.message : String(input.error ?? '');
+  let failureClass = classifyFailure({ error: input.error, safety: 'PURE_READ_IDEMPOTENT' });
+  if (/^COORDINATOR_WAIT_TIMEOUT\b/.test(message)) failureClass = 'TRANSIENT_RESOURCE';
+  if (failureClass === 'AMBIGUOUS_EFFECT') failureClass = 'EXECUTION_FAILED';
+  return { failureClass, next: input.persistedState === 'PREPARING' ? 'FAILED' : 'CANCELLED' };
+}
+
 export function retryAllowed(safety: SafetyClass, failure: FailureClass): boolean {
   if (['AUTHORITY_REFUSAL', 'POLICY_CHANGED', 'TARGET_CHANGED', 'INVALID_INPUT', 'INPUT_REQUIRED', 'AMBIGUOUS_EFFECT', 'CORRUPT_STATE', 'USER_CANCELLED', 'SYSTEM_CANCELLED'].includes(failure)) return false;
   if (safety === 'PLAN_COMMIT' || safety === 'PROCESS_UNKNOWN_EFFECT' || safety === 'DESTRUCTIVE') return false;
   return safety === 'PURE_READ_IDEMPOTENT' || safety === 'SIDE_EFFECTING_IDEMPOTENT';
+}
+
+export type ExistingTaskBinding = {
+  taskId: string;
+  actorId: string;
+  nodeId: string;
+  operation: string;
+  state: string;
+  summaryStatus?: string;
+  payloadSha256: string;
+  policyHash?: string;
+  resultRef?: string;
+  resultHash?: string;
+};
+
+export type ExistingTaskDecision =
+  | { kind: 'NEW' }
+  | { kind: 'RETURN_RESULT'; task: ExistingTaskBinding }
+  | { kind: 'REFUSE_CORRUPT'; task: ExistingTaskBinding }
+  | { kind: 'REFUSE_AMBIGUOUS'; task: ExistingTaskBinding }
+  | { kind: 'REFUSE_TERMINAL'; task: ExistingTaskBinding }
+  | { kind: 'REFUSE_IN_FLIGHT'; task: ExistingTaskBinding }
+  | { kind: 'COLLISION'; task: ExistingTaskBinding };
+
+/** Decide whether a duplicate request may attach without widening identity or replaying work. */
+export function decideExistingTask(input: {
+  existing?: ExistingTaskBinding;
+  actorId: string;
+  nodeId: string;
+  operation: string;
+  payloadSha256: string;
+  policyHash: string;
+}): ExistingTaskDecision {
+  const task = input.existing;
+  if (!task) return { kind: 'NEW' };
+  if (task.actorId !== input.actorId || task.nodeId !== input.nodeId || task.operation !== input.operation
+      || task.payloadSha256 !== input.payloadSha256 || (task.policyHash && task.policyHash !== input.policyHash)) {
+    return { kind: 'COLLISION', task };
+  }
+  if (task.state === 'COMPLETED') {
+    if (!task.resultRef || !task.resultHash) return { kind: 'REFUSE_CORRUPT', task };
+    return { kind: 'RETURN_RESULT', task };
+  }
+  if (task.state === 'AMBIGUOUS') return { kind: 'REFUSE_AMBIGUOUS', task };
+  if (task.state === 'FAILED' || task.state === 'CANCELLED') return { kind: 'REFUSE_TERMINAL', task };
+  return { kind: 'REFUSE_IN_FLIGHT', task };
 }
 
 export function retryDelayMs(attemptNumber: number, failure: FailureClass, random = 0): number | null {
@@ -88,11 +167,14 @@ export type ReconciliationEvidence = {
   policyStillAllows?: boolean;
 };
 
-export type ReconciliationDecision = 'REATTACH' | 'FINISH_FROM_DURABLE_EVIDENCE' | 'RETRY_SAFE' | 'INPUT_REQUIRED' | 'AMBIGUOUS';
+export type ReconciliationDecision = 'REATTACH' | 'MONITOR_ORPHAN' | 'FINISH_FROM_DURABLE_EVIDENCE' | 'RETRY_SAFE' | 'INPUT_REQUIRED' | 'AMBIGUOUS';
 
 export function reconcile(evidence: ReconciliationEvidence, safety: SafetyClass): ReconciliationDecision {
   if (evidence.receiptVerified || evidence.resultAvailable) return 'FINISH_FROM_DURABLE_EVIDENCE';
-  if (evidence.processAlive || evidence.activitySeen || evidence.externalJobId) return 'REATTACH';
+  // A local process is never reattached: after a node restart nothing holds its pipes or exit status, so the task is
+  // monitored by identity and stays AMBIGUOUS (repair C). Only a remote job with its own supervisor may be reattached.
+  if (evidence.processAlive || evidence.activitySeen) return 'MONITOR_ORPHAN';
+  if (evidence.externalJobId) return 'REATTACH';
   if (evidence.policyStillAllows === false) return 'INPUT_REQUIRED';
   return safety === 'PURE_READ_IDEMPOTENT' && !evidence.externalJobId ? 'RETRY_SAFE' : 'AMBIGUOUS';
 }

@@ -113,16 +113,22 @@ test('nativeProcess exposes the real child pid while work is running and records
   await withStateDir(async dir => {
     const cwd = path.join(dir, 'work');
     await fs.mkdir(cwd);
-    const pending = nativeProcess('sleep 0.35', cwd, 'development', 2000, [cwd]);
-
-    await waitFor(async () => (await listProcessActivities()).some(item => item.kind === 'native-process'));
-    const active = (await listProcessActivities()).find(item => item.kind === 'native-process');
-    assert.ok(active);
-    assert.notEqual(active.pid, process.pid);
-    assert.equal(active.state, 'running');
-    assert.equal(active.processLabel, 'sleep');
-
-    const result = await pending;
+    // Hold the child until its live activity has actually been observed. A fixed short
+    // sleep can finish between polling and reading under full-suite contention.
+    const pending = nativeProcess('sleep 0.1; while test ! -f release.txt; do sleep 0.05; done', cwd, 'development', 10000, [cwd]);
+    let active: Awaited<ReturnType<typeof listProcessActivities>>[number] | undefined;
+    let result: Awaited<typeof pending>;
+    try {
+      await waitFor(async () => (await listProcessActivities()).some(item => item.kind === 'native-process'));
+      active = (await listProcessActivities()).find(item => item.kind === 'native-process');
+      assert.ok(active);
+      assert.notEqual(active.pid, process.pid);
+      assert.equal(active.state, 'running');
+      assert.equal(active.processLabel, 'sleep');
+    } finally {
+      await fs.writeFile(path.join(cwd, 'release.txt'), 'release');
+      result = await pending;
+    }
     assert.equal(result.exitCode, 0);
 
     const history = await listProcessActivities({ includeFinished: true });

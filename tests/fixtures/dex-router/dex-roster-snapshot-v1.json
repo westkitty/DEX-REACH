@@ -1,0 +1,1607 @@
+{
+  "manifestVersion": "1.0.0",
+  "commands": [
+    {
+      "name": "REACH",
+      "canonical": "DEX//REACH",
+      "slash": "/reach",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "REACH",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_reach_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "remote-control"
+    },
+    {
+      "name": "MAINT",
+      "canonical": "DEX//MAINT",
+      "slash": "/maint",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "MAINT",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_maint_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "SWEEP",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "maintenance"
+    },
+    {
+      "name": "SESSION",
+      "canonical": "DEX//SESSION",
+      "slash": "/session",
+      "aliases": [],
+      "commandClass": "MUTATE",
+      "scope": "SESSION",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "room"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_session_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "DROPZONE",
+      "canonical": "DEX//DROPZONE",
+      "slash": "/dropzone",
+      "aliases": [],
+      "commandClass": "MUTATE",
+      "scope": "DROPZONE",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "artifact"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_dropzone_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "PAIR",
+      "canonical": "DEX//PAIR",
+      "slash": "/pair",
+      "aliases": [],
+      "commandClass": "MUTATE",
+      "scope": "PAIR",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "room"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_pair_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "CAPSULE",
+      "canonical": "DEX//CAPSULE",
+      "slash": "/capsule",
+      "aliases": [],
+      "commandClass": "MUTATE",
+      "scope": "CAPSULE",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "artifact"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_capsule_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "MUSEUM",
+      "canonical": "DEX//MUSEUM",
+      "slash": "/museum",
+      "aliases": [],
+      "commandClass": "MUTATE",
+      "scope": "MUSEUM",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "artifact"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_museum_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "REMIX",
+      "canonical": "DEX//REMIX",
+      "slash": "/remix",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "REMIX",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "artifact"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_remix_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "SIDEQUEST",
+      "canonical": "DEX//SIDEQUEST",
+      "slash": "/sidequest",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "SIDEQUEST",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "quest",
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_sidequest_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "product"
+    },
+    {
+      "name": "WITNESS",
+      "canonical": "DEX//WITNESS",
+      "slash": "/witness",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "WITNESS",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "case",
+        "artifact"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_witness_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "evidence"
+    },
+    {
+      "name": "UPLIFT",
+      "canonical": "DEX//UPLIFT",
+      "slash": "/uplift",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_uplift_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "UPLIFT",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "AWE",
+      "canonical": "DEX//AWE",
+      "slash": "/awe",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_awe_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "AWE",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "PERFORMANCE",
+      "canonical": "DEX//PERFORMANCE",
+      "slash": "/performance",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_performance_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "PERFORMANCE",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "LOG",
+      "canonical": "DEX//LOG",
+      "slash": "/log",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "CONTROL_ROOM",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_log_v1",
+      "outputs": [
+        "event-ledger"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "QQQ",
+      "canonical": "DEX//QQQ",
+      "slash": "/qqq",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_qqq_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "QQQ",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "BUILD",
+      "canonical": "DEX//BUILD",
+      "slash": "/build",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_build_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "VERIFY",
+      "canonical": "DEX//VERIFY",
+      "slash": "/verify",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_verify_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "PROVE",
+      "canonical": "DEX//PROVE",
+      "slash": "/prove",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_prove_v1",
+      "outputs": [
+        "verification-report"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "SHIP",
+      "canonical": "DEX//SHIP",
+      "slash": "/ship",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "COMMIT",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_ship_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "SYNC",
+      "canonical": "DEX//SYNC",
+      "slash": "/sync",
+      "aliases": [],
+      "commandClass": "CONTROL",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_sync_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "RESUME",
+      "canonical": "DEX//RESUME",
+      "slash": "/resume",
+      "aliases": [],
+      "commandClass": "CONTROL",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_resume_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "RECOVER",
+      "canonical": "DEX//RECOVER",
+      "slash": "/recover",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_recover_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "REPAIR",
+      "canonical": "DEX//REPAIR",
+      "slash": "/repair",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_repair_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "SWEEP",
+      "canonical": "DEX//SWEEP",
+      "slash": "/sweep",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_sweep_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "SWEEP",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "RECON",
+      "canonical": "DEX//RECON",
+      "slash": "/recon",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_recon_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "RECON",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "LOOP",
+      "canonical": "DEX//LOOP",
+      "slash": "/loop",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_loop_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "PROMPT",
+      "canonical": "DEX//PROMPT",
+      "slash": "/prompt",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_prompt_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "PROMPT",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "BRIEF",
+      "canonical": "DEX//BRIEF",
+      "slash": "/brief",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_brief_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "BRIEF",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "DIFF",
+      "canonical": "DEX//DIFF",
+      "slash": "/diff",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_diff_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "CHECKPOINT",
+      "canonical": "DEX//CHECKPOINT",
+      "slash": "/checkpoint",
+      "aliases": [],
+      "commandClass": "CONTROL",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_checkpoint_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "ROLLBACK",
+      "canonical": "DEX//ROLLBACK",
+      "slash": "/rollback",
+      "aliases": [],
+      "commandClass": "CONTROL",
+      "scope": "GLOBAL",
+      "mutationLevel": "DESTRUCTIVE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_rollback_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "PUBLISH",
+      "canonical": "DEX//PUBLISH",
+      "slash": "/publish",
+      "aliases": [],
+      "commandClass": "CONTROL",
+      "scope": "GLOBAL",
+      "mutationLevel": "COMMIT",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_publish_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "INSTALL",
+      "canonical": "DEX//INSTALL",
+      "slash": "/install",
+      "aliases": [],
+      "commandClass": "ADMIN",
+      "scope": "GLOBAL",
+      "mutationLevel": "COMMIT",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_install_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "MIGRATE",
+      "canonical": "DEX//MIGRATE",
+      "slash": "/migrate",
+      "aliases": [],
+      "commandClass": "ADMIN",
+      "scope": "GLOBAL",
+      "mutationLevel": "COMMIT",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_migrate_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "PACKAGE",
+      "canonical": "DEX//PACKAGE",
+      "slash": "/package",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_package_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "DEVICE",
+      "canonical": "DEX//DEVICE",
+      "slash": "/device",
+      "aliases": [],
+      "commandClass": "CONTROL",
+      "scope": "REACH",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_device_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "REACH",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "DECIDE",
+      "canonical": "DEX//DECIDE",
+      "slash": "/decide",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_decide_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "DOCTOR",
+      "canonical": "DEX//DOCTOR",
+      "slash": "/doctor",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_doctor_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "PLAN",
+      "canonical": "DEX//PLAN",
+      "slash": "/plan",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_plan_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "PLAN",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "ROUTE",
+      "canonical": "DEX//ROUTE",
+      "slash": "/route",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_route_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "HANDOFF",
+      "canonical": "DEX//HANDOFF",
+      "slash": "/handoff",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "STAGED",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_handoff_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "TRACE",
+      "canonical": "DEX//TRACE",
+      "slash": "/trace",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "CONTROL_ROOM",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_trace_v1",
+      "outputs": [
+        "trace-graph"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "AUDIT",
+      "canonical": "DEX//AUDIT",
+      "slash": "/audit",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_audit_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "PRUNE",
+      "canonical": "DEX//PRUNE",
+      "slash": "/prune",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "DESTRUCTIVE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_prune_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": "SWEEP",
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "FIND",
+      "canonical": "DEX//FIND",
+      "slash": "/find",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_find_v1",
+      "outputs": [
+        "search-results"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "WATCH",
+      "canonical": "DEX//WATCH",
+      "slash": "/watch",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_watch_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "MAP",
+      "canonical": "DEX//MAP",
+      "slash": "/map",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_map_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "FREEZE",
+      "canonical": "DEX//FREEZE",
+      "slash": "/freeze",
+      "aliases": [],
+      "commandClass": "CONTROL",
+      "scope": "GLOBAL",
+      "mutationLevel": "COMMIT",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_freeze_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "COMPARE",
+      "canonical": "DEX//COMPARE",
+      "slash": "/compare",
+      "aliases": [],
+      "commandClass": "READ",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_compare_v1",
+      "outputs": [
+        "structured-result"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    },
+    {
+      "name": "NEXT",
+      "canonical": "DEX//NEXT",
+      "slash": "/next",
+      "aliases": [],
+      "commandClass": "WORKFLOW",
+      "scope": "GLOBAL",
+      "mutationLevel": "NONE",
+      "objectKinds": [
+        "task"
+      ],
+      "supportedModifiers": [
+        "+LOG",
+        "+PROVE",
+        "+AWE",
+        "+PERF",
+        "+DEEP",
+        "+FAST",
+        "+DRY",
+        "+NO-REGRESS",
+        "+MOBILE",
+        "+SHIP"
+      ],
+      "workflowId": "workflow_next_v1",
+      "outputs": [
+        "next-action"
+      ],
+      "skillBinding": null,
+      "effect": "",
+      "appCommand": null,
+      "trustDomain": "control"
+    }
+  ]
+}

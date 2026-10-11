@@ -9,6 +9,7 @@ This directory contains the authoritative Architecture Decision Records (ADRs) o
 | [ADR-0001](./0001-durable-task-execution-and-identity.md) | Durable Task Execution and Identity | Accepted | Task authority on node, globally safe ID format, parent/child lineage, actor/node binding, lifecycle state machine, persistence ordering, INPUT_REQUIRED, AMBIGUOUS, and cancellation. |
 | [ADR-0002](./0002-operation-safety-retry-and-reconciliation.md) | Operation Safety Classes, Retry Policies, and Reconciliation Semantics | Accepted | Five operation safety classes, idempotency keys, duplicate submissions, retry budgets, uncertainty rules, and mandatory reconciliation protocols. |
 | [ADR-0003](./0003-reach-protocol-capability-negotiation.md) | REACH Protocol Capability Negotiation and Legacy Compatibility | Accepted | Protocol v1 vs v2 negotiation, capability headers, no silent downgrade, mixed-version rules, and backward compatibility. |
+| [ADR-0004](./0004-dex-command-router.md) | DEX 1.0 Command Router on the REACH Boundary | Proposed | Canonical DEX manifest consumed as data, explicit REACH-owned command mappings (none exist yet, so every command is unroutable), `+DRY` preview semantics, major-version pinning and structured refusals, exact node selection with no fallback, PAIR/DROPZONE/WITNESS trust boundaries, rebuildable search projections, and receiver-validated handoffs. Fixture-tested; checked against the real DEX manifest by `conformance:dex`. |
 
 ---
 

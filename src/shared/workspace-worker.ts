@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { ProcessExecutionContext } from './activity.js';
+import { FINGERPRINT_CAPTURE_TIMEOUT_MS, FINGERPRINT_MAX_CAPTURES } from './fingerprint.js';
 
 export const WORKSPACE_WORKER_PROTOCOL_VERSION = 1;
 export const WORKSPACE_WORKER_MAX_FRAME_BYTES = 32 * 1024;
@@ -72,7 +73,12 @@ async function callWorker(payload: Record<string, unknown>): Promise<WorkerRespo
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ path: workspaceWorkerSocketPath() });
     let received = '';
-    const timer = setTimeout(() => socket.destroy(new WorkspaceWorkerUnavailableError('workspace worker did not respond in time')), 5_000);
+    // Fingerprinting performs up to four sequential bounded subprocess captures.
+    // Keep the transport alive through that execution budget plus the usual IPC allowance.
+    const timeoutMs = payload.operation === 'dex.fingerprint'
+      ? FINGERPRINT_CAPTURE_TIMEOUT_MS * FINGERPRINT_MAX_CAPTURES + 5_000
+      : 5_000;
+    const timer = setTimeout(() => socket.destroy(new WorkspaceWorkerUnavailableError('workspace worker did not respond in time')), timeoutMs);
     socket.setEncoding('utf8');
     socket.once('error', error => reject(new WorkspaceWorkerUnavailableError(`workspace worker unavailable: ${error.message}`)));
     socket.on('data', chunk => {

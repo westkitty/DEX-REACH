@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import net from 'node:net';
 import {
   acquireWork,
@@ -14,6 +15,9 @@ import {
   type WorkEventWindow
 } from '../shared/work-coordinator.js';
 
+// Kept only in this caller process; persisted coordination state contains its digest.
+const callerProof = crypto.randomBytes(32).toString('hex');
+const callerProofHash = crypto.createHash('sha256').update(callerProof).digest('hex');
 const PROTOCOL_VERSION = 1;
 const MAX_FRAME_BYTES = 16 * 1024;
 
@@ -45,8 +49,11 @@ async function socketPresent(): Promise<boolean> {
   }
 }
 
-async function callDaemon(command: Command, payload?: Record<string, unknown>): Promise<unknown | null> {
-  if (!(await socketPresent())) return null;
+async function callDaemon(command: Command, payload?: Record<string, unknown>, requireDaemon = false): Promise<unknown | null> {
+  if (!(await socketPresent())) {
+    if (requireDaemon) throw new CoordinatorUnavailableError('coordinator daemon required; refusing direct fallback');
+    return null;
+  }
   const request = JSON.stringify({ version: PROTOCOL_VERSION, command, ...(payload ? { payload } : {}) } satisfies WireRequest) + '\n';
   if (Buffer.byteLength(request) > MAX_FRAME_BYTES) throw new CoordinatorUnavailableError('coordinator request exceeds the local protocol limit');
   return new Promise<unknown>((resolve, reject) => {
@@ -75,15 +82,28 @@ async function callDaemon(command: Command, payload?: Record<string, unknown>): 
 
 function object<T>(value: unknown): T { return value as T; }
 
-/** Production callers prefer the single-writer daemon. Direct mode is bootstrap/test-only. */
-export async function coordinatedAcquire(request: WorkRequest): Promise<AdmissionResult> {
-  const value = await callDaemon('acquire', { request: request as unknown as Record<string, unknown> });
-  return value === null ? acquireWork(request) : object<AdmissionResult>(value);
+/** Give the coordinator the requester's liveness identity, not the daemon's own PID. */
+export function bindCoordinatorCaller(request: WorkRequest, callerPid = process.pid): WorkRequest {
+  return {
+    ...request,
+    pid: request.pid ?? callerPid,
+    pidIsWorkload: request.pidIsWorkload ?? request.pid !== undefined
+  };
 }
 
-export async function coordinatedRelease(id: string, options: { pid?: number; force?: boolean } = {}): Promise<ReleaseResult> {
-  const value = await callDaemon('release', { id, options });
-  return value === null ? releaseWork(id, options) : object<ReleaseResult>(value);
+/** Production callers prefer the single-writer daemon. Direct mode is bootstrap/test-only. */
+export async function coordinatedAcquire(request: WorkRequest, options: { requireDaemon?: boolean } = {}): Promise<AdmissionResult> {
+  const bound = { ...bindCoordinatorCaller(request), callerProofHash };
+  const value = await callDaemon('acquire', { request: bound as unknown as Record<string, unknown> }, options.requireDaemon);
+  return value === null ? acquireWork(bound) : object<AdmissionResult>(value);
+}
+
+export async function coordinatedRelease(id: string, options: { pid?: number; force?: boolean; requireDaemon?: boolean } = {}): Promise<ReleaseResult> {
+  // The daemon must validate the node caller PID, not its own daemon PID.
+  // Without this, a completed task can strand a live-node lease indefinitely.
+  const callerPid = options.pid ?? process.pid;
+  const value = await callDaemon('release', { id, options: { pid: callerPid, force: options.force, callerProof } }, options.requireDaemon);
+  return value === null ? releaseWork(id, { ...options, pid: callerPid, callerProof }) : object<ReleaseResult>(value);
 }
 
 export async function coordinatedHeartbeat(id: string): Promise<boolean> {
@@ -91,13 +111,13 @@ export async function coordinatedHeartbeat(id: string): Promise<boolean> {
   return value === null ? heartbeat(id) : Boolean(value);
 }
 
-export async function coordinatedCancel(id: string): Promise<boolean> {
-  const value = await callDaemon('cancel', { id });
+export async function coordinatedCancel(id: string, options: { requireDaemon?: boolean } = {}): Promise<boolean> {
+  const value = await callDaemon('cancel', { id }, options.requireDaemon);
   return value === null ? cancelTicket(id) : Boolean(value);
 }
 
-export async function coordinatedStatus(): Promise<WorkStatus> {
-  const value = await callDaemon('status');
+export async function coordinatedStatus(options: { requireDaemon?: boolean } = {}): Promise<WorkStatus> {
+  const value = await callDaemon('status', undefined, options.requireDaemon);
   return value === null ? workStatus() : object<WorkStatus>(value);
 }
 

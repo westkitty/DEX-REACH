@@ -1,7 +1,7 @@
 import { readOAuthRuntimeHealth } from '../src/shared/oauth-diagnostics.js';
-import { stateDir } from '../src/shared/local-env.js';
+import { machineStateDir } from '../src/shared/local-env.js';
 
-const health = await readOAuthRuntimeHealth(stateDir());
+const health = await readOAuthRuntimeHealth(machineStateDir());
 if (!health) {
   console.error('OAuth health is unavailable; the gateway has not written runtime token evidence.');
   process.exitCode = 2;

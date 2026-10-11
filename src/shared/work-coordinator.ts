@@ -82,7 +82,7 @@ function validateTaskBinding(taskId: unknown, attempt: unknown): void {
 }
 
 /**
- * Coordination metadata only. There is deliberately no capability, grant, root, token, mode or
+ * Coordination metadata only. There is deliberately no execution capability, grant, root, token, mode or
  * profile field here: holding a lease answers "can this run now?" and never "is this allowed?"
  * (DEX-INV-022).
  */
@@ -92,6 +92,8 @@ export type WorkLease = {
   attempt?: number;
   pid: number;
   parentPid?: number;
+  /** Digest of the process-held release proof; grants no execution authority. */
+  callerProofHash?: string;
   pidIsWorkload?: boolean;
   executor: WorkExecutor;
   repositoryRoot?: string;
@@ -122,7 +124,7 @@ export type WorkQueueTicket = {
 
 /** Exact persisted key sets. Anything else is dropped on write and ignored on read. */
 export const LEASE_FIELDS: readonly (keyof WorkLease)[] = [
-  'id', 'taskId', 'attempt', 'pid', 'parentPid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'branch', 'access', 'workload', 'bundle', 'phase', 'createdAt', 'heartbeatAt'
+  'id', 'taskId', 'attempt', 'pid', 'parentPid', 'callerProofHash', 'pidIsWorkload', 'executor', 'repositoryRoot', 'branch', 'access', 'workload', 'bundle', 'phase', 'createdAt', 'heartbeatAt'
 ];
 export const TICKET_FIELDS: readonly (keyof WorkQueueTicket)[] = [
   'id', 'taskId', 'attempt', 'pid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'access', 'workload', 'bundle', 'phase', 'enqueuedAt', 'heartbeatAt'
@@ -142,12 +144,16 @@ export type WorkRequest = {
   ticketId?: string;
   pid?: number;
   parentPid?: number;
+  /** Whether pid identifies the executing workload rather than its coordinator caller. */
+  pidIsWorkload?: boolean;
   /**
    * Host measurement to decide against. Callers normally omit this and the host is measured here;
    * supplying it lets a caller reuse one measurement across a poll loop, and lets tests exercise
    * admission policy against a fixed host rather than whatever the runner happens to be doing.
    */
   snapshot?: CapacitySnapshot;
+  /** Coordination-only release proof digest supplied by the local client. */
+  callerProofHash?: string;
 };
 
 export type CoordinatorState = {
@@ -183,8 +189,8 @@ export function coordinatorDir(): string { return path.join(machineStateDir(), '
  * state path is represented by a stable non-secret digest beneath the system temporary directory.
  * The daemon still verifies account ownership and applies 0600 permissions before serving it.
  */
-export function coordinatorSocketPath(): string {
-  const identity = crypto.createHash('sha256').update(machineStateDir()).digest('hex').slice(0, 20);
+export function coordinatorSocketPath(root = machineStateDir()): string {
+  const identity = crypto.createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 20);
   return path.join(os.tmpdir(), `dex-reach-coord-${identity}.sock`);
 }
 export function leasesDir(): string { return path.join(coordinatorDir(), 'leases'); }
@@ -268,6 +274,7 @@ function validLease(raw: unknown): WorkLease | null {
   if (!WORK_EXECUTORS.includes(record.executor as WorkExecutor)) return null;
   if (!WORK_ACCESS_CLASSES.includes(record.access as AccessClass)) return null;
   if (!WORK_WORKLOAD_CLASSES.includes(record.workload as WorkloadClass)) return null;
+  if (record.callerProofHash !== undefined && (typeof record.callerProofHash !== 'string' || !/^[0-9a-f]{64}$/.test(record.callerProofHash))) return null;
   if (record.bundle !== undefined && !isWorkBundle(record.bundle)) return null;
   try { validateTaskBinding(record.taskId, record.attempt); } catch { return null; }
   return pick<WorkLease>(record, LEASE_FIELDS);
@@ -493,6 +500,9 @@ async function pruneExpired(state: CoordinatorState, now = Date.now()): Promise<
 // ---------------------------------------------------------------------------
 
 export type CapacitySnapshot = {
+  /** Internal freshness and lease-accounting binding; omitted only by deterministic trusted fixtures. */
+  sampledAtMs?: number;
+  excludedLeaseIds?: string[];
   physicalMemoryBytes: number;
   logicalCpuCount: number;
   loadAverage1m: number | null;
@@ -509,16 +519,21 @@ export type CapacitySnapshot = {
  * same thing: the lock is held only long enough to reserve capacity.
  */
 export async function snapshotCapacity(): Promise<CapacitySnapshot> {
+  const sampledAtMs = Date.now();
   const state = await readCoordinatorState().catch(() => ({ leases: [] as WorkLease[] }));
   const [probe, rows] = await Promise.all([probeHost(), observeProcessRows()]);
-  const observed = classifyObservedWorkloads(rows, { leasedPids: state.leases.map(lease => lease.pid) });
+  // Lease exclusion is identity-checked against process start time; an unreadable table is 'unknown'.
+  const leases = state.leases.flatMap(lease => typeof lease.pid === 'number' && typeof lease.createdAt === 'string' ? [{ pid: lease.pid, createdAt: lease.createdAt }] : []);
+  const observed = rows ? classifyObservedWorkloads(rows, { leases, observedAt: Date.now() }) : { uncoordinatedHeavy: 0, dexServices: 0, uncoordinatedDetails: [], dexServiceDetails: [], processObservation: 'unknown' as const };
   const health = await recordCapacityHealth({
-    memory: probe.memory,
+    memory: observed.processObservation === 'unknown' ? 'unknown' : probe.memory,
     cpu: classifyCpuPressure(probe.loadAverage1m, probe.logicalCpuCount),
     thermal: probe.thermal,
     observedUncoordinatedHeavy: observed.uncoordinatedHeavy
   });
   return {
+    sampledAtMs,
+    excludedLeaseIds: state.leases.map(lease => lease.id).sort(),
     physicalMemoryBytes: probe.physicalMemoryBytes,
     logicalCpuCount: probe.logicalCpuCount,
     loadAverage1m: probe.loadAverage1m,
@@ -540,6 +555,9 @@ export function decideAdmission(
 ): { admit: boolean; capacity: MachineCapacity; reasons: string[] } {
   const blocking: string[] = [];
   const substantive = isSubstantive(request.workload, request.access);
+
+  if (substantive && snapshot.sampledAtMs !== undefined && (Date.now() - snapshot.sampledAtMs > 2000 || Date.now() < snapshot.sampledAtMs)) blocking.push('capacity observation stale; fresh sampling required');
+  if (substantive && snapshot.excludedLeaseIds && JSON.stringify(snapshot.excludedLeaseIds) !== JSON.stringify(state.leases.map(lease => lease.id).sort())) blocking.push('lease accounting changed during observation; fresh sampling required');
 
   // Corrupt or unreadable coordination state collapses to one substantive job (DEX-INV-024).
   const degradedPenalty = state.degraded && substantive ? 1 : 0;
@@ -589,7 +607,7 @@ export function decideAdmission(
       memory: snapshot.memory,
       thermal: snapshot.thermal
     },
-    { activeSubstantive, activeHeavy, observedUncoordinatedHeavy: snapshot.observed.uncoordinatedHeavy },
+    { activeSubstantive, activeHeavy, observedUncoordinatedHeavy: snapshot.observed.uncoordinatedHeavy, processObservation: snapshot.observed.processObservation ?? 'observed' },
     { workload: request.workload, access: request.access, profile: snapshot.profile, interactiveReady: snapshot.interactiveReady }
   );
 
@@ -611,6 +629,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
   validateTaskBinding(request.taskId, request.attempt);
   const branch = sanitizeLabel(request.branch, 'branch');
   const repositoryRoot = await canonicalRepositoryRoot(request.repositoryRoot);
+  if (request.callerProofHash !== undefined && (typeof request.callerProofHash !== 'string' || !/^[0-9a-f]{64}$/.test(request.callerProofHash))) throw new Error('invalid caller release proof digest');
   const pid = request.pid ?? process.pid;
   const parentPid = request.parentPid ?? process.ppid;
 
@@ -632,8 +651,9 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
         ...(request.taskId ? { taskId: request.taskId } : {}),
         ...(request.attempt !== undefined ? { attempt: request.attempt } : {}),
         pid,
+        ...(request.callerProofHash ? { callerProofHash: request.callerProofHash } : {}),
         ...(Number.isInteger(parentPid) && parentPid > 0 ? { parentPid } : {}),
-        pidIsWorkload: request.pid !== undefined,
+        pidIsWorkload: request.pidIsWorkload ?? request.pid !== undefined,
         executor,
         ...(repositoryRoot ? { repositoryRoot } : {}),
         ...(branch ? { branch } : {}),
@@ -658,7 +678,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
           ...(request.taskId ? { taskId: request.taskId } : {}),
           ...(request.attempt !== undefined ? { attempt: request.attempt } : {}),
           pid,
-          pidIsWorkload: request.pid !== undefined,
+          pidIsWorkload: request.pidIsWorkload ?? request.pid !== undefined,
           executor,
           ...(repositoryRoot ? { repositoryRoot } : {}),
           access,
@@ -683,13 +703,18 @@ export type ReleaseResult = { released: boolean; reason?: string };
  * Release a lease. By default only the holding process may release its own lease; `force` is a
  * local owner override and is never available to a remote caller.
  */
-export async function releaseWork(leaseId: string, options: { pid?: number; force?: boolean } = {}): Promise<ReleaseResult> {
+export async function releaseWork(leaseId: string, options: { pid?: number; force?: boolean; callerProof?: string; requireCallerProof?: boolean } = {}): Promise<ReleaseResult> {
   await ensureLayout();
   return withFileLock(coordinatorLockFile(), async () => {
     const state = await readCoordinatorState();
     const lease = state.leases.find(entry => entry.id === leaseId);
     if (!lease) return { released: false, reason: `no active lease ${leaseId}` };
     const pid = options.pid ?? process.pid;
+    if (!options.force && processAlive(lease.pid) && (lease.callerProofHash || options.requireCallerProof)) {
+      const proof = options.callerProof;
+      const digest = typeof proof === 'string' && /^[0-9a-f]{64}$/.test(proof) ? crypto.createHash('sha256').update(proof).digest('hex') : '';
+      if (!lease.callerProofHash || !digest || !crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(lease.callerProofHash))) return { released: false, reason: 'live lease release requires the acquiring caller proof; local owner override remains explicit' };
+    }
     if (!options.force && lease.pid !== pid && processAlive(lease.pid)) {
       return { released: false, reason: `lease ${leaseId} belongs to live pid ${lease.pid}; use --force as the local owner to override` };
     }
@@ -754,7 +779,9 @@ export async function cancelTicket(ticketId: string): Promise<boolean> {
 export async function workStatus(options: { snapshot?: CapacitySnapshot } = {}): Promise<WorkStatus> {
   await ensureLayout();
   const snapshot = options.snapshot ?? (await snapshotCapacity());
-  const state = await pruneExpired(await readCoordinatorState());
+  // Reclaiming removes lease/ticket files and records events: the same mutation acquire performs, so it
+  // takes the same lock. Otherwise a status read races admission and escapes a checkpoint fence.
+  const state = await withFileLock(coordinatorLockFile(), async () => pruneExpired(await readCoordinatorState()), { timeoutMs: 15_000 });
   const decision = decideAdmission(state, snapshot, { access: 'mutate', workload: 'medium' });
   return {
     capacity: decision.capacity,

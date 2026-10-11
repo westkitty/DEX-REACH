@@ -62,7 +62,7 @@ export type BootRecoveryEvidence = {
 };
 
 export type BootRecoveryDecision = {
-  kind: 'FINISH_FROM_DURABLE_EVIDENCE' | 'REATTACH' | 'RETRY_SAFE' | 'INPUT_REQUIRED' | 'AMBIGUOUS' | 'DEGRADED';
+  kind: 'FINISH_FROM_DURABLE_EVIDENCE' | 'REATTACH' | 'MONITOR_ORPHAN' | 'RETRY_SAFE' | 'INPUT_REQUIRED' | 'AMBIGUOUS' | 'DEGRADED';
   reason: string;
 };
 
@@ -73,6 +73,13 @@ export function decideBootRecovery(evidence: BootRecoveryEvidence): BootRecovery
   }
   if (evidence.hasDurableResult) {
     return { kind: 'FINISH_FROM_DURABLE_EVIDENCE', reason: 'A persisted result reference and verified result body are available.' };
+  }
+  // A RUNNING task whose orphan is still alive cannot be reattached: after a node restart no supervisor
+  // holds the child's pipes or exit status, so the effect is not observable from here. The orphan is
+  // monitored, the task is recorded AMBIGUOUS, and nothing is replayed. This is never a completion.
+  if (evidence.state === 'RUNNING' && evidence.hasMatchingLease && evidence.processAlive && evidence.transportConnected &&
+      (evidence.hasMatchingLiveActivity || evidence.safetyClass !== 'PROCESS_UNKNOWN_EFFECT')) {
+    return { kind: 'MONITOR_ORPHAN', reason: 'An identity-verified orphan process is still running and no supervisor can observe its effect; the task is AMBIGUOUS and replay is forbidden.' };
   }
   if (evidence.hasMatchingLease && evidence.processAlive && evidence.transportConnected &&
       (evidence.hasMatchingLiveActivity || evidence.safetyClass !== 'PROCESS_UNKNOWN_EFFECT')) {

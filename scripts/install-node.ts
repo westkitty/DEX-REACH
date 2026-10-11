@@ -16,7 +16,7 @@ import { promisify } from 'node:util';
 import { stateDir } from '../src/shared/local-env.js';
 import { isAccessMode, saveAccessState, loadAccessState, defaultAccessState } from '../src/shared/access.js';
 import { arg, cleanNodeId, flag, nodeEnvFile, readEnvFile, writeEnvFile } from './lib/node-files.js';
-import { launchAgentsDir, launchdOneShotPlist, launchdPlist, servicePath, systemdUnit, systemdUserDir } from './lib/service.js';
+import { launchAgentsDir, launchdOneShotPlist, launchdPlist, servicePath, stableNodeBin, systemdUnit, systemdUserDir } from './lib/service.js';
 import { atomicWriteFile } from '../src/shared/state-io.js';
 import { errorText, failureOutcome, launchctlWithReconciliation, launchdIsAbsent, launchdIsRunning } from './lib/launchctl.js';
 
@@ -61,8 +61,10 @@ console.log(`AI access: ${access.mode.toUpperCase()}${access.mode === 'off' ? ' 
 
 if (flag('--service')) {
   const logsDir = path.join(stateDir(), 'logs');
+  // Stable across Homebrew patch upgrades; the versioned keg path is deleted by `brew upgrade`.
+  const nodeBin = await stableNodeBin(process.execPath);
   await fs.mkdir(logsDir, { recursive: true, mode: 0o700 });
-  const spec = { label: 'com.stinkyweasel.dex-reach.node', entry: 'dist/src/node/main.js', envFile: target, stateDir: stateDir(), pathEnv: servicePath(process.execPath), root, nodeBin: process.execPath, logsDir };
+  const spec = { label: 'com.stinkyweasel.dex-reach.node', entry: 'dist/src/node/main.js', envFile: target, stateDir: stateDir(), pathEnv: servicePath(nodeBin), root, nodeBin, logsDir };
   if (process.platform === 'darwin') {
     const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
     const plist = path.join(launchAgentsDir(), `${spec.label}.plist`);
@@ -88,7 +90,7 @@ if (flag('--service')) {
     }, null, 2) + '\n', 0o600);
     await atomicWriteFile(helperTarget, launchdOneShotPlist({
       label: helperLabel,
-      programArguments: [process.execPath, helperEntry, '--domain', domain, '--status', installStatus, '--delay-ms', '3000', '--cleanup-plist', helperTarget, '--service', spec.label, plist],
+      programArguments: [nodeBin, helperEntry, '--domain', domain, '--status', installStatus, '--delay-ms', '3000', '--cleanup-plist', helperTarget, '--service', spec.label, plist],
       workingDirectory: root,
       logsDir
     }), 0o600);

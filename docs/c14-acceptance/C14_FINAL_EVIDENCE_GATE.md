@@ -1,0 +1,58 @@
+# C14 final evidence gate
+
+## Current source note — 2026-10-10 maximum-scope v2 campaign
+
+Final source `77cb289` passes 398/398 local tests and all five hosted checks. The
+separate CodeQL security alert was repaired with a real 300/minute admission
+limiter before bearer verification; the analyzer workflow and security check
+are independently PASS. Native proof 20/0/2, clean build 172 artifacts, compiled
+historical A-F and source SSE example were rerun on that source.
+
+The older frozen candidate and counts below are historical. Production candidate f4efc91643a71a3b163665df072f3832322a855f has real client-visible replay and compiled historical evidence, plus 172 byte-for-byte build artifacts. Performance remains PARTIAL without latency budgets; installed/connector/program gates remain open.
+
+Evidence and exact validation/publication boundaries: [../c14-compatibility/C14_V2_COMPLETION_REPORT.md](../c14-compatibility/C14_V2_COMPLETION_REPORT.md).
+C13 NOT PASS; E7 HOST CAPABILITY BLOCKED; C14 program PARTIAL; C15 BLOCKED.
+
+## Frozen candidate
+
+Candidate source is `c14-chaos-recovery` at
+`7161f95536f7ca787f1772f5afdd66c3e274f351`, pushed with exact remote parity.
+The worktree is clean. This frozen candidate contains documentation and
+traceability additions only after the previously validated source; hosted CI
+also executed the exact head.
+
+## Adversarial nine-category assessment
+
+| Requirement | Source/test evidence | Hosted CI | Installed/runtime | Ecosystem | Verdict and release implication |
+| --- | --- | --- | --- | --- | --- |
+| Chaos across gateway/node/coordinator/worker/WebSocket and interruption phases | C14-H matrix; routing, disconnect, worker, task and recovery fixtures | PASS on loopback runtime-proof | Physical service interruption blocked | Not applicable to REACH-only fixtures | PARTIAL: dedicated node/worker durable-process and host-service interruption remain open |
+| Mutation ambiguity/no blind replay | C14-A/B, boot recovery repair, result binding, ambiguity tests | PASS | Installed interruption unverified | External product effects not exercised | PASS at source scope; no release claim for physical boundary |
+| Performance and matched measurement | C14-D, corrected C14-E, C14-J | PASS for repository gates | Installed idle profiling not measured | Product dashboard integration unverified | PASS isolated source scope; installed observability remains a limitation |
+| Long-session lifecycle | 661.1-second corrected isolated confirmation, 3,611 cycles, zero failures, cleanup | Full suite PASS | No installed long-session run | Search/provenance product growth unverified | PASS source-only; historical pre-repair partial retained |
+| Security | 42 invariants and security/access/budget/replay/revocation tests | PASS + CodeQL PASS | Installed policy proof is historical, not this candidate | Cross-product trust runtime unverified | PASS current REACH source scope |
+| Privacy | Secret, trace, receipt, share projection and control-room tests | PASS | Installed UI acceptance not rerun | PAIR/DROPZONE/WITNESS integrated proof absent | PASS REACH source scope; ecosystem partial |
+| Mixed-version migration | Semantic v1.0/v2.0 negotiation, capability intersection, progress frames, and isolated IPv4 loopback A-F fixtures | PASS at source/fixture scope | No installed mixed-version migration | Public/external consumer compatibility remains unverified | PARTIAL: installed migration and connector acceptance remain open |
+| Cold-start/reconstructability | Fresh detached install, 160-artifact clean build, exact master-plan recovery | Reproducible-build PASS | Installed/source distinction preserved | DEX source separately inspected | PASS reconstruction; independent evaluator unverified |
+| Failure prevention and closure | Demonstrated defects have regression fixtures; focused and full suite green | Validate PASS | No physical failure injection | DEX negative fixtures exist, no REACH consumer | PASS for recorded source defects; future defects still require fixtures |
+
+## Separate verdicts
+
+- **C14 SOURCE ACCEPTANCE: PASS within tested repository scope.**
+- **C14 PROGRAM ACCEPTANCE: PARTIAL / NOT COMPLETE.**
+
+The unresolved rows are not silently waived. They require installed/physical
+authority, a protocol migration decision or implementation, DEX ecosystem
+integration evidence, independent evaluation, installed observability, and
+human/connector acceptance. C15 therefore remains blocked.
+
+## Final checks
+
+- Full suite: 387/387 PASS, 0 failed, 0 skipped.
+- Typecheck: PASS.
+- Invariants: 42/42 PASS.
+- Build: PASS.
+- Audit: PASS at high-severity threshold; six moderate advisories remain.
+- Backend probe: PASS, 26 tools.
+- Diff check: PASS.
+- Hosted validation: PASS, run `38024604247`, exact head SHA.
+- CodeQL: PASS, run `38024604152`, exact head SHA.

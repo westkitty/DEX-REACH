@@ -1,9 +1,11 @@
+import { GATEWAY_RESPONSE_MS, admissionBudgetMs, boundedGatewayMs } from '../shared/request-deadlines.js';
 import crypto from 'node:crypto';
 import type { Server } from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
 import { parseNodeAuthorization, type NodeAuthStore } from './node-auth.js';
-import { REACH_PROTOCOL_VERSION, type AccessSnapshot, type DurableTaskRequest, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor, type SchedulerSnapshot } from '../shared/protocol.js';
+import { REACH_PROTOCOL_VERSION, REACH_DURABLE_TASK_CAPABILITY, type AccessSnapshot, type DurableTaskRequest, type GatewayRequest, type GatewayResponse, type NodeHello, type NodeStatus, type RequestActor, type SchedulerSnapshot, type ProtocolHelloAck, type ReachCapability, type ReachProtocolVersion, type TaskProgressEvent } from '../shared/protocol.js';
 import { addRevokedNode, loadRevokedNodes } from '../shared/revoked-nodes.js';
+import { durableCapabilityRefusal, negotiateProtocol, supportsNegotiatedCapability, type NegotiatedProtocol } from '../shared/protocol-negotiation.js';
 
 export type NodeRecord = {
   hello: NodeHello;
@@ -13,6 +15,12 @@ export type NodeRecord = {
   /** Latest node-reported local access policy (display only; the node enforces it). */
   access: AccessSnapshot | null;
   scheduler: SchedulerSnapshot | null;
+  negotiated: NegotiatedProtocol;
+};
+
+export type NodeRegistryOptions = {
+  supportedProtocols?: readonly ReachProtocolVersion[];
+  capabilities?: readonly ReachCapability[];
 };
 
 export type NodeRequestResult = {
@@ -21,19 +29,22 @@ export type NodeRequestResult = {
 };
 
 type Pending = {
+  nodeId: string;
+  socket: WebSocket;
   resolve: (value: NodeRequestResult) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  responding?: boolean;
 };
 
 export class NodeRegistry {
-  private readonly wss = new WebSocketServer({ noServer: true });
+  private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   private readonly nodes = new Map<string, NodeRecord>();
   private readonly pending = new Map<string, Pending>();
   private readonly revoked = new Set<string>();
   private sweepTimer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly nodeAuth: NodeAuthStore, private readonly stateDir: string) {}
+  constructor(private readonly nodeAuth: NodeAuthStore, private readonly stateDir: string, private readonly options: NodeRegistryOptions = {}) {}
 
   async initialize(): Promise<void> {
     for (const nodeId of await loadRevokedNodes(this.stateDir)) this.revoked.add(nodeId);
@@ -52,8 +63,9 @@ export class NodeRegistry {
   async sweepRevoked(): Promise<number> {
     let dropped = 0;
     for (const [nodeId, record] of this.nodes) {
-      if (!(await this.nodeAuth.isRevoked(nodeId))) continue;
+      if (!(await this.nodeAuth.isRevoked(nodeId)) || this.nodes.get(nodeId) !== record) continue;
       this.revoked.add(nodeId);
+      this.rejectConnection(record.socket, 'node revoked; execution outcome may be uncertain');
       record.socket.close(4001, 'node revoked');
       this.nodes.delete(nodeId);
       dropped += 1;
@@ -100,6 +112,8 @@ export class NodeRegistry {
       aiAccess: record.access ? { mode: record.access.effectiveMode, until: record.access.until, clients: record.access.clients } : 'unknown',
       scheduler: record.scheduler,
       capabilities: record.hello.capabilities ?? {},
+      negotiatedProtocol: record.negotiated.version,
+      admittedCapabilities: record.negotiated.capabilities,
       toolCount: record.hello.tools.length,
       agentVersion: record.hello.agentVersion,
       connectedAt: new Date(record.connectedAt).toISOString(),
@@ -116,7 +130,7 @@ export class NodeRegistry {
    * Routes one operation to exactly the named node. There is deliberately no default node, no
    * "first online" choice, and no fallback: an unknown, offline, or revoked node ID always throws.
    */
-  async request(nodeId: string, operation: string, args: Record<string, unknown>, actor?: RequestActor, timeoutMs = 60000): Promise<unknown> {
+  async request(nodeId: string, operation: string, args: Record<string, unknown>, actor?: RequestActor, timeoutMs = GATEWAY_RESPONSE_MS): Promise<unknown> {
     return (await this.requestWithTrace(nodeId, operation, args, actor, undefined, timeoutMs)).result;
   }
 
@@ -126,16 +140,24 @@ export class NodeRegistry {
     args: Record<string, unknown>,
     actor?: RequestActor,
     trace?: { traceparent?: string; tracestate?: string },
-    timeoutMs = 60000,
+    timeoutMs = GATEWAY_RESPONSE_MS,
     task?: DurableTaskRequest
   ): Promise<NodeRequestResult> {
+    timeoutMs = boundedGatewayMs(timeoutMs);
     const record = this.requireNode(nodeId);
+    if (await this.nodeAuth.isRevoked(nodeId)) throw new Error(`node is revoked: ${nodeId}`);
+    if (this.requireNode(nodeId) !== record) throw new Error('node connection changed before dispatch; request was not sent');
+    if (task && !supportsNegotiatedCapability(record.negotiated, REACH_DURABLE_TASK_CAPABILITY)) {
+      throw durableCapabilityRefusal(nodeId, record.negotiated);
+    }
+    if (this.pending.size >= 2048) throw new Error('gateway pending request limit reached');
     const id = crypto.randomUUID();
     const request: GatewayRequest = {
       type: 'request',
       id,
       operation,
       args,
+      admissionBudgetMs: admissionBudgetMs(timeoutMs),
       ...(actor ? { actor } : {}),
       ...(trace?.traceparent ? { traceparent: trace.traceparent } : {}),
       ...(trace?.tracestate ? { tracestate: trace.tracestate } : {}),
@@ -147,7 +169,7 @@ export class NodeRegistry {
         reject(new Error(`node request timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       timer.unref();
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { nodeId, socket: record.socket, resolve, reject, timer });
       record.socket.send(JSON.stringify(request), error => {
         if (!error) return;
         clearTimeout(timer);
@@ -159,7 +181,7 @@ export class NodeRegistry {
 
   supportsDurableTasks(nodeId: string): boolean {
     const record = this.requireNode(nodeId);
-    return record.hello.capabilities?.durable_tasks === true;
+    return supportsNegotiatedCapability(record.negotiated, REACH_DURABLE_TASK_CAPABILITY);
   }
 
   async revoke(nodeId: string): Promise<boolean> {
@@ -167,6 +189,7 @@ export class NodeRegistry {
     await this.nodeAuth.revoke(nodeId);
     const record = this.nodes.get(nodeId);
     if (record) {
+      this.rejectConnection(record.socket, 'node revoked; execution outcome may be uncertain');
       record.socket.close(4001, 'node revoked');
       this.nodes.delete(nodeId);
     }
@@ -197,12 +220,13 @@ export class NodeRegistry {
 
   /** Test seam: register an already-authenticated socket-like object as a node. */
   registerForTest(hello: NodeHello, socket: WebSocket): void {
-    this.nodes.set(hello.nodeId, { hello, socket, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null });
+    const negotiated = negotiateProtocol(hello, { gatewayProtocols: this.options.supportedProtocols, gatewayCapabilities: this.options.capabilities });
+    this.nodes.set(hello.nodeId, { hello, socket, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null, negotiated });
   }
 
   /** Test seam: deliver a node response as if it arrived on the socket. */
-  deliverForTest(response: GatewayResponse): void {
-    this.finishResponse(response);
+  deliverForTest(response: GatewayResponse, nodeId = this.pending.get(response.id)?.nodeId, socket = this.pending.get(response.id)?.socket): void {
+    if (nodeId && socket) void this.finishResponse(response, nodeId, socket);
   }
   private accept(ws: WebSocket, expectedNodeId: string): void {
     let registered = false;
@@ -221,15 +245,29 @@ export class NodeRegistry {
         if (hello.nodeId !== expectedNodeId || hello.protocolVersion !== REACH_PROTOCOL_VERSION || this.revoked.has(hello.nodeId)) {
           return ws.close(1008, 'invalid node identity or protocol');
         }
+        if (!Array.isArray(hello.tools) || !Array.isArray(hello.allowedRoots) || !hello.fingerprint || typeof hello.agentVersion !== 'string') return ws.close(1008, 'malformed hello');
+        let negotiated: NegotiatedProtocol;
+        try {
+          negotiated = negotiateProtocol(hello, { gatewayProtocols: this.options.supportedProtocols, gatewayCapabilities: this.options.capabilities });
+        } catch {
+          return ws.close(1008, 'incompatible semantic protocol');
+        }
         const existing = this.nodes.get(hello.nodeId);
-        if (existing && existing.socket !== ws) existing.socket.close(4000, 'replaced by newer connection');
-        this.nodes.set(hello.nodeId, { hello, socket: ws, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null });
+        if (existing && existing.socket !== ws) {
+          this.rejectConnection(existing.socket, 'node connection replaced; execution outcome may be uncertain');
+          existing.socket.close(4000, 'replaced by newer connection');
+        }
+        this.nodes.set(hello.nodeId, { hello, socket: ws, connectedAt: Date.now(), lastSeenAt: Date.now(), access: hello.access ?? null, scheduler: hello.scheduler ?? null, negotiated });
         registered = true;
+        const ack: ProtocolHelloAck = { type: 'hello_ack', protocolVersion: negotiated.version, capabilities: negotiated.capabilities };
+        ws.send(JSON.stringify(ack));
         return;
       }
       const record = this.nodes.get(expectedNodeId);
-      if (record) record.lastSeenAt = Date.now();
-      if (typed.type === 'response') this.finishResponse(message as GatewayResponse);
+      if (!record || record.socket !== ws || ws.readyState !== WebSocket.OPEN || this.revoked.has(expectedNodeId)) return;
+      record.lastSeenAt = Date.now();
+      if (typed.type === 'response') void this.finishResponse(message as GatewayResponse, expectedNodeId, ws).catch(() => ws.close(1008, 'node authorization unavailable'));
+      if (typed.type === 'task_event') this.acceptTaskEvent(message as TaskProgressEvent);
       if (typed.type === 'status' && record) {
         const status = message as NodeStatus;
         record.access = status.access ?? null;
@@ -238,14 +276,31 @@ export class NodeRegistry {
     });
 
     ws.on('close', () => {
+      this.rejectConnection(ws, 'node disconnected; execution outcome may be uncertain');
       const record = this.nodes.get(expectedNodeId);
       if (record?.socket === ws) this.nodes.delete(expectedNodeId);
     });
   }
 
-  private finishResponse(response: GatewayResponse): void {
+  private rejectConnection(socket: WebSocket, reason: string): void {
+    for (const [id, pending] of this.pending) {
+      if (pending.socket !== socket) continue;
+      clearTimeout(pending.timer);
+      this.pending.delete(id);
+      pending.reject(new Error(reason));
+    }
+  }
+
+  private async finishResponse(response: GatewayResponse, nodeId: string, socket: WebSocket): Promise<void> {
+    if (typeof response.id !== 'string' || typeof response.ok !== 'boolean') return;
     const pending = this.pending.get(response.id);
-    if (!pending) return;
+    if (!pending || pending.nodeId !== nodeId || pending.socket !== socket) return;
+    if (pending.responding) return;
+    pending.responding = true;
+    if (await this.nodeAuth.isRevoked(nodeId)) { this.rejectConnection(socket, 'node revoked; execution outcome may be uncertain'); return; }
+    // Recheck after credential-store I/O: timeout, replacement or revocation may have won.
+    if (this.pending.get(response.id) !== pending || this.nodes.get(nodeId)?.socket !== socket
+      || socket.readyState !== WebSocket.OPEN || this.revoked.has(nodeId)) return;
     clearTimeout(pending.timer);
     this.pending.delete(response.id);
     if (response.ok) {
@@ -253,5 +308,11 @@ export class NodeRegistry {
     } else {
       pending.reject(new Error(response.error || 'node request failed'));
     }
+  }
+
+  private acceptTaskEvent(event: TaskProgressEvent): void {
+    // The gateway deliberately does not persist progress payloads here. The node owns the durable
+    // event log; this validation boundary ensures only content-free lifecycle frames are accepted.
+    if (!event.taskId || !event.state || !event.summary || !Number.isFinite(Date.parse(event.at))) return;
   }
 }
