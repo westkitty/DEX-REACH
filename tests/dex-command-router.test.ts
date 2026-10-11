@@ -8,9 +8,19 @@ import {
   routeCommand,
   validateHandoff,
   type LoadedManifest,
+  type ProductReferenceVerifier,
   type RouterNodeView,
   type RouterRefusal
 } from '../src/shared/dex-command-router.js';
+
+// SYNTHETIC verifier: stands in for the product interface in tests only. It resolves two fixture references
+// bound to one fixture target. It is not production configuration and proves no DEX behaviour.
+const syntheticVerifier: ProductReferenceVerifier = {
+  verify: query => {
+    if (query.ref !== 'accepted-input-1' && query.ref !== 'promotion-1') return { status: 'NOT_FOUND' };
+    return query.targetId === 'target-1' ? { status: 'VERIFIED' } : { status: 'WRONG_BINDING' };
+  }
+};
 
 // Fixture-only tests for the ADR-0004 router skeleton. They prove the skeleton's logic against a
 // SYNTHETIC manifest. They do not prove any DEX product integration.
@@ -47,11 +57,11 @@ function node(overrides: Partial<RouterNodeView> & { nodeId: string }): RouterNo
 
 const onlineNode = node({ nodeId: 'node-a' });
 
-test('the synthetic fixture loads, is marked synthetic, and carries six commands', () => {
+test('the synthetic fixture loads, is marked synthetic, and carries seven commands', () => {
   const manifest = loaded();
   assert.equal(manifest.synthetic, true);
   assert.equal(manifest.contractVersion, '1.0.0');
-  assert.equal(manifest.commands.size, 6);
+  assert.equal(manifest.commands.size, 7);
   for (const id of manifest.commands.keys()) assert.match(id, /^FIXTURE\/\//, 'fixture ids must not look like DEX commands');
 });
 
@@ -100,8 +110,8 @@ function withCommandRemoved(index: number, key: string): Record<string, unknown>
   return raw;
 }
 
-test('a known command routes to exactly the node that was named', () => {
-  const decision = routeCommand({
+test('a known command routes to exactly the node that was named', async () => {
+  const decision = await routeCommand({
     manifest: loaded(),
     request: { command: 'FIXTURE//SESSION_STATUS', nodeId: 'node-a' },
     nodes: [onlineNode]
@@ -113,41 +123,41 @@ test('a known command routes to exactly the node that was named', () => {
   assert.equal(decision.command.product, 'SESSION');
 });
 
-test('unknown commands are refused, including case and whitespace variants', () => {
+test('unknown commands are refused, including case and whitespace variants', async () => {
   for (const command of ['FIXTURE//UNKNOWN', 'fixture//session_status', 'FIXTURE//SESSION_STATUS ', '']) {
-    const refusal = refusalOf(routeCommand({ manifest: loaded(), request: { command, nodeId: 'node-a' }, nodes: [onlineNode] }));
+    const refusal = refusalOf(await routeCommand({ manifest: loaded(), request: { command, nodeId: 'node-a' }, nodes: [onlineNode] }));
     assert.equal(refusal.code, 'UNKNOWN_COMMAND', JSON.stringify(command));
   }
 });
 
-test('a pinned command major must match the manifest command major', () => {
+test('a pinned command major must match the manifest command major', async () => {
   const manifest = loaded();
-  assert.equal(routeCommand({ manifest, request: { command: 'FIXTURE//SESSION_STATUS', commandVersion: '1.4.0', nodeId: 'node-a' }, nodes: [onlineNode] }).ok, true);
-  const refusal = refusalOf(routeCommand({ manifest, request: { command: 'FIXTURE//SESSION_STATUS', commandVersion: '2.0.0', nodeId: 'node-a' }, nodes: [onlineNode] }));
+  assert.equal((await routeCommand({ manifest, request: { command: 'FIXTURE//SESSION_STATUS', commandVersion: '1.4.0', nodeId: 'node-a' }, nodes: [onlineNode] })).ok, true);
+  const refusal = refusalOf(await routeCommand({ manifest, request: { command: 'FIXTURE//SESSION_STATUS', commandVersion: '2.0.0', nodeId: 'node-a' }, nodes: [onlineNode] }));
   assert.equal(refusal.code, 'COMMAND_MAJOR_MISMATCH');
   assert.equal(refusal.details?.actualVersion, '1.0.0');
 });
 
-test('a missing node_id is refused even when exactly one node is online', () => {
-  const refusal = refusalOf(routeCommand({ manifest: loaded(), request: { command: 'FIXTURE//SESSION_STATUS' }, nodes: [onlineNode] }));
+test('a missing node_id is refused even when exactly one node is online', async () => {
+  const refusal = refusalOf(await routeCommand({ manifest: loaded(), request: { command: 'FIXTURE//SESSION_STATUS' }, nodes: [onlineNode] }));
   assert.equal(refusal.code, 'NODE_ID_REQUIRED');
 });
 
-test('node selection is exact: no case folding, prefix match or fallback to a capable online node', () => {
+test('node selection is exact: no case folding, prefix match or fallback to a capable online node', async () => {
   const nodes = [node({ nodeId: 'node-a' }), node({ nodeId: 'node-b', online: false })];
   const manifest = loaded();
   // Offline requested node: refused, and the refusal must not offer the capable node-a.
-  const offline = refusalOf(routeCommand({ manifest, request: { command: 'FIXTURE//SESSION_STATUS', nodeId: 'node-b' }, nodes }));
+  const offline = refusalOf(await routeCommand({ manifest, request: { command: 'FIXTURE//SESSION_STATUS', nodeId: 'node-b' }, nodes }));
   assert.equal(offline.code, 'NODE_NOT_ONLINE');
   assert.doesNotMatch(JSON.stringify(offline), /node-a/);
   for (const nodeId of ['NODE-A', 'node', 'node-a ', 'node-a.local']) {
-    const refusal = refusalOf(routeCommand({ manifest, request: { command: 'FIXTURE//SESSION_STATUS', nodeId }, nodes }));
+    const refusal = refusalOf(await routeCommand({ manifest, request: { command: 'FIXTURE//SESSION_STATUS', nodeId }, nodes }));
     assert.equal(refusal.code, 'NODE_NOT_FOUND', nodeId);
   }
 });
 
-test('a node that is not enrolled is not routable, even when it reports online', () => {
-  const refusal = refusalOf(routeCommand({
+test('a node that is not enrolled is not routable, even when it reports online', async () => {
+  const refusal = refusalOf(await routeCommand({
     manifest: loaded(),
     request: { command: 'FIXTURE//SESSION_STATUS', nodeId: 'node-a' },
     nodes: [node({ nodeId: 'node-a', enrolled: false })]
@@ -155,23 +165,23 @@ test('a node that is not enrolled is not routable, even when it reports online',
   assert.equal(refusal.code, 'NODE_NOT_ONLINE');
 });
 
-test('a node without the router capability or with a different adapter major is refused, never downgraded', () => {
+test('a node without the router capability or with a different adapter major is refused, never downgraded', async () => {
   const manifest = loaded();
-  const noCapability = refusalOf(routeCommand({
+  const noCapability = refusalOf(await routeCommand({
     manifest,
     request: { command: 'FIXTURE//SESSION_STATUS', nodeId: 'node-a' },
     nodes: [node({ nodeId: 'node-a', capabilities: {} })]
   }));
   assert.equal(noCapability.code, 'CAPABILITY_UNSUPPORTED_ON_NODE');
 
-  const noAdapter = refusalOf(routeCommand({
+  const noAdapter = refusalOf(await routeCommand({
     manifest,
     request: { command: 'FIXTURE//SESSION_STATUS', nodeId: 'node-a' },
     nodes: [node({ nodeId: 'node-a', productAdapters: {} })]
   }));
   assert.equal(noAdapter.code, 'CAPABILITY_UNSUPPORTED_ON_NODE');
 
-  const wrongMajor = refusalOf(routeCommand({
+  const wrongMajor = refusalOf(await routeCommand({
     manifest,
     request: { command: 'FIXTURE//SESSION_STATUS', nodeId: 'node-a' },
     nodes: [node({ nodeId: 'node-a', productAdapters: { ...capableAdapters, SESSION: '2.0.0' } })]
@@ -180,24 +190,24 @@ test('a node without the router capability or with a different adapter major is 
   assert.equal(wrongMajor.details?.expectedMajor, 1);
 });
 
-test('DROPZONE input is untrusted until an accepted input reference is supplied', () => {
+test('DROPZONE input is untrusted until an accepted input reference is supplied', async () => {
   const manifest = loaded();
   const request = { command: 'FIXTURE//DROPZONE_INGEST', nodeId: 'node-a' };
-  assert.equal(refusalOf(routeCommand({ manifest, request, nodes: [onlineNode] })).code, 'INPUT_NOT_ACCEPTED');
-  assert.equal(routeCommand({ manifest, request: { ...request, acceptanceRef: 'accepted-input-1' }, nodes: [onlineNode] }).ok, true);
+  assert.equal(refusalOf(await routeCommand({ manifest, request, nodes: [onlineNode] })).code, 'INPUT_NOT_ACCEPTED');
+  assert.equal((await routeCommand({ manifest, request: { ...request, acceptanceRef: 'accepted-input-1', targetId: 'target-1' }, nodes: [onlineNode], verifier: syntheticVerifier })).ok, true);
 });
 
-test('PRIVATE and SEALED data is not routable remotely without an explicit promotion', () => {
+test('PRIVATE and SEALED data is not routable remotely without an explicit promotion', async () => {
   const manifest = loaded();
   const pair = { command: 'FIXTURE//PAIR_READ', nodeId: 'node-a' };
-  assert.equal(refusalOf(routeCommand({ manifest, request: pair, nodes: [onlineNode] })).code, 'DATA_NOT_PROMOTED');
-  assert.equal(routeCommand({ manifest, request: { ...pair, promotionRef: 'promotion-1' }, nodes: [onlineNode] }).ok, true);
+  assert.equal(refusalOf(await routeCommand({ manifest, request: pair, nodes: [onlineNode] })).code, 'DATA_NOT_PROMOTED');
+  assert.equal((await routeCommand({ manifest, request: { ...pair, promotionRef: 'promotion-1', targetId: 'target-1' }, nodes: [onlineNode], verifier: syntheticVerifier })).ok, true);
   const witness = { command: 'FIXTURE//WITNESS_EXPORT', nodeId: 'node-a' };
-  assert.equal(refusalOf(routeCommand({ manifest, request: witness, nodes: [onlineNode] })).code, 'DATA_NOT_PROMOTED');
+  assert.equal(refusalOf(await routeCommand({ manifest, request: witness, nodes: [onlineNode] })).code, 'DATA_NOT_PROMOTED');
 });
 
-test('a manifest cannot route a command to an operation REACH does not catalogue', () => {
-  const refusal = refusalOf(routeCommand({
+test('a manifest cannot route a command to an operation REACH does not catalogue', async () => {
+  const refusal = refusalOf(await routeCommand({
     manifest: loaded(),
     request: { command: 'FIXTURE//NOT_CATALOGUED', nodeId: 'node-a' },
     nodes: [onlineNode]
@@ -210,7 +220,7 @@ test('every refusal code is in the closed list of ADR-0004 section 7', async () 
   for (const code of ['MANIFEST_INVALID', 'DEX_CONTRACT_MAJOR_MISMATCH', 'COMMAND_MAJOR_MISMATCH', 'UNKNOWN_COMMAND', 'NODE_ID_REQUIRED', 'NODE_NOT_FOUND', 'NODE_NOT_ONLINE', 'CAPABILITY_UNSUPPORTED_ON_NODE', 'ADAPTER_MAJOR_MISMATCH', 'INPUT_NOT_ACCEPTED', 'DATA_NOT_PROMOTED', 'OPERATION_NOT_IN_CATALOGUE', 'HANDOFF_INVALID', 'WITNESS_REMIX_EDGE_FORBIDDEN']) {
     assert.ok(ROUTER_REFUSAL_CODES.includes(code as never), code);
   }
-  assert.equal(ROUTER_REFUSAL_CODES.length, 14);
+  assert.equal(ROUTER_REFUSAL_CODES.length, 21);
 });
 
 const validHandoff = {

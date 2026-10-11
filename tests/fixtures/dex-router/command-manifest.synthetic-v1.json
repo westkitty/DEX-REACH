@@ -10,7 +10,13 @@
       "safetyClass": "PURE_READ_IDEMPOTENT",
       "dataClass": "PUBLIC",
       "inputOrigin": "owner",
-      "reachOperation": "dex.trustReport"
+      "reachOperation": "dex.trustReport",
+      "invokesReach": true,
+      "modifiers": [
+        "DRY",
+        "SHIP",
+        "FAST"
+      ]
     },
     {
       "id": "FIXTURE//DROPZONE_INGEST",
@@ -19,7 +25,12 @@
       "safetyClass": "SIDE_EFFECTING_IDEMPOTENT",
       "dataClass": "PUBLIC",
       "inputOrigin": "dropzone",
-      "reachOperation": "dex.file.write"
+      "reachOperation": "dex.file.write",
+      "invokesReach": true,
+      "modifiers": [
+        "SHIP",
+        "FAST"
+      ]
     },
     {
       "id": "FIXTURE//PAIR_READ",
@@ -28,7 +39,12 @@
       "safetyClass": "PURE_READ_IDEMPOTENT",
       "dataClass": "PRIVATE",
       "inputOrigin": "owner",
-      "reachOperation": "dex.file.read"
+      "reachOperation": "dex.file.read",
+      "invokesReach": true,
+      "modifiers": [
+        "DRY",
+        "FAST"
+      ]
     },
     {
       "id": "FIXTURE//WITNESS_EXPORT",
@@ -37,7 +53,11 @@
       "safetyClass": "PURE_READ_IDEMPOTENT",
       "dataClass": "SEALED",
       "inputOrigin": "owner",
-      "reachOperation": "dex.result.read"
+      "reachOperation": "dex.result.read",
+      "invokesReach": true,
+      "modifiers": [
+        "DRY"
+      ]
     },
     {
       "id": "FIXTURE//REMIX_APPLY",
@@ -46,7 +66,11 @@
       "safetyClass": "SIDE_EFFECTING_IDEMPOTENT",
       "dataClass": "PUBLIC",
       "inputOrigin": "owner",
-      "reachOperation": "dex.file.write"
+      "reachOperation": "dex.file.write",
+      "invokesReach": true,
+      "modifiers": [
+        "SHIP"
+      ]
     },
     {
       "id": "FIXTURE//NOT_CATALOGUED",
@@ -55,7 +79,19 @@
       "safetyClass": "PURE_READ_IDEMPOTENT",
       "dataClass": "PUBLIC",
       "inputOrigin": "owner",
-      "reachOperation": "dex.invented.operation"
+      "reachOperation": "dex.invented.operation",
+      "invokesReach": true,
+      "modifiers": []
+    },
+    {
+      "id": "FIXTURE//DEX_LOCAL_HELP",
+      "version": "1.0.0",
+      "product": "SESSION",
+      "safetyClass": "PURE_READ_IDEMPOTENT",
+      "dataClass": "PUBLIC",
+      "inputOrigin": "owner",
+      "invokesReach": false,
+      "modifiers": []
     }
   ]
 }

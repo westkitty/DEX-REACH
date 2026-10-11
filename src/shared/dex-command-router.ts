@@ -23,8 +23,13 @@ export const ROUTER_REFUSAL_CODES = [
   'MANIFEST_INVALID', 'DEX_CONTRACT_MAJOR_MISMATCH', 'COMMAND_MAJOR_MISMATCH', 'UNKNOWN_COMMAND',
   'NODE_ID_REQUIRED', 'NODE_NOT_FOUND', 'NODE_NOT_ONLINE', 'CAPABILITY_UNSUPPORTED_ON_NODE',
   'ADAPTER_MAJOR_MISMATCH', 'INPUT_NOT_ACCEPTED', 'DATA_NOT_PROMOTED', 'OPERATION_NOT_IN_CATALOGUE',
-  'HANDOFF_INVALID', 'WITNESS_REMIX_EDGE_FORBIDDEN'
+  'HANDOFF_INVALID', 'WITNESS_REMIX_EDGE_FORBIDDEN',
+  'SYNTHETIC_MANIFEST_IN_PRODUCTION', 'MODIFIER_UNKNOWN', 'MODIFIER_MUTATION_FORBIDDEN',
+  'REFERENCE_VERIFIER_UNAVAILABLE', 'REFERENCE_NOT_FOUND', 'REFERENCE_WRONG_BINDING', 'REFERENCE_REVOKED_OR_INAPPLICABLE'
 ] as const;
+/** Modifiers are DEX-owned labels. REACH enforces their monotonicity whatever the manifest says. */
+export const DEX_MODIFIERS = ['DRY', 'SHIP', 'FAST'] as const;
+export type DexModifier = (typeof DEX_MODIFIERS)[number];
 export type RouterRefusalCode = (typeof ROUTER_REFUSAL_CODES)[number];
 
 export type RouterRefusal = {
@@ -41,7 +46,10 @@ export type DexCommandEntry = {
   safetyClass: SafetyClass;
   dataClass: DataClass;
   inputOrigin: InputOrigin;
-  reachOperation: string;
+  /** Declared by DEX. A command that does not invoke REACH has no node requirement and no REACH operation. */
+  invokesReach: boolean;
+  modifiers: readonly DexModifier[];
+  reachOperation: string | null;
 };
 
 export type LoadedManifest = {
@@ -53,7 +61,7 @@ export type LoadedManifest = {
 export type ManifestLoadResult = { ok: true; manifest: LoadedManifest } | RouterRefusal;
 
 const TOP_LEVEL_KEYS = new Set(['schema', 'contractVersion', 'synthetic', 'commands']);
-const COMMAND_KEYS = new Set(['id', 'version', 'product', 'safetyClass', 'dataClass', 'inputOrigin', 'reachOperation']);
+const COMMAND_KEYS = new Set(['id', 'version', 'product', 'safetyClass', 'dataClass', 'inputOrigin', 'invokesReach', 'modifiers', 'reachOperation']);
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const COMMAND_ID = /^[A-Z][A-Z0-9_]{1,31}\/\/[A-Z][A-Z0-9_]{1,31}$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -75,7 +83,7 @@ export function semverMajor(version: string): number | null {
  * Load a manifest as data. The manifest can name only existing REACH operations; it cannot add code.
  * The major-version check runs before field validation so a future major produces a version refusal.
  */
-export function loadCommandManifest(raw: unknown): ManifestLoadResult {
+export function loadCommandManifest(raw: unknown, options: { production?: boolean } = {}): ManifestLoadResult {
   if (!isPlainObject(raw)) return refuse('MANIFEST_INVALID', 'manifest must be a JSON object');
   if (raw.schema !== 'dex.command-manifest') return refuse('MANIFEST_INVALID', 'manifest schema must be dex.command-manifest');
   if (typeof raw.contractVersion !== 'string' || !SEMVER.test(raw.contractVersion)) {
@@ -92,6 +100,8 @@ export function loadCommandManifest(raw: unknown): ManifestLoadResult {
     if (!TOP_LEVEL_KEYS.has(key)) return refuse('MANIFEST_INVALID', `unknown manifest field: ${key}`);
   }
   if (raw.synthetic !== undefined && typeof raw.synthetic !== 'boolean') return refuse('MANIFEST_INVALID', 'synthetic must be a boolean');
+  // Synthetic fixtures are test data. They are never accepted as production configuration.
+  if (options.production && raw.synthetic === true) return refuse('SYNTHETIC_MANIFEST_IN_PRODUCTION', 'a synthetic manifest cannot be loaded as production configuration');
   if (!Array.isArray(raw.commands)) return refuse('MANIFEST_INVALID', 'commands must be an array');
 
   const commands = new Map<string, DexCommandEntry>();
@@ -108,7 +118,17 @@ export function loadCommandManifest(raw: unknown): ManifestLoadResult {
     if (!SAFETY_CLASSES.includes(entry.safetyClass as SafetyClass)) return invalid('safetyClass is not a REACH safety class');
     if (!DATA_CLASSES.includes(entry.dataClass as DataClass)) return invalid('dataClass must be PUBLIC, PRIVATE or SEALED');
     if (!INPUT_ORIGINS.includes(entry.inputOrigin as InputOrigin)) return invalid('inputOrigin must be owner or dropzone');
-    if (typeof entry.reachOperation !== 'string') return invalid('reachOperation must be a string');
+    if (typeof entry.invokesReach !== 'boolean') return invalid('invokesReach must be declared true or false by DEX');
+    // A REACH operation is mapped only where DEX says the command actually invokes REACH. Nothing is invented.
+    if (entry.invokesReach) {
+      if (typeof entry.reachOperation !== 'string' || entry.reachOperation.length === 0) return invalid('reachOperation is required when invokesReach is true');
+    } else if (entry.reachOperation !== undefined && entry.reachOperation !== null) {
+      return invalid('reachOperation must be absent when invokesReach is false; no REACH mapping is fabricated');
+    }
+    const modifiers = entry.modifiers ?? [];
+    if (!Array.isArray(modifiers) || new Set(modifiers).size !== modifiers.length || modifiers.some(m => !DEX_MODIFIERS.includes(m as DexModifier))) {
+      return invalid('modifiers must be a unique list of DRY, SHIP or FAST');
+    }
     commands.set(entry.id, {
       id: entry.id,
       version: entry.version,
@@ -116,7 +136,9 @@ export function loadCommandManifest(raw: unknown): ManifestLoadResult {
       safetyClass: entry.safetyClass as SafetyClass,
       dataClass: entry.dataClass as DataClass,
       inputOrigin: entry.inputOrigin as InputOrigin,
-      reachOperation: entry.reachOperation
+      invokesReach: entry.invokesReach,
+      modifiers: [...(modifiers as DexModifier[])],
+      reachOperation: entry.invokesReach ? (entry.reachOperation as string) : null
     });
   }
   return { ok: true, manifest: { contractVersion: raw.contractVersion, synthetic: raw.synthetic === true, commands } };
@@ -134,31 +156,76 @@ export type RouterNodeView = {
 export type RouteRequest = {
   command: string;
   commandVersion?: string;
+  /** Exact node identity. Required only when the command invokes REACH; never defaulted or selected. */
   nodeId?: string;
+  /** The object the command acts on. A reference must be bound to it, or it proves nothing. */
+  targetId?: string;
   acceptanceRef?: string;
   promotionRef?: string;
+  modifiers?: readonly string[];
 };
 
 export type RoutePlan = {
   ok: true;
-  nodeId: string;
+  /** Null when the command does not invoke REACH: there is no node to select and no REACH operation. */
+  nodeId: string | null;
   command: DexCommandEntry;
-  /** The REACH operation the existing executor will be asked to run. The router executes nothing. */
-  reachOperation: string;
+  /** The REACH operation the existing executor will be asked to run. Null for non-REACH commands. */
+  reachOperation: string | null;
+  /** Effective modifier outcome. Monotonic: none of these grants authority or skips a gate. */
+  effective: { dryRun: boolean; authorityFromModifiers: false; gatesSkipped: false };
+  /** Every supplied reference was verified by the authoritative product interface before this plan was returned. */
+  referencesVerified: boolean;
 };
 
 export type RouteDecision = RoutePlan | RouterRefusal;
 
+export type ReferenceKind = 'promotion' | 'acceptance';
+export type ReferenceQuery = {
+  kind: ReferenceKind;
+  ref: string;
+  product: DexProductId;
+  command: string;
+  targetId: string;
+  nodeId: string | null;
+  dataClass: DataClass;
+};
+export type ReferenceVerdict =
+  | { status: 'VERIFIED' }
+  | { status: 'NOT_FOUND' | 'WRONG_BINDING' | 'REVOKED' | 'INAPPLICABLE' | 'UNAVAILABLE'; reason?: string };
+
 /**
- * Route one command to exactly one node. The checks run in ADR-0004 section 5 order and the first failure
- * is the refusal. Nothing here substitutes another node, command or version.
+ * The authoritative product interface that resolves promotionRef and acceptanceRef. REACH never reads
+ * another product's database and never trusts the presence of a string. With no verifier, dispatch is refused.
  */
-export function routeCommand(input: {
+export type ProductReferenceVerifier = {
+  verify(query: ReferenceQuery): Promise<ReferenceVerdict> | ReferenceVerdict;
+};
+
+const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+
+function verdictRefusal(kind: ReferenceKind, verdict: Exclude<ReferenceVerdict, { status: 'VERIFIED' }>): RouterRefusal {
+  switch (verdict.status) {
+    case 'NOT_FOUND': return refuse('REFERENCE_NOT_FOUND', `${kind} reference does not resolve in the authoritative product interface`);
+    case 'WRONG_BINDING': return refuse('REFERENCE_WRONG_BINDING', `${kind} reference is bound to another object, product or target`);
+    case 'REVOKED':
+    case 'INAPPLICABLE': return refuse('REFERENCE_REVOKED_OR_INAPPLICABLE', `${kind} reference is revoked or does not apply to this command`);
+    default: return refuse('REFERENCE_VERIFIER_UNAVAILABLE', `${kind} reference could not be verified; dispatch is refused`);
+  }
+}
+
+/**
+ * Route one command. The checks run in ADR-0004 section 5 order and the first failure is the refusal.
+ * Node selection is exact and applies only where the command invokes REACH. Supplied references are
+ * verified by the product interface; a reference that is merely present is never enough.
+ */
+export async function routeCommand(input: {
   manifest: LoadedManifest;
   request: RouteRequest;
   nodes: readonly RouterNodeView[];
-}): RouteDecision {
-  const { manifest, request, nodes } = input;
+  verifier?: ProductReferenceVerifier;
+}): Promise<RouteDecision> {
+  const { manifest, request, nodes, verifier } = input;
   const entry = manifest.commands.get(request.command);
   if (!entry) return refuse('UNKNOWN_COMMAND', 'command is not in the loaded manifest', { command: String(request.command) });
 
@@ -173,45 +240,88 @@ export function routeCommand(input: {
     }
   }
 
-  if (typeof request.nodeId !== 'string' || request.nodeId.length === 0) {
-    return refuse('NODE_ID_REQUIRED', 'an exact node_id is required; the router never selects a node');
+  // Modifiers are monotonic. Only a modifier DEX declares for this command is accepted.
+  const modifiers = request.modifiers ?? [];
+  for (const modifier of modifiers) {
+    if (!DEX_MODIFIERS.includes(modifier as DexModifier)) return refuse('MODIFIER_UNKNOWN', `modifier ${String(modifier)} is not a DEX modifier`, { command: entry.id });
+    if (!entry.modifiers.includes(modifier as DexModifier)) return refuse('MODIFIER_UNKNOWN', `modifier ${modifier} is not declared for this command`, { command: entry.id });
   }
-  // Exact, case-sensitive equality. No alias, prefix, normalisation or default node.
-  const node = nodes.find(candidate => candidate.nodeId === request.nodeId);
-  if (!node) return refuse('NODE_NOT_FOUND', 'no enrolled node has the requested exact node_id', { nodeId: request.nodeId });
-  if (!node.enrolled || !node.online) {
-    // The refusal names only the requested node; it never offers another one.
-    return refuse('NODE_NOT_ONLINE', 'the requested node is not enrolled and online', { nodeId: request.nodeId });
-  }
-  if (node.capabilities[DEX_ROUTER_CAPABILITY] !== true) {
-    return refuse('CAPABILITY_UNSUPPORTED_ON_NODE', `node does not advertise ${DEX_ROUTER_CAPABILITY}`, { nodeId: node.nodeId });
-  }
-  const adapterVersion = node.productAdapters?.[entry.product];
-  if (adapterVersion === undefined) {
-    return refuse('CAPABILITY_UNSUPPORTED_ON_NODE', `node advertises no ${entry.product} adapter`, { nodeId: node.nodeId, product: entry.product });
-  }
-  if (semverMajor(adapterVersion) !== DEX_CONTRACT_MAJOR) {
-    return refuse('ADAPTER_MAJOR_MISMATCH', `node ${entry.product} adapter major does not match the pinned major`, {
-      nodeId: node.nodeId,
-      product: entry.product,
-      expectedMajor: DEX_CONTRACT_MAJOR,
-      actualVersion: adapterVersion
-    });
+  // +DRY can never mutate: a dry run of a mutating command would be a mutation by another name.
+  if (modifiers.includes('DRY') && entry.safetyClass !== 'PURE_READ_IDEMPOTENT') {
+    return refuse('MODIFIER_MUTATION_FORBIDDEN', '+DRY cannot be used on a command that is not read-only', { command: entry.id });
   }
 
-  if (entry.inputOrigin === 'dropzone' && (typeof request.acceptanceRef !== 'string' || request.acceptanceRef.length === 0)) {
+  let node: RouterNodeView | undefined;
+  if (entry.invokesReach) {
+    if (typeof request.nodeId !== 'string' || request.nodeId.length === 0) {
+      return refuse('NODE_ID_REQUIRED', 'an exact node_id is required; the router never selects a node');
+    }
+    // Exact, case-sensitive equality. No alias, prefix, normalisation or default node.
+    node = nodes.find(candidate => candidate.nodeId === request.nodeId);
+    if (!node) return refuse('NODE_NOT_FOUND', 'no enrolled node has the requested exact node_id', { nodeId: request.nodeId });
+    if (!node.enrolled || !node.online) {
+      // The refusal names only the requested node; it never offers another one.
+      return refuse('NODE_NOT_ONLINE', 'the requested node is not enrolled and online', { nodeId: request.nodeId });
+    }
+    if (node.capabilities[DEX_ROUTER_CAPABILITY] !== true) {
+      return refuse('CAPABILITY_UNSUPPORTED_ON_NODE', `node does not advertise ${DEX_ROUTER_CAPABILITY}`, { nodeId: node.nodeId });
+    }
+    const adapterVersion = node.productAdapters?.[entry.product];
+    if (adapterVersion === undefined) {
+      return refuse('CAPABILITY_UNSUPPORTED_ON_NODE', `node advertises no ${entry.product} adapter`, { nodeId: node.nodeId, product: entry.product });
+    }
+    if (semverMajor(adapterVersion) !== DEX_CONTRACT_MAJOR) {
+      return refuse('ADAPTER_MAJOR_MISMATCH', `node ${entry.product} adapter major does not match the pinned major`, {
+        nodeId: node.nodeId,
+        product: entry.product,
+        expectedMajor: DEX_CONTRACT_MAJOR,
+        actualVersion: adapterVersion
+      });
+    }
+  }
+
+  // Gates. +FAST never removes one: every gate below applies to every modifier combination.
+  if (entry.inputOrigin === 'dropzone' && !nonEmpty(request.acceptanceRef)) {
     return refuse('INPUT_NOT_ACCEPTED', 'dropzone input is untrusted until an accepted input reference is supplied', { command: entry.id });
   }
-  if (entry.dataClass !== 'PUBLIC' && (typeof request.promotionRef !== 'string' || request.promotionRef.length === 0)) {
+  if (entry.dataClass !== 'PUBLIC' && !nonEmpty(request.promotionRef)) {
     return refuse('DATA_NOT_PROMOTED', `${entry.dataClass} data is not routable without an explicit promotion`, { command: entry.id, dataClass: entry.dataClass });
   }
-  if (!isKnownOperation(entry.reachOperation)) {
+
+  // A supplied reference must be resolved and bound by the authoritative product interface.
+  let referencesVerified = false;
+  const suppliedRefs: Array<[ReferenceKind, string]> = [];
+  if (nonEmpty(request.acceptanceRef)) suppliedRefs.push(['acceptance', request.acceptanceRef]);
+  if (nonEmpty(request.promotionRef)) suppliedRefs.push(['promotion', request.promotionRef]);
+  if (suppliedRefs.length) {
+    if (!verifier) return refuse('REFERENCE_VERIFIER_UNAVAILABLE', 'no authoritative product interface is available to verify references; dispatch is refused', { command: entry.id });
+    if (!nonEmpty(request.targetId)) return refuse('REFERENCE_WRONG_BINDING', 'a reference cannot be bound without a target', { command: entry.id });
+    for (const [kind, ref] of suppliedRefs) {
+      let verdict: ReferenceVerdict;
+      try {
+        verdict = await verifier.verify({ kind, ref, product: entry.product, command: entry.id, targetId: request.targetId, nodeId: node?.nodeId ?? null, dataClass: entry.dataClass });
+      } catch {
+        verdict = { status: 'UNAVAILABLE' };
+      }
+      if (verdict.status !== 'VERIFIED') return verdictRefusal(kind, verdict);
+    }
+    referencesVerified = true;
+  }
+
+  if (entry.invokesReach && !isKnownOperation(entry.reachOperation!)) {
     return refuse('OPERATION_NOT_IN_CATALOGUE', 'manifest names an operation REACH does not catalogue', {
       command: entry.id,
-      reachOperation: entry.reachOperation
+      reachOperation: entry.reachOperation ?? 'none'
     });
   }
-  return { ok: true, nodeId: node.nodeId, command: entry, reachOperation: entry.reachOperation };
+  return {
+    ok: true,
+    nodeId: node?.nodeId ?? null,
+    command: entry,
+    reachOperation: entry.reachOperation,
+    effective: { dryRun: modifiers.includes('DRY'), authorityFromModifiers: false, gatesSkipped: false },
+    referencesVerified
+  };
 }
 
 export type HandoffEnvelope = {
