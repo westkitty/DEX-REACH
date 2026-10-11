@@ -1,3 +1,4 @@
+import { assertNotQuarantined } from '../shared/task-quarantine.js';
 import crypto from 'node:crypto';
 import { AuditLog } from '../shared/audit.js';
 import { listProcessActivities, type ProcessActivity } from '../shared/activity.js';
@@ -82,6 +83,7 @@ export async function buildTaskLog(task: ReachTaskRecord, dir = stateDir()): Pro
 }
 
 export async function resetTask(store: NodeTaskStore, taskId: string, control: 'reset' | 'retry' = 'reset'): Promise<ReachTaskRecord> {
+  await assertNotQuarantined(store.rootDir, taskId);
   const source = await store.read(taskId);
   if (!source) throw new Error(`task not found: ${taskId}`);
   await ownerControlAuthority(source.nodeId, store.rootDir);
@@ -105,6 +107,7 @@ export async function resetTask(store: NodeTaskStore, taskId: string, control: '
 }
 
 export async function cancelTask(store: NodeTaskStore, taskId: string): Promise<ReachTaskRecord> {
+  await assertNotQuarantined(store.rootDir, taskId);
   const task = await store.read(taskId);
   if (!task) throw new Error(`task not found: ${taskId}`);
   await ownerControlAuthority(task.nodeId, store.rootDir);
@@ -113,6 +116,7 @@ export async function cancelTask(store: NodeTaskStore, taskId: string): Promise<
 }
 
 export async function reconcileTask(store: NodeTaskStore, taskId: string, evidenceRef: string): Promise<ReachTaskRecord> {
+  await assertNotQuarantined(store.rootDir, taskId);
   if (!CONTROL_REF.test(evidenceRef)) throw new Error('evidence reference must be a bounded identifier; payload text is not accepted');
   const task = await store.read(taskId);
   if (!task) throw new Error(`task not found: ${taskId}`);
@@ -124,6 +128,7 @@ export async function reconcileTask(store: NodeTaskStore, taskId: string, eviden
 }
 
 export async function requestPause(store: NodeTaskStore, taskId: string, phase: string): Promise<ReachTaskRecord> {
+  await assertNotQuarantined(store.rootDir, taskId);
   if (!CONTROL_REF.test(phase)) throw new Error('pause phase must be a bounded identifier');
   const task = await store.read(taskId);
   if (!task) throw new Error(`task not found: ${taskId}`);
@@ -134,6 +139,7 @@ export async function requestPause(store: NodeTaskStore, taskId: string, phase: 
 }
 
 export async function resumeTask(store: NodeTaskStore, taskId: string): Promise<ReachTaskRecord> {
+  await assertNotQuarantined(store.rootDir, taskId);
   const task = await store.read(taskId);
   if (!task) throw new Error(`task not found: ${taskId}`);
   await ownerControlAuthority(task.nodeId, store.rootDir);

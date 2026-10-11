@@ -66,6 +66,7 @@ export class NodeAuthStore {
   private state: PersistedNodeAuth = structuredClone(EMPTY_STATE);
   private readonly stateFile: string;
   private readonly lockFile: string;
+  private serial: Promise<unknown> = Promise.resolve();
 
   constructor(stateDir: string) {
     this.stateFile = path.join(stateDir, 'node-auth.json');
@@ -73,12 +74,12 @@ export class NodeAuthStore {
   }
 
   async initialize(): Promise<void> {
-    await this.reload();
-    this.prune();
+    await this.exclusive(async()=>{ await this.reload(); this.prune(); });
   }
 
   /** Legacy bearer-token authentication. Asymmetric-only nodes never succeed here. */
   async authenticate(nodeId: string, token: string): Promise<boolean> {
+    return this.exclusive(async()=>{
     await this.reload();
     this.prune();
     const record = this.state.nodes[nodeId];
@@ -89,6 +90,7 @@ export class NodeAuthStore {
     if (timingSafeEqualText(candidate, record.active.hash)) return true;
     const now = Date.now();
     return record.previous.some(slot => Boolean(slot.validUntil && slot.validUntil > now) && timingSafeEqualText(candidate, slot.hash));
+    });
   }
 
   async authenticateProof(nodeId: string, encodedProof: string, requestPath = NODE_PROOF_PATH): Promise<{ ok: true } | { ok: false; reason: ProofFailure }> {
@@ -247,9 +249,11 @@ export class NodeAuthStore {
   }
 
   async isRevoked(nodeId: string): Promise<boolean> {
-    await this.reload();
-    const record = this.state.nodes[nodeId];
-    return !record || record.revoked;
+    return this.exclusive(async()=>{
+      await this.reload();
+      const record = this.state.nodes[nodeId];
+      return !record || record.revoked;
+    });
   }
 
   authMode(nodeId: string): NodeAuthMode | null {
@@ -275,12 +279,19 @@ export class NodeAuthStore {
   }
 
   private async mutate<T>(fn: () => Promise<T>): Promise<T> {
-    return withFileLock(this.lockFile, async () => {
+    return this.exclusive(()=>withFileLock(this.lockFile, async () => {
       await this.reload();
       const result = await fn();
       await this.persistUnlocked();
       return result;
-    });
+    }));
+  }
+
+  /** A read reload must not replace the shared snapshot while a mutation is awaiting disk I/O. */
+  private exclusive<T>(fn:()=>Promise<T>):Promise<T> {
+    const next=this.serial.then(fn);
+    this.serial=next.then(()=>undefined,()=>undefined);
+    return next;
   }
 
   private async reload(): Promise<void> {

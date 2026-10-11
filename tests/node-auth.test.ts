@@ -3,7 +3,32 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { NodeAuthStore } from '../src/gateway/node-auth.js';
+
+test('revocation refresh cannot overwrite transport enrollment awaiting persistence', async()=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'dex-auth-refresh-race-'));
+  try{
+    const store=new NodeAuthStore(dir);await store.initialize();await store.enroll('node-a');
+    const token=await store.createEnrollmentToken('node-a');
+    const {publicKey}=crypto.generateKeyPairSync('ed25519');
+    const seam=store as unknown as {persistUnlocked:()=>Promise<void>};
+    const original=seam.persistUnlocked.bind(store);
+    let entered:()=>void=()=>{};let release:()=>void=()=>{};
+    const ready=new Promise<void>(resolve=>{entered=resolve;});
+    const gate=new Promise<void>(resolve=>{release=resolve;});
+    seam.persistUnlocked=async()=>{entered();await gate;await original();};
+    const enrollment=store.consumeEnrollment('node-a',token,publicKey.export({type:'spki',format:'pem'}).toString());
+    await ready;
+    const refresh=store.isRevoked('node-a');
+    await new Promise(resolve=>setTimeout(resolve,50));release();
+    await enrollment;assert.equal(await refresh,false);
+    assert.equal(store.authMode('node-a'),'migrating');
+    const reopened=new NodeAuthStore(dir);await reopened.initialize();
+    assert.equal(reopened.authMode('node-a'),'migrating');
+    assert.equal(reopened.list()[0]?.transportKey,true);
+  }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
 
 test('node credentials are isolated, rotatable, and revocable', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-node-auth-'));

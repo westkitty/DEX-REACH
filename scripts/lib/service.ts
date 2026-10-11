@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -138,6 +139,20 @@ WantedBy=default.target
 
 export function launchAgentsDir(): string { return path.join(os.homedir(), 'Library', 'LaunchAgents'); }
 export function systemdUserDir(): string { return path.join(os.homedir(), '.config', 'systemd', 'user'); }
+
+/**
+ * process.execPath under Homebrew is the versioned keg (`<prefix>/Cellar/node/<version>/bin/node`), which
+ * `brew upgrade` deletes, so pinned services exit EX_CONFIG after any patch upgrade. Use the keg's stable
+ * `<prefix>/opt/node/bin/node` link, but only when it resolves to exactly the interpreter performing the
+ * install; otherwise keep the exact path rather than guess.
+ */
+export async function stableNodeBin(nodeBin = process.execPath): Promise<string> {
+  const match = nodeBin.match(/^(.*)\/Cellar\/(node(?:@[0-9]+)?)\/[^/]+\/bin\/node$/);
+  if (!match) return nodeBin;
+  const stable = path.join(match[1]!, 'opt', match[2]!, 'bin', 'node');
+  try { return (await fs.realpath(stable)) === (await fs.realpath(nodeBin)) ? stable : nodeBin; }
+  catch { return nodeBin; }
+}
 
 export function servicePath(nodeBin = process.execPath, inherited = process.env.PATH || '', runtimeRoot?: string): string {
   const runtimeBin = runtimeRoot ? path.join(runtimeRoot, 'node_modules', '.bin') : '';

@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Recovery tests compile the exact retained C13 readers from their Git revision.
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 22

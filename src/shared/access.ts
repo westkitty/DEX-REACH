@@ -342,3 +342,21 @@ export function classifyClient(clientName: string | undefined): ClientKind {
   if (/smoke/.test(name)) return 'smoke';
   return 'other';
 }
+
+export type TaskAuthority = { capabilities: ReachCapability[]; paths: string[] };
+/** Recheck persisted authority requirements without retaining raw payloads or consuming new uses. */
+export function authorizeTaskControl(state: AccessState, actor: RequestActor | undefined, operation: string,
+  profile: ReachProfile, authority: TaskAuthority | undefined, policyHash: string | undefined, now = Date.now()): void {
+  const kind = actor?.kind ?? 'other';
+  const decision = authorizeOperation({ ...state, grantRequired: {} }, actor, operation, profile, now);
+  if (!decision.allowed) throw new Error(decision.reason);
+  if (!authority) {
+    if (state.grantRequired[kind] || !policyHash || hashValue(state) !== policyHash) throw new Error('legacy task authority cannot be established');
+    return;
+  }
+  if (state.grantRequired[kind] && !state.grants.some(grant => grant.client === kind && Date.parse(grant.until) > now
+    && (grant.maxUses === null || grant.uses < grant.maxUses)
+    && authority.capabilities.every(c => grant.capabilities.includes(c)) && rootsCover(authority.paths, grant.roots))) {
+    throw new Error('task original authority is no longer granted');
+  }
+}

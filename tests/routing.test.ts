@@ -13,7 +13,7 @@ class FakeSocket extends EventEmitter {
   readyState: number = WebSocket.OPEN;
   sent: GatewayRequest[] = [];
   closed: { code: number; reason: string } | null = null;
-  send(data: string, cb?: (error?: Error) => void): void { this.sent.push(JSON.parse(data) as GatewayRequest); cb?.(); }
+  send(data: string, cb?: (error?: Error) => void): void { this.sent.push(JSON.parse(data) as GatewayRequest); cb?.(); this.emit('sent'); }
   close(code: number, reason: string): void { this.closed = { code, reason }; this.readyState = WebSocket.CLOSED; }
   terminate(): void { this.readyState = WebSocket.CLOSED; }
 }
@@ -44,6 +44,7 @@ test('routing is explicit: unknown, blank, offline, and revoked nodes fail and n
 
     // Explicit routing reaches exactly the named node, carrying the actor identity.
     const pending = registry.request('second-laptop', 'dex.file.write', { path: '/x' }, { kind: 'chatgpt', clientId: 'c', clientName: 'ChatGPT' });
+    await new Promise<void>(resolve => second.once('sent', resolve));
     assert.equal(second.sent.length, 1);
     assert.equal(primary.sent.length, 0);
     assert.equal(second.sent[0]!.actor?.kind, 'chatgpt');
@@ -70,6 +71,7 @@ test('routing is explicit: unknown, blank, offline, and revoked nodes fail and n
     await assert.rejects(registry.request('second-laptop', 'dex.fingerprint', {}), /revoked: second-laptop/);
     assert.equal(await auth.authenticate('second-laptop', secondToken), false);
     const again = registry.request('primary-mac', 'dex.fingerprint', {});
+    await new Promise<void>(resolve => primary.once('sent', resolve));
     assert.equal(primary.sent.length, 1);
     registry.deliverForTest({ type: 'response', id: primary.sent[0]!.id, ok: true, result: 'primary-ok' });
     assert.equal(await again, 'primary-ok');
@@ -84,6 +86,7 @@ test('routing is explicit: unknown, blank, offline, and revoked nodes fail and n
       { kind: 'chatgpt', clientId: 'trace', clientName: 'Trace test' },
       { traceparent: `00-${traceId}-2222222222222222-01` }
     );
+    await new Promise<void>(resolve => primary.once('sent', resolve));
     const tracedRequest = primary.sent.at(-1)!;
     assert.equal(tracedRequest.traceparent, `00-${traceId}-2222222222222222-01`);
     registry.deliverForTest({ type: 'response', id: tracedRequest.id, ok: true, result: 'primary-traced', traceId });

@@ -97,6 +97,11 @@ async function lockCanBeRecovered(file: string, staleMs: number): Promise<boolea
   }
 }
 
+async function guardAbandoned(recoveryFile: string, staleMs: number): Promise<boolean> {
+  try { return Date.now() - (await fs.stat(recoveryFile)).mtimeMs > staleMs; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+}
+
 async function acquireRecoveryGuard(file: string): Promise<fs.FileHandle | null> {
   try {
     return await fs.open(`${file}.recovery`, 'wx', 0o600);
@@ -157,6 +162,10 @@ export async function withFileLock<T>(
     let held: HeldLock | null = null;
     try {
       if (await exists(recoveryFile)) {
+        // A guard is held for milliseconds. One older than staleMs was abandoned by a recoverer that
+        // died mid-recovery; without removing it every acquirer would wait forever.
+        if (await guardAbandoned(recoveryFile, staleMs)) { await fs.rm(recoveryFile, { force: true }).catch(() => undefined); continue; }
+        if (Date.now() - started >= timeoutMs) throw new Error(`timed out waiting for DEX state lock: ${path.basename(file)}`);
         await sleep(10);
         continue;
       }

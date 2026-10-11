@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { stageRuntimeRelease, verifyRuntimeRelease } from '../scripts/lib/runtime-release.js';
+import { installLockFile, stageRuntimeRelease, verifyRuntimeRelease } from '../scripts/lib/runtime-release.js';
 import { servicePath } from '../scripts/lib/service.js';
 
 async function write(file: string, text: string): Promise<void> {
@@ -66,6 +66,24 @@ test('macOS installer does not run the mutable checkout build before runtime sta
   const packageJson = JSON.parse(await fs.readFile(path.resolve('package.json'), 'utf8')) as { scripts?: Record<string, string> };
   assert.equal(packageJson.scripts?.['install:macos'], 'tsx scripts/install-macos.ts');
   assert.doesNotMatch(packageJson.scripts?.['install:macos'] || '', /npm run build|prebuild/);
+});
+
+test('macOS install has a revision-bound rollback capsule and explicit recovery command', async () => {
+  const packageJson = JSON.parse(await fs.readFile(path.resolve('package.json'), 'utf8')) as { scripts?: Record<string, string> };
+  const installer = await fs.readFile(path.resolve('scripts/install-macos.ts'), 'utf8');
+  const rollback = await fs.readFile(path.resolve('scripts/rollback-macos.ts'), 'utf8');
+  assert.equal(packageJson.scripts?.['rollback:macos'], 'tsx scripts/rollback-macos.ts');
+  const snapshotAt = installer.indexOf('prepareRuntimeRollbackSnapshot(');
+  const workerWriteAt = installer.indexOf('atomicWriteFile(workspaceWorkerConfigFile()');
+  const plistWriteAt = installer.indexOf('atomicWriteFile(service.target, contents');
+  const activationAt = installer.indexOf("args: ['bootstrap', domain, helperTarget]");
+  assert.ok(snapshotAt >= 0 && snapshotAt < workerWriteAt);
+  assert.ok(workerWriteAt < plistWriteAt && plistWriteAt < activationAt);
+  assert.match(installer, /launchctl.*print-disabled/s);
+  assert.match(installer, /withFileLock\(installLockFile\(localStateDir\), install/);
+  assert.match(rollback, /withFileLock\(installLockFile\(localStateDir\), rollback/);
+  assert.equal(installLockFile('/state'), path.join('/state', 'runtime', 'install.lock'));
+  assert.match(installer, /do not have distinct running process identities/);
 });
 
 

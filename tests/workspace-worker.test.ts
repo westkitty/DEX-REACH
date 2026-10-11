@@ -162,3 +162,38 @@ test('every delegated operation is admitted under the narrowest profile the node
     assert.equal(descriptor.mutation, false, `${operation} is delegated but mutates`);
   }
 });
+
+
+test('fingerprint transport waits through a bounded capture beyond the ordinary IPC deadline', async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-worker-deadline-test-'));
+  const previous = process.env.DEX_WORKSPACE_WORKER_DIR;
+  process.env.DEX_WORKSPACE_WORKER_DIR = temp;
+  const timers = new Set<NodeJS.Timeout>();
+  const sockets = new Set<net.Socket>();
+  const server = net.createServer(socket => {
+    sockets.add(socket);
+    socket.on('error', () => undefined);
+    socket.once('close', () => sockets.delete(socket));
+    socket.once('data', () => {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        socket.end(JSON.stringify({ ok: true, value: { nodeId: 'delayed-worker' } }) + '\n');
+      }, 5_500);
+      timers.add(timer);
+    });
+  });
+  try {
+    await new Promise<void>(resolve => server.listen(workspaceWorkerSocketPath(), resolve));
+    await fs.chmod(workspaceWorkerSocketPath(), 0o600);
+    const value = await workspaceWorkerExecute('delayed-worker', 'dex.fingerprint', { cwd: temp }, 'test') as { nodeId: string };
+    assert.equal(value.nodeId, 'delayed-worker');
+    await assert.rejects(workspaceWorkerExecute('delayed-worker', 'dex.file.read', { path: temp }, 'test'), /did not respond in time/);
+  } finally {
+    for (const timer of timers) clearTimeout(timer);
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    if (previous === undefined) delete process.env.DEX_WORKSPACE_WORKER_DIR;
+    else process.env.DEX_WORKSPACE_WORKER_DIR = previous;
+    await fs.rm(temp, { recursive: true, force: true });
+  }
+});

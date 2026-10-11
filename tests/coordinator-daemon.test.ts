@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { coordinatorSocketPath } from '../src/shared/work-coordinator.js';
-import { coordinatedEvents, coordinatedStatus } from '../src/coordinator/client.js';
+import { bindCoordinatorCaller, coordinatedAcquire, coordinatedEvents, coordinatedRelease, coordinatedStatus } from '../src/coordinator/client.js';
 
 async function socketCall(socketPath: string, request: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -61,6 +61,62 @@ test('coordinator daemon owns an account-private socket and rejects malformed fr
     const malformed = await socketCall(socketPath, '{not-json') as { ok: boolean; error?: string };
     assert.equal(malformed.ok, false);
     assert.match(malformed.error || '', /JSON|request/);
+
+    // Exercise the actual routed path: a short-lived caller acquires through the daemon,
+    // queues behind a conflicting repository lease, then exits. The ticket must retain that
+    // caller PID so stale-ticket recovery can observe its death instead of the daemon PID.
+    const { acquireWork, cancelTicket, readCoordinatorState, releaseWork } = await import('../src/shared/work-coordinator.js');
+    // Actual daemon socket release must carry the living requester's PID, not the daemon's.
+    const completedLease = await coordinatedAcquire({ executor: 'other', access: 'read', workload: 'light' }, { requireDaemon: true });
+    assert.equal(completedLease.status, 'acquired');
+    if (completedLease.status === 'acquired') {
+      assert.equal(completedLease.lease.pid, process.pid);
+      const forged = await socketCall(socketPath, JSON.stringify({ version: 1, command: 'release', payload: { id: completedLease.lease.id, options: { pid: process.pid } } })) as any;
+      assert.equal(forged.value.released, false);
+      const wrongProof = await socketCall(socketPath, JSON.stringify({ version: 1, command: 'release', payload: { id: completedLease.lease.id, options: { pid: process.pid, callerProof: '0'.repeat(64) } } })) as any;
+      assert.equal(wrongProof.value.released, false);
+      assert.ok((await readCoordinatorState()).leases.some(lease => lease.id === completedLease.lease.id));
+      const wrongCaller = await coordinatedRelease(completedLease.lease.id, { pid: process.pid + 1 });
+      assert.equal(wrongCaller.released, false);
+      const released = await coordinatedRelease(completedLease.lease.id);
+      assert.equal(released.released, true);
+      assert.equal((await readCoordinatorState()).leases.some(lease => lease.id === completedLease.lease.id), false);
+    }
+    const repositoryRoot = path.join(state, 'repo');
+    await fs.mkdir(repositoryRoot, { recursive: true });
+    const held = await acquireWork({ executor: 'human', access: 'mutate', workload: 'medium', repositoryRoot, snapshot: host() });
+    assert.equal(held.status, 'acquired');
+    if (held.status === 'acquired') {
+      const taskId = `rtsk_${Date.now().toString(16)}_${'a'.repeat(32)}`;
+      const source = `import { coordinatedAcquire } from './src/coordinator/client.ts'; const result = await coordinatedAcquire({ executor: 'chatgpt', access: 'mutate', workload: 'medium', repositoryRoot: ${JSON.stringify(repositoryRoot)}, taskId: ${JSON.stringify(taskId)} }); console.log(JSON.stringify({ pid: process.pid, result }));`;
+      const caller = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', source], {
+        cwd: process.cwd(), env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe']
+      });
+      let callerStdout = '';
+      let callerStderr = '';
+      caller.stdout?.setEncoding('utf8');
+      caller.stderr?.setEncoding('utf8');
+      caller.stdout?.on('data', chunk => { callerStdout += chunk; });
+      caller.stderr?.on('data', chunk => { callerStderr += chunk; });
+      const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+        caller.once('error', reject);
+        caller.once('exit', (code, signal) => resolve({ code, signal }));
+      });
+      try {
+        assert.equal(exit.code, 0, callerStderr);
+        const returned = JSON.parse(callerStdout) as { pid: number; result: { status: string } };
+        assert.equal(returned.result.status, 'queued');
+        const ticket = (await readCoordinatorState()).tickets.find(item => item.taskId === taskId);
+        assert.ok(ticket);
+        assert.equal(ticket?.pid, returned.pid);
+        assert.notEqual(ticket?.pid, child.pid);
+        assert.equal(ticket?.pidIsWorkload, false);
+      } finally {
+        const ticket = (await readCoordinatorState()).tickets.find(item => item.taskId === taskId);
+        if (ticket) await cancelTicket(ticket.id);
+        await releaseWork(held.lease.id, { force: true });
+      }
+    }
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
@@ -70,6 +126,17 @@ test('coordinator daemon owns an account-private socket and rejects malformed fr
     if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR; else process.env.DEX_REACH_STATE_DIR = previous;
     await fs.rm(state, { recursive: true, force: true });
   }
+});
+
+test('routed acquisition binds liveness to the caller without claiming its PID is a workload', () => {
+  const callerPid = 12_345;
+  const bound = bindCoordinatorCaller({ executor: 'chatgpt', access: 'read', workload: 'light' }, callerPid);
+  assert.equal(bound.pid, callerPid);
+  assert.equal(bound.pidIsWorkload, false);
+
+  const workload = bindCoordinatorCaller({ executor: 'chatgpt', access: 'read', workload: 'light', pid: 54_321 }, callerPid);
+  assert.equal(workload.pid, 54_321);
+  assert.equal(workload.pidIsWorkload, true);
 });
 
 test('a coordinator socket owned by another account is refused rather than trusted or bypassed', async () => {
@@ -186,5 +253,32 @@ test('invalidation fences a pending sample and acquisition does not join it', as
     finish(host()); await status;
     const next = await execute(statusRequest) as import('../src/shared/work-coordinator.js').WorkStatus;
     assert.equal(calls, 3); assert.equal(next.capacity.livePressure.memory, 'warning');
+  });
+});
+
+
+test('caller proof survives daemon handler restart and rejects PID-only impersonation', async () => {
+  const { createCoordinatorHandler } = await import('../src/coordinator/main.js');
+  const crypto = await import('node:crypto');
+  const { readCoordinatorState } = await import('../src/shared/work-coordinator.js');
+  await withHandlerState(async () => {
+    const proof = crypto.randomBytes(32).toString('hex');
+    const callerProofHash = crypto.createHash('sha256').update(proof).digest('hex');
+    const first = createCoordinatorHandler(async () => host());
+    for (const invalid of [['a'.repeat(64)], {}, 12, 'bad']) {
+      await assert.rejects(first({ version: 1, command: 'acquire', payload: { request: { executor: 'other', access: 'read', workload: 'light', callerProofHash: invalid } } }), /invalid caller release proof digest/);
+    }
+    assert.equal((await readCoordinatorState()).leases.length, 0);
+    const admission = await first({ version: 1, command: 'acquire', payload: { request: { executor: 'other', access: 'read', workload: 'light', pid: process.pid, callerProofHash } } }) as any;
+    assert.equal(admission.status, 'acquired');
+    const unrelated = await first({ version: 1, command: 'acquire', payload: { request: { executor: 'other', access: 'read', workload: 'light', pid: process.pid, callerProofHash } } }) as any;
+    assert.equal(unrelated.status, 'acquired');
+    const restarted = createCoordinatorHandler(async () => host());
+    const release = (callerProof?: string) => restarted({ version: 1, command: 'release', payload: { id: admission.lease.id, options: { pid: process.pid, callerProof } } }) as Promise<any>;
+    assert.equal((await release()).released, false);
+    assert.equal((await release(callerProofHash)).released, false); // public digest is not the proof
+    assert.equal((await release(proof)).released, true);
+    assert.deepEqual((await readCoordinatorState()).leases.map(l => l.id), [unrelated.lease.id]);
+    assert.equal((await restarted({ version: 1, command: 'release', payload: { id: unrelated.lease.id, options: { force: true } } }) as any).released, true);
   });
 });

@@ -15,7 +15,9 @@ export type CapacityHealth = { profile: CapacityProfile; interactiveReady: boole
 function directory(): string { return path.join(machineStateDir(), 'coordinator'); }
 function profileFile(): string { return path.join(directory(), 'capacity-profile.json'); }
 function healthFile(): string { return path.join(directory(), 'capacity-health.json'); }
-function lockFile(): string { return path.join(directory(), 'capacity-profile.lock'); }
+/** Serializes capacity profile and health writes; checkpoint fences hold it with the coordinator locks. */
+export function capacityProfileLockFile(): string { return path.join(directory(), 'capacity-profile.lock'); }
+const lockFile = capacityProfileLockFile;
 
 function validProfile(value: unknown): value is ProfileRecord {
   return Boolean(value) && typeof value === 'object' && CAPACITY_PROFILES.includes((value as ProfileRecord).profile) && typeof (value as ProfileRecord).updatedAt === 'string';
