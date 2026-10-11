@@ -1,6 +1,6 @@
 # ADR-0004 — DEX 1.0 Command Router on the REACH Boundary
 
-Status: Proposed (design). The router skeleton in `src/shared/dex-command-router.ts` implements only the fixture-tested subset in section 9. No product integration is claimed.
+Status: Proposed (design). The router skeleton in `src/shared/dex-command-router.ts` implements only the fixture-tested subset in section 9. No product integration is claimed. Sections 3.1, 3.4, 5, 6.4, 7 and 9 were amended by the correction campaign (Repair E/F); the amendments are fixture-verified only, and DEX has not confirmed them.
 Date: 2026-10-11
 Decision owners: DEX//REACH project
 Companion decisions: DEX-owned ADR-0013 (50-command system and manifests), ADR-0014 (product adapter interface), ADR-0016 (provenance graph and derived search projections), ADR-0017 (ecosystem control vocabulary), as listed in [the decision index](./README.md).
@@ -66,7 +66,9 @@ Field rules:
 - `safetyClass` is one of the five REACH safety classes (ADR-0002, `SAFETY_CLASSES`): `PURE_READ_IDEMPOTENT`, `SIDE_EFFECTING_IDEMPOTENT`, `PLAN_COMMIT`, `PROCESS_UNKNOWN_EFFECT`, `DESTRUCTIVE`.
 - `dataClass` is `PUBLIC`, `PRIVATE` or `SEALED`.
 - `inputOrigin` is `owner` or `dropzone`.
-- `reachOperation` must be a key in `DEX_OPERATIONS`. It is the only execution target a command can have.
+- `invokesReach` is a required boolean. It declares whether the command actually invokes REACH. Only such commands have a node requirement (section 5) and a REACH target.
+- `reachOperation` is required when `invokesReach` is `true`, must be a key in `DEX_OPERATIONS`, and must be absent when `invokesReach` is `false`. A command with no REACH operation is never given one by REACH. No mapping is fabricated.
+- `modifiers` is an optional array of `DRY`, `SHIP` or `FAST`. Each must be unique and declared by the command. Their meaning is in section 3.4.
 - `synthetic` is optional. A manifest that sets it to `true` is a fixture and must never be loaded in production. Real manifests do not set it.
 
 ### 3.2 Loader behaviour (fail closed)
@@ -80,11 +82,25 @@ The loader is a pure function over parsed JSON. It refuses:
 
 The major check runs before field validation, so a future major with new fields produces a version refusal rather than a field error.
 
+### 3.2a Production loading (Repair E)
+
+`loadCommandManifest(raw, { production: true })` refuses any manifest with `synthetic: true` (`SYNTHETIC_MANIFEST_IN_PRODUCTION`). This is a loader gate only. No production policy is wired to it yet: nothing in the running node selects the option, so the gate is inert until that wiring is reviewed.
+
 ### 3.3 One router, not 50 engines and not 50 tools
 
 - The router is a single lookup: `command id -> (product, safety, data class, input origin, reach operation)`, followed by the checks in section 5.
 - Dispatch reuses the existing operation path (`executeOperation` / `nativeCall`) and its authorization, profile, budget, secret and task-record gates. The router adds no execution path.
 - The MCP tool surface does not grow because of this ADR. Exposing a generic command entry point to remote clients is a separate decision that needs its own ADR and an update to the tool-surface invariants.
+
+### 3.4 Modifiers are DEX-owned; REACH enforces monotonicity
+
+DEX owns the modifier labels and their meaning. REACH enforces the following whatever the manifest says:
+
+- `+DRY` cannot mutate. A DRY request on a command that is not `PURE_READ_IDEMPOTENT` is refused with `MODIFIER_MUTATION_FORBIDDEN`.
+- `+SHIP` grants no authority. The plan records `authorityFromModifiers: false`, and a SHIP request still meets every input, promotion and acceptance gate.
+- `+FAST` cannot skip a gate. Promotion and acceptance references are still required and verified.
+
+An unknown modifier name is `MODIFIER_UNKNOWN`. A modifier that the command does not declare is `MODIFIER_UNKNOWN`.
 
 ## 4. Versioning
 
@@ -127,9 +143,24 @@ No step may substitute a different node. A refusal's `details` may name the requ
 
 ## 7. Refusal codes (closed list)
 
-`MANIFEST_INVALID`, `DEX_CONTRACT_MAJOR_MISMATCH`, `COMMAND_MAJOR_MISMATCH`, `UNKNOWN_COMMAND`, `NODE_ID_REQUIRED`, `NODE_NOT_FOUND`, `NODE_NOT_ONLINE`, `CAPABILITY_UNSUPPORTED_ON_NODE`, `ADAPTER_MAJOR_MISMATCH`, `INPUT_NOT_ACCEPTED`, `DATA_NOT_PROMOTED`, `OPERATION_NOT_IN_CATALOGUE`, `HANDOFF_INVALID`, `WITNESS_REMIX_EDGE_FORBIDDEN`.
+The closed list has 21 codes. The first 14 were in the original ADR. The last seven were added by Repair E/F: `SYNTHETIC_MANIFEST_IN_PRODUCTION`, `MODIFIER_UNKNOWN`, `MODIFIER_MUTATION_FORBIDDEN`, `REFERENCE_VERIFIER_UNAVAILABLE`, `REFERENCE_NOT_FOUND`, `REFERENCE_WRONG_BINDING`, `REFERENCE_REVOKED_OR_INAPPLICABLE`.
+
+`MANIFEST_INVALID`, `DEX_CONTRACT_MAJOR_MISMATCH`, `COMMAND_MAJOR_MISMATCH`, `UNKNOWN_COMMAND`, `NODE_ID_REQUIRED`, `NODE_NOT_FOUND`, `NODE_NOT_ONLINE`, `CAPABILITY_UNSUPPORTED_ON_NODE`, `ADAPTER_MAJOR_MISMATCH`, `INPUT_NOT_ACCEPTED`, `DATA_NOT_PROMOTED`, `OPERATION_NOT_IN_CATALOGUE`, `HANDOFF_INVALID`, `WITNESS_REMIX_EDGE_FORBIDDEN`, `SYNTHETIC_MANIFEST_IN_PRODUCTION`, `MODIFIER_UNKNOWN`, `MODIFIER_MUTATION_FORBIDDEN`, `REFERENCE_VERIFIER_UNAVAILABLE`, `REFERENCE_NOT_FOUND`, `REFERENCE_WRONG_BINDING`, `REFERENCE_REVOKED_OR_INAPPLICABLE`.
 
 A new code requires an ADR amendment. Consumers must treat an unknown code as a refusal.
+
+### 6.4 Promotion and acceptance references are verified, not presence-checked (Repair F)
+
+`promotionRef` and `acceptanceRef` are resolved by an injected `ProductReferenceVerifier`, which is the authoritative product interface. A string that is present proves nothing. Dispatch is refused in every case except a `VERIFIED` answer:
+
+- no verifier, or a verifier that throws or reports `UNAVAILABLE`: `REFERENCE_VERIFIER_UNAVAILABLE`;
+- the reference is not held by the product: `REFERENCE_NOT_FOUND`;
+- a reference cannot be bound because the request names no target: `REFERENCE_WRONG_BINDING`, and the verifier is not consulted;
+- the reference is bound to another product, command, target, node or data class: `REFERENCE_WRONG_BINDING`;
+- the reference is revoked or does not apply to this request: `REFERENCE_REVOKED_OR_INAPPLICABLE`;
+- the reference is absent where section 6.1 or 6.2 requires one: `DATA_NOT_PROMOTED` or `INPUT_NOT_ACCEPTED`, and the verifier is not consulted.
+
+REACH does not import another product's database. The verifier is the only route to product state.
 
 ## 8. Search projections and handoffs
 
@@ -159,6 +190,8 @@ Implemented, with fixture tests (`tests/dex-command-router.test.ts`):
 
 - the loader (section 3.2), including major-first ordering and the closed refusal list;
 - command routing checks in section 5 order, section 6.2 and the PRIVATE/SEALED part of section 6.1;
+- modifier monotonicity (section 3.4) and verified promotion and acceptance references (section 6.4);
+- the adapter and the synthetic fixture `tests/fixtures/dex-router/command-manifest.synthetic-v1.json` (seven commands, `synthetic: true`);
 - the WITNESS-to-REMIX refusal and receiver-side handoff validation (sections 6.3 and 8.2);
 - a projection filter that excludes unpromoted PRIVATE/SEALED items and records a source digest (section 8.1).
 
@@ -168,11 +201,11 @@ Not implemented, deliberately:
 - no dispatch. The router returns a plan (`nodeId`, command, `reachOperation`) and executes nothing;
 - no persistence of routing decisions, promotion ledger or acceptance records;
 - no connection to the live registry. The router takes a plain node view so it can be tested without a gateway;
-- no DEX product behaviour, adapters, or the real 50-command roster.
+- no DEX product behaviour, no real 50-command roster, and no DEX-owned manifest. The DEX manifest was not readable from REACH; see `docs/architecture/dex-contract-alignment.md`.
 
 ## 10. Open questions for DEX (must be answered before integration)
 
-1. The authoritative manifest shape, field names, and whether `DEX//NEXT` and other ids match section 3.1.
+1. The authoritative manifest shape, field names, and whether `DEX//NEXT` and other ids match section 3.1. Status: unanswered. DEX was unreachable (HTTP 403), so the manifest was neither read nor generated.
 2. Whether DEX ADR-0014's `DexProductAdapter` v1.0.0 uses the same product ids and semver rules.
 3. The promotion record: its fields, who may promote, and how a promotion is revoked.
 4. The DROPZONE acceptance record and who may accept.
@@ -187,6 +220,6 @@ Not implemented, deliberately:
 
 ## 12. Validation
 
-The fixture-backed tests cover: the loader's refusals; unknown commands (including case and whitespace variants); command and contract major mismatches; missing node id; an offline node with a capable online alternative (the refusal must not name the alternative); missing capability and adapter major mismatch; dropzone acceptance; PRIVATE/SEALED without promotion; catalogue membership; the WITNESS-to-REMIX edge; receiver-side handoff validation; and projection exclusion and determinism.
+The fixture-backed tests cover: the loader's refusals; the production gate for synthetic manifests; `invokesReach` and `reachOperation` consistency; modifier monotonicity; verified references (`tests/dex-reference-verification.test.ts`); unknown commands (including case and whitespace variants); command and contract major mismatches; missing node id; an offline node with a capable online alternative (the refusal must not name the alternative); missing capability and adapter major mismatch; dropzone acceptance; PRIVATE/SEALED without promotion; catalogue membership; the WITNESS-to-REMIX edge; receiver-side handoff validation; and projection exclusion and determinism.
 
 These tests prove the skeleton's logic against a synthetic fixture. They do not prove any DEX integration.
