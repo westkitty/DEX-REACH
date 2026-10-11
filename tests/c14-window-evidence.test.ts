@@ -196,3 +196,12 @@ test('application restore treats an absent revocation list as empty but refuses 
     await assert.rejects(verifyRestoredApplication(w.source), /APPLICATION_REVOCATIONS/);
   } finally { await w.cleanup(); }
 });
+
+import { selectQuarantineCandidates } from '../scripts/lib/c14-window-evidence.js';
+test('a later quarantine run appends only new eligible records and never re-appends existing ones', () => {
+  const rec = (taskId: string) => ({ taskId, rootTaskId: taskId, parentTaskId: null, actorId: 'a', nodeId: 'macbook-air.local', operation: 'dex.process.run', idempotencyKey: taskId, payloadSha256: 'a'.repeat(64), createdAtUtc: '2026-10-11T00:00:00.000Z', attemptNumber: 1, state: 'PREPARING' });
+  const row = (taskId: string, classification = 'AMBIGUOUS_EFFECT', lease = false) => ({ taskId, classification, evidence: { activity: false, lease, ticket: false } }) as unknown as TaskInspection;
+  const records = Object.fromEntries(['old', 'new', 'live', 'odd'].map(id => [id, rec(id)]));
+  const s = selectQuarantineCandidates([row('old'), row('new'), row('live', 'AMBIGUOUS_EFFECT', true), row('odd', 'ACTIVE_CONFIRMED')], records, new Set(['old']));
+  assert.deepEqual(s.append.map(a => a.task.taskId), ['new']); assert.deepEqual(s.already, ['old']); assert.deepEqual(s.ineligible.sort(), ['live', 'odd']);
+});

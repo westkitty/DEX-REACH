@@ -8,8 +8,8 @@ import { inspectTasks, publicTaskReport, realDirectory } from './lib/recovery-re
 import { inspectCoverage, publicCoverage } from './lib/recovery-coverage.js';
 import { runtimeTreeSha256 } from './lib/runtime-rollback.js';
 import { captureOffline, hostProbe, offlineQuiescenceBlockers } from './lib/recovery-offline-capture.js';
-import { readCapturePointer, readWindowAuthorization, verifyWindowEvidence, WINDOW } from './lib/c14-window-evidence.js';
-import { appendQuarantine, type QuarantinedTaskIdentity } from '../src/shared/task-quarantine.js';
+import { readCapturePointer, readWindowAuthorization, selectQuarantineCandidates, verifyWindowEvidence, WINDOW } from './lib/c14-window-evidence.js';
+import { appendQuarantine, readQuarantine, type QuarantinedTaskIdentity } from '../src/shared/task-quarantine.js';
 import { TransactionEvidenceLog, ExpectationStore } from './lib/recovery-evidence.js';
 import { COMPAT_HOME_PRESERVATION_RULE, defaultLinkPolicy } from './lib/recovery-symlinks.js';
 import { recoveryStorageEstimate } from './lib/recovery-storage.js';
@@ -148,10 +148,10 @@ async function quarantineCommand(): Promise<number> {
   if (!authorization?.historicalTaskQuarantine) throw new Error('QUARANTINE_NOT_AUTHORIZED');
   const rows = await liveTaskReport();
   const store = JSON.parse(await fs.readFile(path.join(liveRoots.state, 'tasks', 'store.json'), 'utf8')) as { records: Record<string, QuarantinedTaskIdentity> };
-  const eligible = rows.filter(r => (r.classification === 'AMBIGUOUS_EFFECT' || r.classification === 'INSUFFICIENT_EVIDENCE') && !r.evidence.activity && !r.evidence.lease && !r.evidence.ticket && store.records[r.taskId]);
-  const written = await appendQuarantine(liveRoots.state, eligible.map(r => ({ task: store.records[r.taskId]!, classification: r.classification })), { kind: 'owner-authorization', grantedAt: authorization.grantedAt, scope: 'Preserve historical task records; effect unknown; never replay, erase history or claim effects are known.' });
-  console.log(JSON.stringify({ mode: 'APPEND_ONLY_QUARANTINE', quarantined: written.length, ineligible: rows.length - eligible.length, effect: 'UNKNOWN', replayAuthorized: false, taskRecordsModified: false }, null, 2));
-  return rows.length === eligible.length ? 0 : 2;
+  const selection = selectQuarantineCandidates(rows, store.records, new Set((await readQuarantine(liveRoots.state)).keys()));
+  const written = await appendQuarantine(liveRoots.state, selection.append, { kind: 'owner-authorization', grantedAt: authorization.grantedAt, scope: 'Preserve historical task records; effect unknown; never replay, erase history or claim effects are known.' });
+  console.log(JSON.stringify({ mode: 'APPEND_ONLY_QUARANTINE', quarantined: written.length, alreadyQuarantined: selection.already.length, ineligible: selection.ineligible.length, effect: 'UNKNOWN', replayAuthorized: false, taskRecordsModified: false }, null, 2));
+  return selection.ineligible.length === 0 ? 0 : 2;
 }
 async function main() {
   const command = process.argv[2] ?? 'preflight';

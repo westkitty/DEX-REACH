@@ -183,3 +183,19 @@ export async function verifyWindowEvidence(input: {
     return result;
   }
 }
+
+/**
+ * Which unresolved records an owner quarantine run should append. Already-quarantined records are
+ * reported, never re-appended. Only AMBIGUOUS_EFFECT or INSUFFICIENT_EVIDENCE records with no live
+ * activity, lease or ticket qualify.
+ */
+export function selectQuarantineCandidates(rows: TaskInspection[], records: Record<string, QuarantinedTaskIdentity>, existing: ReadonlySet<string>) {
+  const append: Array<{ task: QuarantinedTaskIdentity; classification: string }> = [], already: string[] = [], ineligible: string[] = [];
+  for (const r of rows) {
+    if (existing.has(r.taskId)) { already.push(r.taskId); continue; }
+    const record = records[r.taskId];
+    if ((r.classification === 'AMBIGUOUS_EFFECT' || r.classification === 'INSUFFICIENT_EVIDENCE') && !r.evidence.activity && !r.evidence.lease && !r.evidence.ticket && record) append.push({ task: record, classification: r.classification });
+    else ineligible.push(r.taskId);
+  }
+  return { append, already, ineligible };
+}
