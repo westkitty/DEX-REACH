@@ -70,3 +70,33 @@ test('a residue symlink is never treated as an orphaned temp', async () => {
     assert.ok(!m.entries.some(e => e.residue));
   } finally { await w.cleanup(); }
 });
+
+import { processStartedAfter } from '../scripts/lib/recovery-coverage.js';
+import { materializeManifest } from '../scripts/lib/recovery-capture.js';
+test('a reused pid cannot make an old orphaned temp look like a live write', () => {
+  const name = temp('events.jsonl', process.pid), alive = () => true;
+  // This process started long after a temp last written at the epoch: it cannot be that temp's writer.
+  assert.equal(processStartedAfter(process.pid, 0), true);
+  assert.equal(orphanedAtomicTemp(name, alive, 0), true);
+  // A temp written after this process started may be its own in-progress write: still blocking.
+  assert.equal(orphanedAtomicTemp(name, alive, Date.now()), false);
+  // An unknown start time never releases a live pid.
+  assert.equal(orphanedAtomicTemp(name, alive, 0, () => false), false);
+  assert.equal(orphanedAtomicTemp(name, alive), false, 'no mtime, no release');
+});
+
+test('captured copies keep source modification times and a snapshot refusal names its problem', async () => {
+  const w = await fixture(); try {
+    const old = new Date('2026-09-21T09:32:04Z'), file = path.join(w.source.state, 'coordinator/history', temp('events.jsonl', process.pid));
+    await fs.writeFile(file, 'residue', { mode: 0o600 }); await fs.utimes(file, old, old);
+    const m = await inspectCoverage(w.source, 'synthetic', defaultLinkPolicy());
+    assert.deepEqual(m.problems, []);
+    assert.equal(m.entries.find(e => e.relative.endsWith(path.basename(file)))!.residue, 'ORPHANED_ATOMIC_TEMP');
+    const staging = path.join(w.directory, 'copy'), roots = await materializeManifest(m, w.source, staging);
+    assert.equal(Math.round((await fs.stat(path.join(roots.state, 'coordinator/history', path.basename(file)))).mtimeMs / 1000), Math.round(old.getTime() / 1000));
+    await verifyCoverage(m, roots, manifestDigest(m));
+    // A live write appearing afterwards is reported by class, never by path.
+    await fs.writeFile(path.join(w.source.state, 'coordinator/history', temp('events.jsonl', process.pid)), 'x', { mode: 0o600 });
+    await assert.rejects(verifyCoverage(m, w.source, manifestDigest(m)), /^Error: SNAPSHOT_INCOMPLETE_OR_CHANGED:coordinator:TRANSIENT_WRITE_OR_LOCK_PRESENT$/);
+  } finally { await w.cleanup(); }
+});
