@@ -3,7 +3,8 @@ import path from 'node:path';
 import { recoveryStoragePlan } from './recovery-storage.js';
 import { requiredFreeBytes } from './c14-recovery-preflight.js';
 import { hashValue } from '../../src/shared/hash.js';
-import { safeRead, realDirectory } from './recovery-reconciliation.js';
+import { safeRead, safeReadSync, realDirectory } from './recovery-reconciliation.js';
+import fsSync from 'node:fs';
 import { assertOwned, rehearseRestore, type SyntheticWorkspace } from './recovery-rehearsal.js';
 import { validateBoundary, type SnapshotBoundary } from './recovery-consistency.js';
 import { verifyCoverage, type Manifest, type Roots } from './recovery-coverage.js';
@@ -28,7 +29,7 @@ export async function materializeManifest(manifest: Manifest, source: Roots, sta
   for (const d of manifest.directories) { const target = path.join(roots[d.root], d.relative); await fs.mkdir(target, { recursive: true, mode: d.mode }); await realDirectory(target); await fs.chmod(target, d.mode); }
   for (const e of manifest.entries.filter(e => e.kind !== 'link')) {
     await beforeFile(); await fs.mkdir(path.dirname(path.join(roots[e.root], e.relative)), { recursive: true, mode: 0o700 }); await realDirectory(path.dirname(path.join(roots[e.root], e.relative)));
-    await durableWrite(path.join(roots[e.root], e.relative), await safeRead(source[e.root], e.relative, 512 * 1024 * 1024), e.mode);
+    durableWriteSync(path.join(roots[e.root], e.relative), safeReadSync(source[e.root], e.relative, 512 * 1024 * 1024), e.mode);
   }
   for (const e of manifest.entries.filter(e => e.kind === 'link')) { if (!e.link) throw new Error('LINK_MANIFEST'); await realDirectory(path.dirname(path.join(roots[e.root], e.relative))); await fs.symlink(e.link.target, path.join(roots[e.root], e.relative)); }
   return roots;
@@ -41,6 +42,13 @@ export async function syncDirectories(directory: string): Promise<void> {
     if (st.isDirectory() && !st.isSymbolicLink()) await syncDirectories(child);
   }
   const handle = await fs.open(directory, 'r'); try { await handle.sync(); } finally { await handle.close(); }
+}
+/** Exclusive create, write, chmod, fsync, close: synchronous so no completion can be lost mid-copy. */
+export function durableWriteSync(file: string, bytes: Buffer, mode: number): void {
+  const parent = path.dirname(file), real = fsSync.realpathSync(parent);
+  if (real !== parent || !fsSync.lstatSync(parent).isDirectory()) throw new Error('SYMLINK_ROOT_REFUSED');
+  const fd = fsSync.openSync(file, 'wx', mode);
+  try { fsSync.writeFileSync(fd, bytes); fsSync.fchmodSync(fd, mode); fsSync.fsyncSync(fd); } finally { fsSync.closeSync(fd); }
 }
 export async function durableWrite(file: string, bytes: Buffer, mode: number) {
   await realDirectory(path.dirname(file)); const h = await fs.open(file, 'wx', mode);

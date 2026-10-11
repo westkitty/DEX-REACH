@@ -127,3 +127,17 @@ for (const [name, hook, reason] of [
     await assert.rejects(captureOffline(req), /EVIDENCE_TRANSITION_REFUSED/);
   } finally { await s.w.cleanup(); }
 });
+
+import { safeReadSync } from '../scripts/lib/recovery-reconciliation.js';
+test('the synchronous copy read keeps every safety refusal of the async read', async () => {
+  const s = await setup(); try {
+    const state = s.w.source.state;
+    assert.ok(safeReadSync(state, 'audit.jsonl').length > 0);
+    for (const bad of ['', '/etc/passwd', '../x', 'a/../b']) assert.throws(() => safeReadSync(state, bad), /UNSAFE_RELATIVE_PATH/);
+    await fs.symlink('audit.jsonl', path.join(state, 'linked'));
+    assert.throws(() => safeReadSync(state, 'linked'), /SYMLINK_ENTRY_REFUSED|UNSUPPORTED/);
+    assert.throws(() => safeReadSync(state, 'audit.jsonl', 1), /OVERSIZED/);
+    const linkedRoot = path.join(s.w.directory, 'root-link'); await fs.symlink(state, linkedRoot);
+    assert.throws(() => safeReadSync(linkedRoot, 'audit.jsonl'), /SYMLINK_ROOT_REFUSED/);
+  } finally { await s.w.cleanup(); }
+});

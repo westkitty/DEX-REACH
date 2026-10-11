@@ -1,3 +1,4 @@
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
@@ -43,6 +44,27 @@ export async function realDirectory(root: string): Promise<string> {
   }
   if (!(await fs.lstat(resolved)).isDirectory()) throw new Error('STATE_ROOT_NOT_DIRECTORY');
   return resolved;
+}
+/**
+ * Synchronous twin of safeRead for long copy loops. A promise-based read whose completion is lost
+ * stalls a capture while it holds every writer lock; a blocking call cannot silently vanish.
+ */
+export function safeReadSync(root: string, relative: string, maxBytes = 64 * 1024 * 1024): Buffer {
+  if (!relative || path.isAbsolute(relative) || relative.split(/[\\/]/).some(v => !v || v === '.' || v === '..')) throw new Error('UNSAFE_RELATIVE_PATH');
+  const base = path.resolve(root);
+  if (fsSync.realpathSync(base) !== base || !fsSync.lstatSync(base).isDirectory()) throw new Error('SYMLINK_ROOT_REFUSED');
+  const file = path.join(base, relative);
+  for (let cursor = file; cursor !== base; cursor = path.dirname(cursor)) if (fsSync.lstatSync(cursor).isSymbolicLink()) throw new Error('SYMLINK_ENTRY_REFUSED');
+  const st = fsSync.lstatSync(file);
+  if (!st.isFile() || st.size > maxBytes) throw new Error('UNSUPPORTED_OR_OVERSIZED_FILE');
+  const fd = fsSync.openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened = fsSync.fstatSync(fd);
+    if (!opened.isFile() || opened.ino !== st.ino || opened.dev !== st.dev || opened.size > maxBytes) throw new Error('FILE_CHANGED_BEFORE_READ');
+    const bytes = fsSync.readFileSync(fd), after = fsSync.fstatSync(fd);
+    if (bytes.length > maxBytes || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs) throw new Error('FILE_CHANGED_DURING_READ');
+    return bytes;
+  } finally { fsSync.closeSync(fd); }
 }
 export async function safeRead(root: string, relative: string, maxBytes = 64 * 1024 * 1024): Promise<Buffer> {
   if (!relative || path.isAbsolute(relative) || relative.split(/[\\/]/).some(v => !v || v === '.' || v === '..')) throw new Error('UNSAFE_RELATIVE_PATH');

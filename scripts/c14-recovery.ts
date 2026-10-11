@@ -155,7 +155,8 @@ async function quarantineCommand(): Promise<number> {
 }
 async function main() {
   const command = process.argv[2] ?? 'preflight';
-  if (command === 'capture-offline') { await assertLiveTarget(); process.exitCode = await offlineCaptureCommand(process.argv.slice(3)); return; }
+  // Exit explicitly: the outcome is already durable in the evidence chain, and nothing pending may hold the process.
+  if (command === 'capture-offline') { await assertLiveTarget(); process.exit(await offlineCaptureCommand(process.argv.slice(3))); }
   if (command === 'quarantine' && process.argv.length === 3) { await assertLiveTarget(); process.exitCode = await quarantineCommand(); return; }
   if (!['preflight', 'tasks', 'coverage'].includes(command) || process.argv.slice(3).some(a => a !== '--private')) throw new Error('usage: c14-recovery.ts preflight|tasks|coverage [--private for task IDs only] | capture-offline (owner-run, services stopped); no installation command exists');
   await assertLiveTarget();
