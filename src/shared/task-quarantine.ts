@@ -57,6 +57,13 @@ export async function assertNotQuarantined(stateDir: string, taskId: string): Pr
   if (await isQuarantined(stateDir, taskId)) throw new Error(`TASK_QUARANTINED: ${taskId} is owner-quarantined; its effect is unknown and it cannot be changed, resumed or replayed`);
 }
 
+async function hasTornTail(file: string): Promise<boolean> {
+  let raw: string;
+  try { raw = await fs.readFile(file, 'utf8'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+  return raw.length > 0 && !raw.endsWith('\n');
+}
+
 /** Append quarantine entries. Already-quarantined tasks are refused rather than re-recorded. */
 export async function appendQuarantine(stateDir: string, tasks: Array<{ task: QuarantinedTaskIdentity; classification: string }>, authority: QuarantineAuthority, at = new Date().toISOString()): Promise<QuarantineEntry[]> {
   if (!authority.scope.trim() || !Number.isFinite(Date.parse(authority.grantedAt))) throw new Error('QUARANTINE_AUTHORITY_INVALID');
@@ -64,6 +71,9 @@ export async function appendQuarantine(stateDir: string, tasks: Array<{ task: Qu
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   return withFileLock(quarantineLockFile(stateDir), async () => {
     const existing = await readQuarantine(stateDir);
+    // A torn final write (no trailing newline) is ignored by reads. An append must never write onto it: that
+    // would merge two records into one unparseable line and corrupt the whole chain. Refuse; never truncate.
+    if (await hasTornTail(file)) throw new Error('QUARANTINE_TORN_TAIL');
     let previous = [...existing.values()].at(-1)?.digest ?? null, sequence = existing.size;
     const written: QuarantineEntry[] = [];
     let text = '';
