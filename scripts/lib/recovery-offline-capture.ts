@@ -15,6 +15,7 @@ import { materializeManifest, syncDirectories, durableWrite, stagingRoots } from
 import { WRITER_OWNERSHIP, nestedLocks, refusalCode } from './recovery-checkpoint.js';
 import { verifyLegacyCompatibility } from './recovery-compatibility.js';
 import { COMPAT_HOME_PRESERVATION_RULE } from './recovery-symlinks.js';
+import { EXCLUSION_REFUSALS, type ExclusionOptions } from './recovery-exclusions.js';
 
 const execFileAsync = promisify(execFile);
 export const SERVICE_ROLES = ['coordinator', 'worker', 'gateway', 'node', 'oauth-canary'] as const;
@@ -71,6 +72,8 @@ export type OfflineCaptureRequest = {
   expectations: ExpectationStore;
   probe: HostProbe;
   linkPolicy?: LinkPolicy;
+  /** Opt-in, visible exclusions. Default: include everything. */
+  exclusions?: ExclusionOptions;
   lockTimeoutMs?: number;
   /** Test-only fault seams; production callers pass nothing. */
   hooks?: Partial<Record<'afterFence' | 'afterCopy' | 'afterRestore', () => Promise<void>>>;
@@ -78,8 +81,14 @@ export type OfflineCaptureRequest = {
 export type OfflineCaptureOutcome = Readonly<{
   status: 'OFFLINE_BACKUP_CERTIFIED' | 'REFUSED' | 'FAILED_UNCERTAIN'; transactionId: string; reason?: string;
   manifestDigest?: string; artifactDigest?: string; files?: number; bytes?: number; preservedNonterminalTasks?: number;
+  excluded?: { subtrees: number; files: number; links: number; bytes: number };
   retryAuthorized: false; installationAuthority: false; servicesRestarted: false;
 }>;
+
+/** Exclusion totals only: counts and bytes, never paths. Excluded data is accounted here, not silently dropped. */
+function excludedSummary(manifest: Manifest) {
+  return { subtrees: manifest.exclusions.length, files: manifest.exclusions.reduce((n, x) => n + x.files, 0), links: manifest.exclusions.reduce((n, x) => n + x.links, 0), bytes: manifest.exclusions.reduce((n, x) => n + x.bytes, 0) };
+}
 
 async function nonterminalCount(state: string): Promise<number> {
   const raw = JSON.parse(await fs.readFile(path.join(state, 'tasks', 'store.json'), 'utf8')) as { records?: Record<string, { state?: string }> };
@@ -98,7 +107,8 @@ export async function captureOffline(req: OfflineCaptureRequest): Promise<Offlin
   if (req.nodeId !== 'macbook-air.local' || !UUID.test(txn) || !/^[a-f0-9]{40}$/.test(req.sourceSha)) return Object.freeze({ ...base, status: 'REFUSED' as const, reason: 'OFFLINE_REQUEST_INVALID' });
   const policy = req.linkPolicy ?? defaultLinkPolicy();
   const linkPolicyKind = JSON.stringify(policy) === JSON.stringify({ version: 1, rules: [COMPAT_HOME_PRESERVATION_RULE] }) ? 'compat-home-preservation' : policy.rules.length ? 'custom' : 'default';
-  await log.append(txn, 'PREPARED', { mode: 'offline-services-stopped', sourceSha: req.sourceSha, linkPolicy: linkPolicyKind });
+  const coverageOptions = { ownerExclusions: req.exclusions?.ownerPolicy === true, runtimeReleases: req.exclusions?.runtimeReleases ?? 'all' } as const;
+  await log.append(txn, 'PREPARED', { mode: 'offline-services-stopped', sourceSha: req.sourceSha, linkPolicy: linkPolicyKind, exclusions: { ownerPolicy: coverageOptions.ownerExclusions, runtimeReleases: coverageOptions.runtimeReleases } });
   let started = false;
   const refuse = async (reason: string) => { await log.append(txn, 'REFUSED', { reason }); return Object.freeze({ ...base, status: 'REFUSED' as const, reason }); };
   const fail = async (reason: string) => { await log.append(txn, 'FAILED', { reason }); return Object.freeze({ ...base, status: 'FAILED_UNCERTAIN' as const, reason }); };
@@ -117,8 +127,11 @@ export async function captureOffline(req: OfflineCaptureRequest): Promise<Offlin
       await req.hooks?.afterFence?.();
       const heldLocks = new Set(locks.map(f => path.resolve(f)));
       return await withFencedLocks(heldLocks, async () => {
-        const observe = () => inspectCoverage(roots, 'inspection', policy, { heldLocks });
+        const observe = () => inspectCoverage(roots, 'inspection', policy, { heldLocks, ...coverageOptions });
         const manifest: Manifest = await observe();
+        // Exclusion refusals name their exact cause; every other problem stays the generic SNAPSHOT_UNPROVEN.
+        const exclusionRefusal = manifest.problems.find(p => EXCLUSION_REFUSALS.has(p));
+        if (exclusionRefusal) return await refuse(exclusionRefusal);
         if (!manifest.consistent || manifest.problems.length) return await refuse('SNAPSHOT_UNPROVEN');
         const reprove = async () => {
           const again = await offlineQuiescenceBlockers(req.probe, roots.state);
@@ -141,7 +154,7 @@ export async function captureOffline(req: OfflineCaptureRequest): Promise<Offlin
         started = true;
         const captured = await materializeManifest(manifest, roots, staging);
         await req.hooks?.afterCopy?.();
-        await verifyCoverage(manifest, captured, manifest.digest);
+        await verifyCoverage(manifest, captured, manifest.digest, 'copy');
         await durableWrite(path.join(staging, 'manifest.private.json'), Buffer.from(JSON.stringify(manifest)), 0o600);
         await syncDirectories(staging);
         const parent = await fs.open(facts.root, 'r'); try { await parent.sync(); } finally { await parent.close(); }
@@ -150,7 +163,7 @@ export async function captureOffline(req: OfflineCaptureRequest): Promise<Offlin
 
         // Isolated application restore from the backup bytes, never from the live source.
         const restored = await materializeManifest(manifest, captured, restoreCheck);
-        await verifyCoverage(manifest, restored, manifest.digest);
+        await verifyCoverage(manifest, restored, manifest.digest, 'copy');
         await verifyRestoredApplication(restored);
         const compatibility = await verifyLegacyCompatibility(restored, req.nodeId);
         await req.hooks?.afterRestore?.();
@@ -163,9 +176,10 @@ export async function captureOffline(req: OfflineCaptureRequest): Promise<Offlin
         if (await artifactDigest(staging) !== artifact) throw new Error('ARTIFACT_CHANGED_BEFORE_CERTIFICATION');
         const now = await fs.lstat(facts.root);
         if (now.ino !== before.ino || now.dev !== before.dev || now.mode !== before.mode || now.uid !== before.uid) throw new Error('DESTINATION_CHANGED');
-        await log.append(txn, 'CERTIFIED', { manifestDigest: manifest.digest, artifactDigest: artifact, sourceSha: req.sourceSha, files: manifest.entries.length, bytes: manifest.totalBytes, preservedNonterminalTasks: preserved });
+        await log.append(txn, 'CERTIFIED', { manifestDigest: manifest.digest, artifactDigest: artifact, sourceSha: req.sourceSha, files: manifest.entries.length, bytes: manifest.totalBytes, preservedNonterminalTasks: preserved, excluded: excludedSummary(manifest) });
         const files = manifest.entries.length, bytes = manifest.totalBytes;
-        return Object.freeze({ ...base, status: 'OFFLINE_BACKUP_CERTIFIED' as const, manifestDigest: manifest.digest, artifactDigest: artifact, files, bytes, preservedNonterminalTasks: preserved });
+        const excluded = excludedSummary(manifest);
+        return Object.freeze({ ...base, status: 'OFFLINE_BACKUP_CERTIFIED' as const, manifestDigest: manifest.digest, artifactDigest: artifact, files, bytes, preservedNonterminalTasks: preserved, excluded });
       });
     });
   } catch (error) {

@@ -104,7 +104,7 @@ async function livePreflight() {
 async function offlineCaptureCommand(args: string[]): Promise<number> {
   const flag = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
   const known = new Set(['--transaction-id', '--destination', '--approved-device', '--approved-inode', '--approved-volume-uuid', '--evidence-root', '--expectation-root']);
-  for (let i = 0; i < args.length; i++) { if (args[i] === '--preserve-compat-home-links') continue; if (!known.has(args[i]!) || !args[i + 1] || args[i + 1]!.startsWith('--')) throw new Error('USAGE'); i++; }
+  for (let i = 0; i < args.length; i++) { if (args[i] === '--preserve-compat-home-links' || args[i] === '--exclude-owner-policy' || args[i] === '--exclude-superseded-runtime') continue; if (!known.has(args[i]!) || !args[i + 1] || args[i + 1]!.startsWith('--')) throw new Error('USAGE'); i++; }
   const required = [...known].map(flag);
   if (required.some(v => !v)) throw new Error('USAGE');
   const [transactionId, destinationArg, approvedDevice, approvedInode, approvedVolume, evidenceRoot, expectationRoot] = required as string[];
@@ -116,20 +116,22 @@ async function offlineCaptureCommand(args: string[]): Promise<number> {
   const mount = (await run('/bin/df', ['-P', root])).split('\n').at(-1)!.split(/\s+/).slice(5).join(' ');
   const info = (key: string) => run('/usr/sbin/diskutil', ['info', '-plist', mount]).then(xml => xml.match(new RegExp(`<key>${key}</key>\\s*<(string|true|false)\\s*/?>([^<]*)`))).then(m => !m ? '' : m[1] === 'string' ? m[2]! : m[1]!);
   const home = os.userInfo().homedir, cloudSynced = [path.join(home, 'Library/Mobile Documents'), path.join(home, 'Library/CloudStorage')].some(c => root === c || root.startsWith(c + path.sep)) || /Dropbox|Google Drive|OneDrive/i.test(root);
+  // Opt-in exclusions, both off by default. Each is visible in the manifest and the outcome.
+  const exclusions = { ownerPolicy: args.includes('--exclude-owner-policy'), runtimeReleases: args.includes('--exclude-superseded-runtime') ? 'current-and-rollback' as const : 'all' as const };
   const linkPolicy = args.includes('--preserve-compat-home-links') ? { version: 1 as const, rules: [COMPAT_HOME_PRESERVATION_RULE] } : defaultLinkPolicy();
   const destination: DestinationFacts = {
     root, approvedRoot: root, approved: true, device: st.dev, approvedDevice: Number(approvedDevice), inode: st.ino, approvedInode: Number(approvedInode),
     mountIdentity: await info('VolumeUUID'), approvedMountIdentity: approvedVolume!, ownerUid: st.uid, expectedUid: 501, mode: st.mode & 0o777,
     writable: await fs.access(root, fs.constants.W_OK).then(() => true, () => false), cloudSynced, cloudApproved: false,
     encrypted: await info('FileVault') === 'true', durable: await info('FilesystemType') === 'apfs', freeBytes: volume.bavail * volume.bsize, measured: true,
-    space: recoveryStorageEstimate(await inspectCoverage(liveRoots, 'inspection', linkPolicy)), sources: liveRoots, gitRoots: [C14_ROOT, '/Users/andrew/DEX-REACH', '/Users/andrew/DEX']
+    space: recoveryStorageEstimate(await inspectCoverage(liveRoots, 'inspection', linkPolicy, { ownerExclusions: exclusions.ownerPolicy, runtimeReleases: exclusions.runtimeReleases })), sources: liveRoots, gitRoots: [C14_ROOT, '/Users/andrew/DEX-REACH', '/Users/andrew/DEX']
   };
   const forbidden = [...Object.values(liveRoots), root, C14_ROOT];
   const log = await TransactionEvidenceLog.open(evidenceRoot!, 'macbook-air.local', forbidden);
   const expectations = await ExpectationStore.open(expectationRoot!, 'macbook-air.local', [...forbidden, log.root]);
   const sourceSha = await run('/usr/bin/git', ['rev-parse', 'HEAD']);
   if (await run('/usr/bin/git', ['status', '--porcelain'])) throw new Error('SOURCE_DIRTY');
-  const outcome = await captureOffline({ nodeId: 'macbook-air.local', transactionId: transactionId!, sourceSha, roots: liveRoots, destination, log, expectations, probe, linkPolicy });
+  const outcome = await captureOffline({ nodeId: 'macbook-air.local', transactionId: transactionId!, sourceSha, roots: liveRoots, destination, log, expectations, probe, linkPolicy, exclusions });
   // The window pointer only names the transaction; the preflight re-verifies everything it would imply.
   if (outcome.status === 'OFFLINE_BACKUP_CERTIFIED' && root === WINDOW.destination && log.root === WINDOW.evidence && expectations.root === WINDOW.expectations) {
     const handle = await fs.open(WINDOW.capture, 'wx', 0o600);

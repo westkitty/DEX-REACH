@@ -4,9 +4,10 @@ import crypto from 'node:crypto';
 import { inspectLink, classifyLink, defaultLinkPolicy, type LinkPolicy } from './recovery-symlinks.js';
 import { hashValue } from '../../src/shared/hash.js';
 import { realDirectory, safeRead } from './recovery-reconciliation.js';
+import { exclusionRuleFor, retainedRuntimeReleases, scanExcludedSubtree, EXCLUSION_POLICY_VERSION, assertExclusionPrefixAllowed, type ExcludedSubtree, type ExclusionPolicyRecord, type ExclusionContext, type RuntimeReleasePolicy } from './recovery-exclusions.js';
 
 export type Roots = { state: string; agents: string; worker: string };
-export type Coverage = 'INCLUDED' | 'EXCLUDED_BY_POLICY' | 'MISSING' | 'UNKNOWN' | 'UNREADABLE' | 'DERIVED_ONLY' | 'BLOCKED_BY_LINK_POLICY';
+export type Coverage = 'INCLUDED' | 'PARTIALLY_EXCLUDED_BY_POLICY' | 'EXCLUDED_BY_POLICY' | 'MISSING' | 'UNKNOWN' | 'UNREADABLE' | 'DERIVED_ONLY' | 'BLOCKED_BY_LINK_POLICY';
 export type Family = { id: string; root: keyof Roots; relative: string; required: boolean; sensitive: boolean; derived?: boolean; dependency: string };
 /** Owner-state families are explicit, including signing keys and authority-bearing optional policies. */
 export function recoveryFamilies(nodeId: string, preservation: string[] = []): Family[] {
@@ -40,7 +41,7 @@ export function familyRegistry(names: string[] = []) {
 }
 export type Entry = { residue?: 'ORPHANED_ATOMIC_TEMP'; family: string; root: keyof Roots; relative: string; bytes: number; mode: number; uid: number; gid: number; sha256: string; schema?: number; mtimeMs: number; sensitive: boolean; kind?: 'file' | 'link'; inode?: number; ctimeMs?: number; link?: Awaited<ReturnType<typeof inspectLink>> };
 export type DirectoryEntry = { root: keyof Roots; relative: string; mode: number; uid: number; gid: number; inode: number; ctimeMs: number; names: string[] };
-export type Manifest = { version: 1; scope: 'inspection' | 'synthetic'; nodeId: string; startedAt: string; endedAt: string; roots: Roots; linkPolicy: LinkPolicy; directories: DirectoryEntry[]; volumes: Record<keyof Roots, number>; families: Array<{ id: string; status: Coverage; dependency: string }>; entries: Entry[]; totalBytes: number; consistent: boolean; problems: string[]; digest: string };
+export type Manifest = { version: 1; scope: 'inspection' | 'synthetic'; nodeId: string; startedAt: string; endedAt: string; roots: Roots; linkPolicy: LinkPolicy; directories: DirectoryEntry[]; volumes: Record<keyof Roots, number>; families: Array<{ id: string; status: Coverage; dependency: string }>; entries: Entry[]; totalBytes: number; consistent: boolean; problems: string[]; exclusionPolicy: ExclusionPolicyRecord; exclusions: ExcludedSubtree[]; digest: string };
 const opaquePayload = (family: string, relative: string) => family === 'runtime' && /^runtime\/releases\/[a-z0-9][a-z0-9._-]{0,119}\//.test(relative) || family === 'compatibility' || family === 'checkpoints' && /^checkpoints\/[^/]+\/untracked\//.test(relative);
 /**
  * `atomicWriteFile` writes `<file>.<pid>.<uuid>.tmp` and removes it in `finally`, so one only survives when its
@@ -64,7 +65,7 @@ const mandatory = ['results/manifest.json', 'nodes/macbook-air.local.env', 'node
 export function manifestDigest(m: Omit<Manifest, 'digest'> | Manifest): string { const { digest: _digest, ...body } = m as Manifest; return hashValue(body); }
 
 /** No directories, locks, caches or output files are created. Manifest contains PRIVATE hashes. */
-export type CoverageOptions = { heldLocks?: ReadonlySet<string> };
+export type CoverageOptions = { heldLocks?: ReadonlySet<string>; ownerExclusions?: boolean; runtimeReleases?: RuntimeReleasePolicy; installRoot?: string };
 /** Locks a checkpoint holder in this process holds while fencing writers; scoped to that fence only. */
 const fenceScopes: Array<ReadonlySet<string>> = [];
 export async function withFencedLocks<T>(locks: ReadonlySet<string>, fn: () => Promise<T>): Promise<T> {
@@ -76,7 +77,14 @@ const CONTROL_DIRECTORY = 'checkpoint';
 export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = 'inspection', linkPolicy: LinkPolicy = defaultLinkPolicy(), options: CoverageOptions = {}): Promise<Manifest> {
   for (const root of Object.values(roots)) await realDirectory(root);
   const startedAt = new Date().toISOString(), entries: Entry[] = [], problems: string[] = [], families: Manifest['families'] = [], directories: DirectoryEntry[] = [];
-  const observedDirectories = new Map<string, { inode: number; ctimeMs: number; dev: number; names: string[] }>();
+  const observedDirectories = new Map<string, { inode: number; ctimeMs: number; dev: number; names: string[]; hidden?: ReadonlySet<string> }>();
+  // Opt-in exclusions. Retained runtime releases are resolved before the walk, so ambiguity refuses outright.
+  const runtimeMode: RuntimeReleasePolicy = options.runtimeReleases ?? 'all';
+  const retained = runtimeMode === 'current-and-rollback' ? await retainedRuntimeReleases(roots, options.installRoot ?? roots.state) : [];
+  const ctx: ExclusionContext = { owner: options.ownerExclusions === true, runtime: runtimeMode, retained: new Set(retained) };
+  const exclusions: ExcludedSubtree[] = [];
+  // Children hidden from a directory's listing because they are excluded; the listing stays consistent with the copy.
+  const hiddenIn = (family: string, relative: string, names: string[]) => new Set(names.filter(n => exclusionRuleFor(family, relative ? `${relative}/${n}` : n, ctx)));
   const volumes = { state: (await fs.lstat(roots.state)).dev, agents: (await fs.lstat(roots.agents)).dev, worker: (await fs.lstat(roots.worker)).dev };
   let consistent = true;
   // Only locks this process verifiably holds (a checkpoint fence) are excluded; any other lock still blocks.
@@ -133,6 +141,14 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
     async function visit(relative: string): Promise<void> {
       const file = path.join(base, relative), before = await fs.lstat(file);
       if (relative === family.relative) rootSeen = true;
+      const excluded = exclusionRuleFor(family.id, relative, ctx);
+      if (excluded) {
+        // Inventory only: no hashing, no reads of file content, no link resolution inside an excluded subtree.
+        const scan = await scanExcludedSubtree(base, relative, device);
+        if (scan.authoritative.length) problems.push('EXCLUSION_HIDES_AUTHORITATIVE_FILE');
+        exclusions.push({ rule: excluded.id, family: family.id, root: family.root as 'state', relative, reason: excluded.reason, files: scan.files, links: scan.links, directories: scan.directories, other: scan.other, bytes: scan.bytes, digest: scan.digest });
+        return;
+      }
       if (before.isSymbolicLink()) {
         let link: Awaited<ReturnType<typeof inspectLink>>;
         try { link = await inspectLink(base, relative, linkPolicy); }
@@ -148,10 +164,10 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
       }
       if (before.dev !== device) throw new Error('CROSS_VOLUME');
       if (before.isDirectory()) {
-        const names = await listNames(file);
-        observedDirectories.set(file, { inode: before.ino, ctimeMs: before.ctimeMs, dev: before.dev, names });
+        const allNames = await listNames(file), hidden = hiddenIn(family.id, relative, allNames), names = allNames.filter(n => !hidden.has(n));
+        observedDirectories.set(file, { inode: before.ino, ctimeMs: before.ctimeMs, dev: before.dev, names, hidden });
         directories.push({ root: family.root, relative, mode: before.mode & 0o777, uid: before.uid, gid: before.gid, inode: before.ino, ctimeMs: before.ctimeMs, names });
-        for (const name of names) {
+        for (const name of allNames) {
           const childRelative = relative ? `${relative}/${name}` : name;
           if (!opaquePayload(family.id, childRelative) && /\.lock$|\.tmp$/.test(name) && !(orphanedAtomicTemp(name) && (await fs.lstat(path.join(file, name))).isFile())) { problems.push(`${family.id}:TRANSIENT_WRITE_OR_LOCK_PRESENT`); continue; }
           await visit(relative ? `${relative}/${name}` : name);
@@ -180,6 +196,8 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
       if (code === 'ENOENT' && rootSeen) consistent = false;
       if (status !== 'EXCLUDED_BY_POLICY') problems.push(`${family.id}:${code ?? 'INVALID_OR_UNSUPPORTED'}`);
     }
+    if (status === 'INCLUDED' && exclusions.some(x => x.family === family.id)) status = entries.some(e => e.family === family.id) ? 'PARTIALLY_EXCLUDED_BY_POLICY' : 'EXCLUDED_BY_POLICY';
+    if (family.required && status === 'EXCLUDED_BY_POLICY') problems.push('EXCLUSION_REMOVES_REQUIRED_FAMILY');
     if (linkRefused && status === 'INCLUDED') status = 'BLOCKED_BY_LINK_POLICY';
     if (family.required && status === 'INCLUDED' && !entries.some(e => e.family === family.id)) { status = 'MISSING'; problems.push(`${family.id}:EMPTY_REQUIRED_FAMILY`); }
     families.push({ id: family.id, status, dependency: family.dependency });
@@ -197,25 +215,40 @@ export async function inspectCoverage(roots: Roots, scope: Manifest['scope'] = '
   }
   for (const entry of entries.filter(e => e.kind === 'link' && e.link!.requiredTarget)) {
     if (!entries.some(e => e.root === entry.root && e.relative === entry.link!.resolvedRelative && e.kind !== 'link') && !directories.some(d => d.root === entry.root && d.relative === entry.link!.resolvedRelative)) problems.push('LINK_TARGET_NOT_INDEPENDENTLY_COVERED');
+    // A required link into an excluded subtree would restore a dangling dependency: refuse rather than drop it.
+    const target = entry.link!.resolvedRelative;
+    if (target !== null && exclusions.some(x => x.root === entry.root && (target === x.relative || target.startsWith(`${x.relative}/`)))) problems.push('LINK_TARGET_EXCLUDED_BY_POLICY');
   }
   for (const [file, before] of observedDirectories) {
-    const st = await fs.lstat(file).catch(() => null), names = st?.isDirectory() ? (file === roots.state ? (await listNames(file)).filter(n => n !== CONTROL_DIRECTORY) : await listNames(file)) : [];
+    const st = await fs.lstat(file).catch(() => null), listed = st?.isDirectory() ? (file === roots.state ? (await listNames(file)).filter(n => n !== CONTROL_DIRECTORY) : await listNames(file)) : [];
+    const names = listed.filter(n => !before.hidden?.has(n));
     if (!st || st.isSymbolicLink() || st.ino !== before.inode || st.ctimeMs !== before.ctimeMs || st.dev !== before.dev || JSON.stringify(names) !== JSON.stringify(before.names)) { consistent = false; problems.push('DIRECTORY_MEMBERSHIP_CHANGED'); }
   }
   entries.sort((a, b) => `${a.root}/${a.relative}`.localeCompare(`${b.root}/${b.relative}`));
   for (const f of policy.filter(f => f.id.startsWith('historical-preservation-'))) for (const label of labels) if (!entries.some(e => e.relative === `${f.relative}/com.stinkyweasel.dex-reach.${label}.plist` && e.kind === 'file')) problems.push('HISTORICAL_PRESERVATION_INCOMPLETE');
   for (const relative of mandatory) if (!entries.some(e => e.root === 'state' && e.relative === relative)) problems.push('MISSING_RECOVERY_DEPENDENCY');
-  const body: Omit<Manifest, 'digest'> = { version: 1, scope, nodeId: 'macbook-air.local', startedAt, endedAt: new Date().toISOString(), roots, linkPolicy, directories, volumes, families, entries, totalBytes: entries.reduce((sum, e) => sum + e.bytes, 0), consistent, problems };
+  exclusions.sort((a, b) => `${a.root}/${a.relative}`.localeCompare(`${b.root}/${b.relative}`));
+  const exclusionPolicy: ExclusionPolicyRecord = { version: EXCLUSION_POLICY_VERSION, ownerPolicy: ctx.owner, runtimeReleases: runtimeMode, retainedRuntimeReleases: [...retained].sort() };
+  const body: Omit<Manifest, 'digest'> = { version: 1, scope, nodeId: 'macbook-air.local', startedAt, endedAt: new Date().toISOString(), roots, linkPolicy, directories, volumes, families, entries, totalBytes: entries.reduce((sum, e) => sum + e.bytes, 0), consistent, problems, exclusionPolicy, exclusions };
   return { ...body, digest: manifestDigest(body) };
 }
 function validateManifest(raw: unknown, expectedDigest: string): Manifest {
   const m = raw as Manifest;
-  if (!m || m.version !== 1 || m.nodeId !== 'macbook-air.local' || !m.linkPolicy || m.linkPolicy.version !== 1 || !Array.isArray(m.linkPolicy.rules) || !Array.isArray(m.entries) || !Array.isArray(m.directories) || !m.volumes || !Array.isArray(m.families) || !m.consistent || !Array.isArray(m.problems) || m.problems.length || manifestDigest(m) !== expectedDigest || m.digest !== expectedDigest) throw new Error('MANIFEST_INVALID_OR_UNTRUSTED');
+  if (!m || m.version !== 1 || m.nodeId !== 'macbook-air.local' || !m.exclusionPolicy || m.exclusionPolicy.version !== 1 || typeof m.exclusionPolicy.ownerPolicy !== 'boolean' || !Array.isArray(m.exclusions) || !m.linkPolicy || m.linkPolicy.version !== 1 || !Array.isArray(m.linkPolicy.rules) || !Array.isArray(m.entries) || !Array.isArray(m.directories) || !m.volumes || !Array.isArray(m.families) || !m.consistent || !Array.isArray(m.problems) || m.problems.length || manifestDigest(m) !== expectedDigest || m.digest !== expectedDigest) throw new Error('MANIFEST_INVALID_OR_UNTRUSTED');
   if (!Number.isFinite(Date.parse(m.startedAt)) || !Number.isFinite(Date.parse(m.endedAt)) || Date.parse(m.endedAt) < Date.parse(m.startedAt)) throw new Error('INCONSISTENT_TIMESTAMPS');
   const policy = recoveryFamilies(m.nodeId, m.directories.find(d => d.root === 'state' && d.relative === '')?.names), ids = m.families.map(f => f.id);
-  if (new Set(ids).size !== policy.length || ids.length !== policy.length || policy.some(f => !ids.includes(f.id) || (f.required && m.families.find(x => x.id === f.id)?.status !== 'INCLUDED'))) throw new Error('INCOMPLETE_COVERAGE');
+  const requiredStatus = (id: string) => m.families.find(x => x.id === id)?.status;
+  if (new Set(ids).size !== policy.length || ids.length !== policy.length || policy.some(f => !ids.includes(f.id) || (f.required && !['INCLUDED', 'PARTIALLY_EXCLUDED_BY_POLICY'].includes(requiredStatus(f.id) as string)))) throw new Error('INCOMPLETE_COVERAGE');
   const keys = m.entries.map(e => `${e.root}/${e.relative}`);
   if (new Set(keys).size !== keys.length || m.totalBytes !== m.entries.reduce((n, e) => n + e.bytes, 0)) throw new Error('DUPLICATE_OR_TRUNCATED_INVENTORY');
+  for (const x of m.exclusions) {
+    const ownerRecord = x.reason === 'excluded by owner policy', runtimeRecord = x.reason === 'superseded runtime release excluded by policy';
+    // Owner rules are checked against the protected set; the runtime rule is confined to one release directory.
+    if (ownerRecord) assertExclusionPrefixAllowed(x.relative);
+    if (runtimeRecord && !/^runtime\/releases\/[^/]+$/.test(x.relative)) throw new Error('INVALID_EXCLUSION_RECORD');
+    if (x.root !== 'state' || !x.rule || (!ownerRecord && !runtimeRecord) || (ownerRecord && !m.exclusionPolicy.ownerPolicy) || (runtimeRecord && m.exclusionPolicy.runtimeReleases !== 'current-and-rollback')) throw new Error('INVALID_EXCLUSION_RECORD');
+    if (m.entries.some(e => e.root === x.root && (e.relative === x.relative || e.relative.startsWith(`${x.relative}/`)))) throw new Error('EXCLUDED_PATH_PRESENT');
+  }
   for (const e of m.entries) {
     const f = policy.find(f => f.id === e.family);
     if (!f || e.root !== f.root || !e.relative || path.isAbsolute(e.relative) || e.relative.split(/[\\/]/).some(v => !v || v === '.' || v === '..') || (f.relative && e.relative !== f.relative && !e.relative.startsWith(`${f.relative}/`) && !(e.residue === 'ORPHANED_ATOMIC_TEMP' && path.dirname(e.relative) === path.dirname(f.relative) && atomicTempBase(path.basename(e.relative)) === path.basename(f.relative))) || (e.residue !== undefined && (e.residue !== 'ORPHANED_ATOMIC_TEMP' || e.kind !== 'file' || !ATOMIC_TEMP.test(path.basename(e.relative)))) || !/^[a-f0-9]{64}$/.test(e.sha256) || !Number.isSafeInteger(e.bytes) || e.bytes < 0 || !Number.isInteger(e.mode) || !Number.isInteger(e.uid) || !Number.isInteger(e.gid)) throw new Error('INVALID_ENTRY');
@@ -227,9 +260,13 @@ function validateManifest(raw: unknown, expectedDigest: string): Manifest {
   return m;
 }
 /** expectedDigest must come from a separately protected inventory, never from the backup itself. */
-export async function verifyCoverage(raw: unknown, roots: Roots, expectedDigest: string): Promise<{ certified: true; files: number; bytes: number }> {
+export async function verifyCoverage(raw: unknown, roots: Roots, expectedDigest: string, subject: 'source' | 'copy' = 'source'): Promise<{ certified: true; files: number; bytes: number }> {
   const m = validateManifest(raw, expectedDigest);
-  const observed = await inspectCoverage(roots, m.scope, m.linkPolicy);
+  // Re-inspect under the manifest's own exclusion options. A copy never contains excluded subtrees, so its
+  // expected exclusion inventory is empty; the source must reproduce the recorded exclusions exactly.
+  const observed = await inspectCoverage(roots, m.scope, m.linkPolicy, { ownerExclusions: m.exclusionPolicy.ownerPolicy, runtimeReleases: m.exclusionPolicy.runtimeReleases, installRoot: m.roots.state });
+  if (JSON.stringify(observed.exclusionPolicy) !== JSON.stringify(m.exclusionPolicy)) throw new Error('EXCLUSION_POLICY_MISMATCH');
+  if (JSON.stringify(observed.exclusions) !== JSON.stringify(subject === 'source' ? m.exclusions : [])) throw new Error('EXCLUSION_INVENTORY_MISMATCH');
   if (m.entries.some(e => e.kind === 'link' && (!e.link || e.sha256 !== sha(Buffer.from(e.link.target))))) throw new Error('INVALID_LINK_MANIFEST');
   if (JSON.stringify(observed.volumes) !== JSON.stringify(m.volumes)) throw new Error('VOLUME_IDENTITY_MISMATCH');
   if (!observed.consistent || observed.problems.length || observed.entries.length !== m.entries.length || observed.directories.length !== m.directories.length) throw new Error('SNAPSHOT_INCOMPLETE_OR_CHANGED');
@@ -246,4 +283,4 @@ export async function verifyCoverage(raw: unknown, roots: Roots, expectedDigest:
   return { certified: true, files: m.entries.length, bytes: m.totalBytes };
 }
 /** Public output contains neither credential hashes nor private file paths or values. */
-export function publicCoverage(m: Manifest) { return { version: m.version, scope: m.scope, nodeId: m.nodeId, consistent: m.consistent, certification: 'NOT_CERTIFIED_INSPECTION_ONLY', totalBytes: m.totalBytes, files: m.entries.length, families: m.families, problems: m.problems }; }
+export function publicCoverage(m: Manifest) { return { version: m.version, scope: m.scope, nodeId: m.nodeId, consistent: m.consistent, certification: 'NOT_CERTIFIED_INSPECTION_ONLY', totalBytes: m.totalBytes, files: m.entries.length, families: m.families, problems: m.problems, exclusionPolicy: m.exclusionPolicy, exclusions: m.exclusions.map(x => ({ rule: x.rule, family: x.family, reason: x.reason, files: x.files, links: x.links, directories: x.directories, bytes: x.bytes })) }; }
