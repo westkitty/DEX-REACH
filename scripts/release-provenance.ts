@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   checks.push(await runCheck('invariant manifest', 'npm', ['run', 'invariants', '--', '--check'], 'The machine-readable invariant index matches docs/INVARIANTS.md.'));
   checks.push(await runCheck('tests', 'npm', ['test'], 'The full regression suite passes.'));
   checks.push(await runCheck('build', 'npm', ['run', 'build'], 'The production build emits without errors.'));
-  checks.push(await runCheck('production dependency audit', 'npm', ['audit', '--omit=dev', '--audit-level=high'], 'No high or critical advisory in the production dependency tree at the time this ran.'));
+  checks.push(await runCheck('production dependency audit', 'npm', ['run', 'audit:prod'], 'No high or critical advisory in the production dependency tree at the time this ran, other than an exact, unexpired owner-approved exception in security/audit-exceptions.json (an exception, not a fix).'));
 
   // The probe starts the real compatibility adapter, so it depends on what is installed here rather
   // than on the source being released. A failure is recorded as unverified with its actual message
