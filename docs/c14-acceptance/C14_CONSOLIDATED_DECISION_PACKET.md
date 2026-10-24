@@ -6,6 +6,23 @@ Verdicts: C13 NOT PASS · E7 HOST CAPABILITY BLOCKED · C14 source hardening con
 
 The master plan's C14 exit gate requires "a completely fresh chaos pass", including killing and restarting host services, on the representative Mac. C15 requires C14 PASS and explicit commit/push/deploy/install authority. Neither can be satisfied from source work alone. The decisions below are the smallest set that would unblock the remaining program. Each decision states what stays blocked if it is declined.
 
+## Owner decisions recorded 2026-10-24 (America/New_York)
+
+Recorded from the owner's answers against main `e739e66f9f0b2749c5fa4707262706234bf2d866`. These are decisions, not execution: nothing below was installed, captured, restarted or accepted, and no verdict changes. C13 NOT PASS · E7 BLOCKED — HOST CAPABILITY · C14 program PARTIAL · C15 BLOCKED.
+
+| Item | Owner decision | Time (ET) |
+| --- | --- | --- |
+| 0 | Already resolved (option a, 2026-10-10 18:40 EDT) | — |
+| 1 (D1) | APPROVED: `COMPAT_HOME_PRESERVATION_RULE` for live certification | 2026-10-24 09:43 |
+| 2 (D2) | APPROVED: one bounded window on MacBook-Air.local; it starts only when the owner names the time | 2026-10-24 09:44 |
+| 3 (D3) | AUTHORIZED: design an append-only owner-acknowledgement contract; recheck the live count (19 here, 21 in the maintenance packet) first | 2026-10-24 09:45 |
+| 4 (D4) | ACCEPTED: narrowly scoped local/runtime release; E7 stays an explicit external blocker, not waived and not passed; no production tag | 2026-10-24 09:46 |
+| 5 (D5) | KEEP OUT of this release; `/Users/andrew/DEX` untouched | 2026-10-24 09:47 |
+| 6 | Stale: PR #15 merged and PR #16 closed on 2026-10-11 | — |
+| Candidate (D6) | APPROVED: main `e739e66f9f0b2749c5fa4707262706234bf2d866` as 0.4.0 | 2026-10-24 09:48 |
+
+D3 is implemented as `npm run recovery:c14 -- acknowledge` (see section 3 and the [maintenance packet](../releases/0.4.0-maintenance-window.md)). The D6 candidate predates that change: if the acknowledgement source merges, main advances and the candidate must be re-pinned and re-approved under the packet's own rule.
+
 ## 0. RESOLVED 2026-10-10 18:40 EDT by owner-authorized option (a); see OPERATIONAL_STATE. Original finding: installed services were down (observed read-only, 2026-10-10 17:50–18:05 EDT)
 
 - **Host restart:** the host restarted at about 17:50 EDT. `ps` works again, and no hung `ps` processes remain.
@@ -51,6 +68,7 @@ The installed C13 runtime has no checkpoint participant, so a coordinated live b
 - **State:** 17 PREPARING `AMBIGUOUS_EFFECT` (`dex.process.run` ×13, `dc.call` ×2, `dex.plan` ×2) and 2 RUNNING `dex.file.read` `INSUFFICIENT_EVIDENCE`. None is provably resolved, `replayAuthorized=false`, and no disposition command exists.
 - **Decision:** leave them preserved as-is, or authorize designing an append-only owner-acknowledgement contract. That would add an owner disposition event and never rewrite history, invent results or replay.
 - **If declined:** the records remain unresolved, and the preflight's unresolved-task prerequisite stays false. This blocks installation under the current preflight contract unless the contract is amended.
+- **2026-10-24 (D3 authorized):** the append-only quarantine log (`recovery/task-quarantine.jsonl`, added 2026-10-10 after this packet was written) now also takes one owner-attributed acknowledgement per record: `npm run recovery:c14 -- acknowledge --list`, then `acknowledge --task-id <id> --reason <text>` (dry run) and the same with `--confirm`. Each entry records who (user, uid, host), when and why, binds the record's identity and observed state, keeps effect `UNKNOWN` and `replayAuthorized=false`, and never writes the task store or events. The existing NONTERMINAL_TASKS / TASK_DISPOSITION gates count an acknowledged record as dispositioned; every unacknowledged record still blocks. Not run on the Mac yet.
 
 ## 4. E7 scope
 

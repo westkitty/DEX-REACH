@@ -13,11 +13,21 @@ import { withFileLock } from './state-io.js';
  */
 export const QUARANTINE_VERSION = 1;
 export type QuarantineAuthority = Readonly<{ kind: 'owner-authorization'; grantedAt: string; scope: string }>;
+/**
+ * Who acknowledged one record and why (owner decision D3, 2026-10-24). Optional and additive: entries
+ * written by the batch quarantine have none, and the digest covers it whenever it is present.
+ */
+export type OwnerAcknowledgement = Readonly<{ by: string; uid: number; host: string; reason: string }>;
 export type QuarantineEntry = Readonly<{
   version: 1; sequence: number; taskId: string; nodeId: string; identity: string; observedState: string; classification: string;
   disposition: 'QUARANTINED_OWNER_ACKNOWLEDGED'; effect: 'UNKNOWN'; replayAuthorized: false;
-  authority: QuarantineAuthority; at: string; previous: string | null; digest: string;
+  authority: QuarantineAuthority; acknowledgement?: OwnerAcknowledgement; at: string; previous: string | null; digest: string;
 }>;
+export function validAcknowledgement(a: unknown): a is OwnerAcknowledgement {
+  const v = a as OwnerAcknowledgement | null;
+  return !!v && typeof v === 'object' && typeof v.by === 'string' && !!v.by.trim() && Number.isSafeInteger(v.uid) && v.uid >= 0
+    && typeof v.host === 'string' && !!v.host.trim() && typeof v.reason === 'string' && !!v.reason.trim() && v.reason.length <= 2000;
+}
 /** The fields that define which task this is and what it was asked to do. Volatile status text is excluded. */
 export type QuarantinedTaskIdentity = { taskId: string; rootTaskId: string; parentTaskId: string | null; actorId: string; nodeId: string; operation: string; idempotencyKey: string; payloadSha256: string; policyHash?: string; safetyClass?: string; mutationLevel?: string; createdAtUtc: string; attemptNumber: number; state: string };
 
@@ -44,7 +54,8 @@ export async function readQuarantine(stateDir: string): Promise<Map<string, Quar
     try { entry = JSON.parse(line) as QuarantineEntry; } catch { throw new Error('QUARANTINE_LOG_CORRUPT'); }
     const { digest, ...body } = entry;
     if (entry.version !== 1 || entry.sequence !== index || entry.previous !== previous || hashValue(body) !== digest || entry.effect !== 'UNKNOWN' || entry.replayAuthorized !== false
-      || entry.disposition !== 'QUARANTINED_OWNER_ACKNOWLEDGED' || entry.authority?.kind !== 'owner-authorization' || entries.has(entry.taskId)) throw new Error('QUARANTINE_LOG_CORRUPT');
+      || entry.disposition !== 'QUARANTINED_OWNER_ACKNOWLEDGED' || entry.authority?.kind !== 'owner-authorization' || entries.has(entry.taskId)
+      || ('acknowledgement' in entry && !validAcknowledgement(entry.acknowledgement))) throw new Error('QUARANTINE_LOG_CORRUPT');
     entries.set(entry.taskId, entry); previous = digest;
   }
   return entries;
@@ -65,7 +76,7 @@ async function hasTornTail(file: string): Promise<boolean> {
 }
 
 /** Append quarantine entries. Already-quarantined tasks are refused rather than re-recorded. */
-export async function appendQuarantine(stateDir: string, tasks: Array<{ task: QuarantinedTaskIdentity; classification: string }>, authority: QuarantineAuthority, at = new Date().toISOString()): Promise<QuarantineEntry[]> {
+export async function appendQuarantine(stateDir: string, tasks: Array<{ task: QuarantinedTaskIdentity; classification: string; acknowledgement?: OwnerAcknowledgement }>, authority: QuarantineAuthority, at = new Date().toISOString()): Promise<QuarantineEntry[]> {
   if (!authority.scope.trim() || !Number.isFinite(Date.parse(authority.grantedAt))) throw new Error('QUARANTINE_AUTHORITY_INVALID');
   const file = quarantineFile(stateDir);
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -77,9 +88,10 @@ export async function appendQuarantine(stateDir: string, tasks: Array<{ task: Qu
     let previous = [...existing.values()].at(-1)?.digest ?? null, sequence = existing.size;
     const written: QuarantineEntry[] = [];
     let text = '';
-    for (const { task, classification } of tasks) {
+    for (const { task, classification, acknowledgement } of tasks) {
       if (existing.has(task.taskId) || written.some(w => w.taskId === task.taskId)) throw new Error(`QUARANTINE_DUPLICATE: ${task.taskId}`);
-      const body = { version: 1 as const, sequence, taskId: task.taskId, nodeId: task.nodeId, identity: taskIdentityDigest(task), observedState: task.state, classification, disposition: 'QUARANTINED_OWNER_ACKNOWLEDGED' as const, effect: 'UNKNOWN' as const, replayAuthorized: false as const, authority, at, previous };
+      if (acknowledgement !== undefined && !validAcknowledgement(acknowledgement)) throw new Error('QUARANTINE_ACKNOWLEDGEMENT_INVALID');
+      const body = { version: 1 as const, sequence, taskId: task.taskId, nodeId: task.nodeId, identity: taskIdentityDigest(task), observedState: task.state, classification, disposition: 'QUARANTINED_OWNER_ACKNOWLEDGED' as const, effect: 'UNKNOWN' as const, replayAuthorized: false as const, authority, ...(acknowledgement ? { acknowledgement: { by: acknowledgement.by, uid: acknowledgement.uid, host: acknowledgement.host, reason: acknowledgement.reason } } : {}), at, previous };
       const entry: QuarantineEntry = Object.freeze({ ...body, digest: hashValue(body) });
       written.push(entry); text += JSON.stringify(entry) + '\n'; previous = entry.digest; sequence++;
     }

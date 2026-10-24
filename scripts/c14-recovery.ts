@@ -8,7 +8,7 @@ import { inspectTasks, publicTaskReport, realDirectory } from './lib/recovery-re
 import { inspectCoverage, publicCoverage } from './lib/recovery-coverage.js';
 import { runtimeTreeSha256 } from './lib/runtime-rollback.js';
 import { captureOffline, hostProbe, offlineQuiescenceBlockers } from './lib/recovery-offline-capture.js';
-import { readCapturePointer, readWindowAuthorization, selectQuarantineCandidates, verifyWindowEvidence, WINDOW } from './lib/c14-window-evidence.js';
+import { acknowledgeTask, listAcknowledgementCandidates, readCapturePointer, readWindowAuthorization, selectQuarantineCandidates, taskDisposition, verifyWindowEvidence, WINDOW } from './lib/c14-window-evidence.js';
 import { appendQuarantine, readQuarantine, type QuarantinedTaskIdentity } from '../src/shared/task-quarantine.js';
 import { TransactionEvidenceLog, ExpectationStore } from './lib/recovery-evidence.js';
 import { COMPAT_HOME_PRESERVATION_RULE, defaultLinkPolicy } from './lib/recovery-symlinks.js';
@@ -165,12 +165,36 @@ async function quarantineCommand(): Promise<number> {
   console.log(JSON.stringify({ mode: 'APPEND_ONLY_QUARANTINE', quarantined: written.length, alreadyQuarantined: selection.already.length, ineligible: selection.ineligible.length, effect: 'UNKNOWN', replayAuthorized: false, taskRecordsModified: false }, null, 2));
   return selection.ineligible.length === 0 ? 0 : 2;
 }
+/**
+ * Owner per-record acknowledgement (decision D3). `--list` is read-only. `--task-id <id> --reason <text>`
+ * is a dry run; add `--confirm` to append exactly one owner-attributed quarantine line. Task history is
+ * never written, nothing is replayed, and a repeat is a no-op.
+ */
+async function acknowledgeCommand(args: string[]): Promise<number> {
+  const flag = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
+  const list = args.length === 1 && args[0] === '--list';
+  const taskId = flag('--task-id'), reason = flag('--reason'), confirm = args.includes('--confirm');
+  const expected = 4 + (confirm ? 1 : 0);
+  if (!list && (!taskId || taskId.startsWith('--') || reason === undefined || reason.startsWith('--') || args.length !== expected)) throw new Error('USAGE');
+  const rows = await liveTaskReport();
+  const store = JSON.parse(await fs.readFile(path.join(liveRoots.state, 'tasks', 'store.json'), 'utf8')) as { records: Record<string, QuarantinedTaskIdentity> };
+  if (list) {
+    const quarantine = await readQuarantine(liveRoots.state), counts = taskDisposition(rows, store.records, quarantine);
+    console.log(JSON.stringify({ mode: 'READ_ONLY', total: counts.total, dispositioned: counts.quarantined, unresolved: counts.unresolved, replayAuthorized: false, records: listAcknowledgementCandidates(rows, store.records, quarantine) }, null, 2));
+    return 0;
+  }
+  const outcome = await acknowledgeTask(liveRoots.state, rows, store.records, { taskId: taskId!, reason: reason!, confirm, actor: { by: os.userInfo().username, uid: process.geteuid!(), host: os.hostname() } });
+  const after = taskDisposition(rows, store.records, await readQuarantine(liveRoots.state));
+  console.log(JSON.stringify({ ...outcome, dryRun: !confirm, unresolvedRemaining: after.unresolved, effect: 'UNKNOWN', replayAuthorized: false, taskRecordsModified: false }, null, 2));
+  return outcome.status === 'REFUSED' ? 2 : 0;
+}
 async function main() {
   const command = process.argv[2] ?? 'preflight';
   // Exit explicitly: the outcome is already durable in the evidence chain, and nothing pending may hold the process.
   if (command === 'capture-offline') { await assertLiveTarget(); process.exit(await offlineCaptureCommand(process.argv.slice(3))); }
   if (command === 'quarantine' && process.argv.length === 3) { await assertLiveTarget(); process.exitCode = await quarantineCommand(); return; }
-  if (!['preflight', 'tasks', 'coverage'].includes(command) || process.argv.slice(3).some(a => a !== '--private')) throw new Error('usage: c14-recovery.ts preflight|tasks|coverage [--private for task IDs only] | capture-offline (owner-run, services stopped); no installation command exists');
+  if (command === 'acknowledge') { await assertLiveTarget(); process.exitCode = await acknowledgeCommand(process.argv.slice(3)); return; }
+  if (!['preflight', 'tasks', 'coverage'].includes(command) || process.argv.slice(3).some(a => a !== '--private')) throw new Error('usage: c14-recovery.ts preflight|tasks|coverage [--private for task IDs only] | capture-offline (owner-run, services stopped) | acknowledge --list | acknowledge --task-id <id> --reason <text> [--confirm]; no installation command exists');
   await assertLiveTarget();
   if (command === 'tasks') { const rows = await liveTaskReport(); console.log(JSON.stringify(process.argv.includes('--private') ? { mode: 'READ_ONLY_PRIVATE', records: rows } : publicTaskReport(rows), null, 2)); }
   else if (command === 'coverage') console.log(JSON.stringify(publicCoverage(await inspectCoverage(liveRoots)), null, 2));
