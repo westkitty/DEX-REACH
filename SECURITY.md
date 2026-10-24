@@ -55,6 +55,8 @@ A fix must preserve DEX//REACH's core trust model:
 - anything the gateway's OAuth discovery document advertises must be performed by the route that actually answers, including routes the MCP SDK's own auth router never sees, because a client that trusts an advertised claim and finds it unhonoured fails in a way the server cannot see;
 - a proof run records only what it observed in that run: an item whose environment was absent is `UNVERIFIED — HARDWARE NOT AVAILABLE`, a result reported for absent hardware is discarded rather than believed or silently dropped, and a run on one host is never described as proof about another.
 
+Production dependency audit exceptions are owner-approved exceptions, not fixes. The audit gate (`npm run audit:prod`) fails on every high or critical production advisory except an exact, unexpired entry in `security/audit-exceptions.json`, and it fails again once an entry goes stale. The current entries, their exposure and how each one is retired are listed in [docs/security/AUDIT_EXCEPTIONS.md](docs/security/AUDIT_EXCEPTIONS.md).
+
 Public visibility of this repository is not a security boundary. Authentication, explicit enrollment, least authority, local policy, revocation, and runtime proof are.
 
 ## Important limitation of ON/full-local shell access

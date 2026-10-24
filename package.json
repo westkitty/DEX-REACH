@@ -30,7 +30,8 @@
     "proof": "tsx scripts/proof-run.ts",
     "install:node": "npm run build && tsx scripts/install-node.ts",
     "install:dock": "zsh scripts/install-dock-launcher.sh",
-    "verify": "npm run typecheck && npm run invariants -- --check && npm test && npm run build && npm audit --omit=dev --audit-level=high && npm run probe:backend",
+    "audit:prod": "tsx scripts/audit-gate.ts",
+    "verify": "npm run typecheck && npm run invariants -- --check && npm test && npm run build && npm run audit:prod && npm run probe:backend",
     "verify:golden": "npm run verify && npm run smoke && npm run oauth:canary && npm run oauth:health",
     "oauth:canary": "tsx scripts/oauth-canary.ts",
     "oauth:health": "tsx scripts/oauth-health-check.ts"
