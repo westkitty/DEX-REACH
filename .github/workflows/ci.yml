@@ -39,17 +39,20 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: Production dependency audit
-        # The gate is unchanged: `npm audit --omit=dev --audit-level=high`, failing the job on any
-        # high or critical advisory in the production tree. The loop retries only to ride out a
-        # registry transport failure; a real advisory is deterministic, so it fails every attempt and
-        # the unguarded final run below carries its output and its exit status.
+        # `npm run audit:prod` runs `npm audit --omit=dev --json` and fails the job on any high or
+        # critical advisory in the production tree, except a finding that matches an owner-approved
+        # entry in security/audit-exceptions.json exactly (advisory id + package + exact node path +
+        # installed version + dependents, unexpired). A stale or expired entry also fails. See
+        # docs/security/AUDIT_EXCEPTIONS.md. The loop retries only to ride out a registry transport
+        # failure; a real advisory is deterministic, so it fails every attempt and the unguarded
+        # final run below carries its output and its exit status.
         run: |
           for attempt in 1 2 3; do
-            if npm audit --omit=dev --audit-level=high; then exit 0; fi
-            echo "npm audit attempt ${attempt} failed; retrying in $((attempt * 20))s"
+            if npm run --silent audit:prod; then exit 0; fi
+            echo "audit attempt ${attempt} failed; retrying in $((attempt * 20))s"
             sleep $((attempt * 20))
           done
-          npm audit --omit=dev --audit-level=high
+          npm run --silent audit:prod
 
   # A build that succeeds proves nothing about whether it can be rebuilt by anyone else. This job
   # exports the commit with `git archive`, installs from the lockfile alone and builds in a
