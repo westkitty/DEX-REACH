@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { hashValue } from '../../src/shared/hash.js';
-import { readQuarantine, quarantineMatches, type QuarantinedTaskIdentity } from '../../src/shared/task-quarantine.js';
+import { appendQuarantine, readQuarantine, quarantineMatches, type OwnerAcknowledgement, type QuarantineEntry, type QuarantinedTaskIdentity } from '../../src/shared/task-quarantine.js';
 import { manifestDigest, recoveryFamilies, type Manifest, type Roots } from './recovery-coverage.js';
 import { TransactionEvidenceLog, ExpectationStore, reconcileTransaction, type EvidenceRecord } from './recovery-evidence.js';
 import { recoveryStoragePlan } from './recovery-storage.js';
@@ -91,13 +91,8 @@ export async function verifyWindowEvidence(input: {
   const result: WindowFacts = { boundary: { scope: 'live', version: 1, ...gates }, backupCertified: false, ownerPreservationVerified: false, exactLegacyPairingVerified: false, quarantined: 0, unresolved: input.tasks.length, spaceMeasured: false, blockers };
 
   // Task disposition: every unresolved historical record must carry a quarantine entry that still matches it.
-  const quarantine = await readQuarantine(input.roots.state).catch(() => { blockers.push('QUARANTINE_LOG_CORRUPT'); return new Map(); });
-  for (const row of input.tasks) {
-    const entry = quarantine.get(row.taskId), record = input.storeRecords[row.taskId];
-    const quarantinable = row.classification === 'AMBIGUOUS_EFFECT' || row.classification === 'INSUFFICIENT_EVIDENCE';
-    if (entry && record && quarantinable && quarantineMatches(entry, record) && !row.evidence.activity && !row.evidence.lease && !row.evidence.ticket) result.quarantined++;
-  }
-  result.unresolved = input.tasks.length - result.quarantined;
+  const quarantine = await readQuarantine(input.roots.state).catch(() => { blockers.push('QUARANTINE_LOG_CORRUPT'); return new Map<string, QuarantineEntry>(); });
+  ({ quarantined: result.quarantined, unresolved: result.unresolved } = taskDisposition(input.tasks, input.storeRecords, quarantine));
   gates.taskDisposition = result.unresolved === 0 && !blockers.includes('QUARANTINE_LOG_CORRUPT');
   if (!gates.taskDisposition) blockers.push('TASK_DISPOSITION_INCOMPLETE');
 
@@ -198,4 +193,49 @@ export function selectQuarantineCandidates(rows: TaskInspection[], records: Reco
     else ineligible.push(r.taskId);
   }
   return { append, already, ineligible };
+}
+
+const quarantinable = (r: TaskInspection) => (r.classification === 'AMBIGUOUS_EFFECT' || r.classification === 'INSUFFICIENT_EVIDENCE') && !r.evidence.activity && !r.evidence.lease && !r.evidence.ticket;
+/**
+ * The TASK_DISPOSITION / NONTERMINAL_TASKS count. A record is dispositioned only while it still
+ * classifies as quarantinable with no live claim and its owner entry still matches its identity and
+ * observed state; every other nonterminal record stays unresolved and blocks. Any count is handled.
+ */
+export function taskDisposition(rows: TaskInspection[], records: Record<string, QuarantinedTaskIdentity>, quarantine: ReadonlyMap<string, QuarantineEntry>) {
+  const dispositioned = rows.filter(r => { const e = quarantine.get(r.taskId), record = records[r.taskId]; return !!e && !!record && quarantinable(r) && quarantineMatches(e, record); });
+  return { total: rows.length, quarantined: dispositioned.length, unresolved: rows.length - dispositioned.length, dispositioned: dispositioned.map(r => r.taskId) };
+}
+/** Owner review listing: enough to decide each record, never payloads, results or secrets. */
+export function listAcknowledgementCandidates(rows: TaskInspection[], records: Record<string, QuarantinedTaskIdentity>, quarantine: ReadonlyMap<string, QuarantineEntry>) {
+  const done = new Set(taskDisposition(rows, records, quarantine).dispositioned);
+  return rows.map(r => {
+    const rec = records[r.taskId], e = quarantine.get(r.taskId);
+    return { taskId: r.taskId, operation: rec?.operation ?? 'UNKNOWN_RECORD', state: r.state, classification: r.classification, mutationLevel: rec?.mutationLevel ?? null, actorId: r.actorId, createdAt: rec?.createdAtUtc ?? null, updatedAt: r.updatedAt, attempt: rec?.attemptNumber ?? null,
+      liveClaim: { activity: r.evidence.activity, lease: r.evidence.lease, ticket: r.evidence.ticket }, dispositioned: done.has(r.taskId), acknowledgedAt: e?.at ?? null, acknowledgedBy: e?.acknowledgement?.by ?? (e ? 'batch-owner-authorization' : null), replayAuthorized: false as const };
+  });
+}
+export type AcknowledgementOutcome =
+  | { status: 'WOULD_APPEND' | 'APPENDED'; taskId: string; classification: string; entry?: QuarantineEntry }
+  | { status: 'ALREADY_ACKNOWLEDGED'; taskId: string; at: string }
+  | { status: 'REFUSED'; taskId: string; reason: 'REASON_REQUIRED' | 'UNKNOWN_TASK' | 'NOT_UNRESOLVED' | 'LIVE_CLAIM' | 'RECORD_MISSING' | 'ENTRY_NO_LONGER_MATCHES' };
+/**
+ * Acknowledge ONE unresolved record. Dry run unless `confirm`; a repeat is a no-op. The only write is one
+ * appended quarantine line: the task store, events, activity, results and receipts are never opened for
+ * writing, and nothing is transitioned, resumed or replayed. Effect stays UNKNOWN.
+ */
+export async function acknowledgeTask(stateDir: string, rows: TaskInspection[], records: Record<string, QuarantinedTaskIdentity>, request: { taskId: string; reason: string; actor: Omit<OwnerAcknowledgement, 'reason'>; confirm: boolean; at?: string }): Promise<AcknowledgementOutcome> {
+  const { taskId } = request, reason = request.reason.trim();
+  if (!reason) return { status: 'REFUSED', taskId, reason: 'REASON_REQUIRED' };
+  const row = rows.find(r => r.taskId === taskId), record = records[taskId];
+  if (!row) return { status: 'REFUSED', taskId, reason: 'UNKNOWN_TASK' };
+  const existing = (await readQuarantine(stateDir)).get(taskId);
+  if (existing) return record && quarantineMatches(existing, record) ? { status: 'ALREADY_ACKNOWLEDGED', taskId, at: existing.at } : { status: 'REFUSED', taskId, reason: 'ENTRY_NO_LONGER_MATCHES' };
+  if (row.classification !== 'AMBIGUOUS_EFFECT' && row.classification !== 'INSUFFICIENT_EVIDENCE') return { status: 'REFUSED', taskId, reason: 'NOT_UNRESOLVED' };
+  if (!quarantinable(row)) return { status: 'REFUSED', taskId, reason: 'LIVE_CLAIM' };
+  if (!record) return { status: 'REFUSED', taskId, reason: 'RECORD_MISSING' };
+  if (!request.confirm) return { status: 'WOULD_APPEND', taskId, classification: row.classification };
+  const at = request.at ?? new Date().toISOString();
+  const [entry] = await appendQuarantine(stateDir, [{ task: record, classification: row.classification, acknowledgement: { ...request.actor, reason } }],
+    { kind: 'owner-authorization', grantedAt: at, scope: 'Owner per-record acknowledgement (decision D3): preserve task history byte-for-byte; effect UNKNOWN; never replay, rewrite or resolve.' }, at);
+  return { status: 'APPENDED', taskId, classification: row.classification, entry: entry! };
 }
