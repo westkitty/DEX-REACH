@@ -1,6 +1,6 @@
 # Production dependency audit exceptions
 
-**These are owner-approved exceptions, not fixes.** The vulnerable code is still installed and still reachable as described below.
+**Exceptions are owner approvals, not fixes.** The candidate currently has no production audit exceptions; historical regression fixtures remain for the retirement policy.
 
 ## The gate
 
@@ -26,16 +26,15 @@ There is no `--audit-level` downgrade and no blanket ignore. Adding, extending o
 
 ## Current exceptions
 
-| Advisory | Package @ path | Approved | Expires | Retire by |
-| --- | --- | --- | --- | --- |
-| GHSA-mrhx-c7xc-m3w5 (high): zod `<4.6.6` can exhaust memory while validating oversized constrained collections | `zod@3.25.76` at `node_modules/@wonderwhy-er/desktop-commander/node_modules/zod`; dependent `node_modules/@wonderwhy-er/desktop-commander` | Owner, 2026-10-24 10:38 AM ET, for 0.4.0 | 2027-01-24 | Native replacement of the desktop-commander compatibility adapter (the next planned project) |
+None in the candidate source as of 2026-10-26.
 
-### Why GHSA-mrhx-c7xc-m3w5 can't be fixed today
+GHSA-mrhx-c7xc-m3w5's approved Desktop Commander/Zod 3 exception was retired after
+the native backend passed its pre-switch functionality/security gate. Production
+startup now selects the independently packaged DEX backend; its dependencies are
+declared directly, including fixed Zod 4.6.7. Desktop Commander 0.2.52 remains only
+a development reference for isolated differential tests.
 
-- No zod 3.x release fixes it, and 3.25.76 is the latest 3.x.
-- desktop-commander's latest release (0.3.1) is outside the pinned `^0.2.50` range and still requires `zod ^3.24.1`.
-- Overriding desktop-commander onto zod 4 was tried and reverted. Its `tools/list` then returns input schemas whose `type` is not `"object"`, which breaks the 26-tool `probe:backend` contract.
-
-DEX//REACH's own top-level zod is 4.6.7, which is fixed.
-
-**Exposure:** desktop-commander validates tool arguments with its zod 3. Reaching the advisory needs an authenticated, authorized MCP call to a desktop-commander tool that carries oversized constrained collections. The likely impact is memory exhaustion (denial of service) of the node's compatibility adapter process.
+This changes candidate source, not the installed Big Mac node. The exception
+machinery and historical advisory regression fixtures remain intact. Production
+acceptance requires a clean isolated production install and raw production audit.
+See [native backend evidence](../native-backend-evidence/PARITY.md).

@@ -1,0 +1,18 @@
+{
+  "at": "2026-10-26T17:13:13.249Z",
+  "rows": [
+    {
+      "kind": "incumbent",
+      "ageMs": 310311.59816600004,
+      "expired": true,
+      "error": "Error reading search results: Search session <HANDLE> not found"
+    },
+    {
+      "kind": "candidate",
+      "ageMs": 310003.5365,
+      "expired": true,
+      "error": "Error reading search results: Search session <HANDLE> not found"
+    }
+  ],
+  "pass": true
+}

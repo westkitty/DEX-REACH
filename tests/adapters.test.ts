@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   AdapterInstallRefused,
   AdapterRegistry,
@@ -51,6 +52,25 @@ function stateWithGrant(capabilities: string[], roots: string[]): AccessState {
     updatedAt: new Date().toISOString()
   };
 }
+
+test('the captured Desktop Commander 0.2.52 remote tool contract is complete and independently frozen', async () => {
+  const fixture = JSON.parse(await readFile(new URL('./fixtures/desktop-commander-0.2.52-remote-contract.json', import.meta.url), 'utf8')) as {
+    source: string; version: string; tools: Array<{ name: string; inputSchema: Record<string, unknown> }>;
+  };
+  assert.equal(fixture.source, '@wonderwhy-er/desktop-commander');
+  assert.equal(fixture.version, '0.2.52');
+  const names = fixture.tools.map(tool => tool.name);
+  assert.equal(names.length, 22);
+  assert.equal(new Set(names).size, 22, 'fixture must not conceal duplicate tools');
+  assert.deepEqual([...names].sort(), [...remoteCompatibilityTools()].sort(), 'fixture names must match the independently classified remote surface');
+  for (const tool of fixture.tools) {
+    assert.equal(tool.inputSchema.type, 'object', `${tool.name} keeps an object argument schema`);
+    assert.equal(tool.inputSchema.additionalProperties, false, `${tool.name} rejects undeclared arguments`);
+  }
+  for (const withheld of ['set_config_value', 'get_recent_tool_calls', 'give_feedback_to_desktop_commander', 'get_prompts']) {
+    assert.ok(!names.includes(withheld), `${withheld} remains withheld from remote callers`);
+  }
+});
 
 test('the shipped manifest is admitted and agrees with the DEX catalog on every tool', () => {
   const admission = admitAdapterManifest(manifestOrThrow());

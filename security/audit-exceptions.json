@@ -1,16 +1,4 @@
 {
   "version": 1,
-  "exceptions": [
-    {
-      "advisory": "GHSA-mrhx-c7xc-m3w5",
-      "package": "zod",
-      "path": "node_modules/@wonderwhy-er/desktop-commander/node_modules/zod",
-      "installedVersion": "3.25.76",
-      "dependents": ["node_modules/@wonderwhy-er/desktop-commander"],
-      "reason": "Owner-approved exception, not a fix. zod <4.6.6 can exhaust memory validating oversized constrained collections. This copy is desktop-commander's own nested zod 3; no zod 3.x fix exists, desktop-commander 0.3.1 still requires zod ^3.24.1, and forcing zod 4 breaks its tools/list schemas. Reaching it needs an authenticated MCP call to a desktop-commander tool. Retire by replacing desktop-commander natively.",
-      "approvedBy": "owner (westkitty), decision recorded 2026-10-24 10:38 AM ET",
-      "approvedOn": "2026-10-24",
-      "expiresOn": "2027-01-24"
-    }
-  ]
+  "exceptions": []
 }

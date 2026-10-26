@@ -1,0 +1,3410 @@
+{
+  "at": "2026-10-26T17:47:43.627Z",
+  "base": "274ba16e058e2b1e855a8ae4a5c30ad63ea81363",
+  "scope": "isolated backend protocol; incumbent launcher omits upstream download/flag startup; no production node executor proof",
+  "backends": {
+    "incumbent": {
+      "metrics": {
+        "latenciesMs": [
+          {
+            "name": "get_config",
+            "label": "success",
+            "ms": 18.487124999999992
+          },
+          {
+            "name": "read_file",
+            "label": "success",
+            "ms": 19.770749999999964
+          },
+          {
+            "name": "read_multiple_files",
+            "label": "success",
+            "ms": 27.604291999999987
+          },
+          {
+            "name": "write_file",
+            "label": "success",
+            "ms": 18.783916000000033
+          },
+          {
+            "name": "write_file",
+            "label": "append",
+            "ms": 17.411291000000006
+          },
+          {
+            "name": "create_directory",
+            "label": "success",
+            "ms": 8.244374999999991
+          },
+          {
+            "name": "list_directory",
+            "label": "success",
+            "ms": 8.552833999999962
+          },
+          {
+            "name": "move_file",
+            "label": "success",
+            "ms": 8.965249999999969
+          },
+          {
+            "name": "get_file_info",
+            "label": "success",
+            "ms": 8.52070900000001
+          },
+          {
+            "name": "edit_block",
+            "label": "success",
+            "ms": 32.79525000000001
+          },
+          {
+            "name": "write_pdf",
+            "label": "success",
+            "ms": 21.94183399999997
+          },
+          {
+            "name": "write_file",
+            "label": "format:docx",
+            "ms": 13.620582999999897
+          },
+          {
+            "name": "read_file",
+            "label": "format:docx",
+            "ms": 18.55437499999971
+          },
+          {
+            "name": "write_file",
+            "label": "format:xlsx",
+            "ms": 24.427082999998674
+          },
+          {
+            "name": "read_file",
+            "label": "format:xlsx",
+            "ms": 25.3207910000001
+          },
+          {
+            "name": "write_file",
+            "label": "format:png",
+            "ms": 16.101042000000234
+          },
+          {
+            "name": "read_file",
+            "label": "format:png",
+            "ms": 81.0854159999999
+          },
+          {
+            "name": "read_file",
+            "label": "malformed:pdf",
+            "ms": 34.68770899999981
+          },
+          {
+            "name": "read_file",
+            "label": "malformed:docx",
+            "ms": 19.176790999999866
+          },
+          {
+            "name": "read_file",
+            "label": "malformed:xlsx",
+            "ms": 32.00004199999967
+          },
+          {
+            "name": "write_file",
+            "label": "concurrency:alpha",
+            "ms": 33.76904099999956
+          },
+          {
+            "name": "write_file",
+            "label": "concurrency:beta",
+            "ms": 41.77595800000017
+          },
+          {
+            "name": "read_file",
+            "label": "utf16",
+            "ms": 16.487708999999086
+          },
+          {
+            "name": "read_file",
+            "label": "permission",
+            "ms": 15.98699999999917
+          },
+          {
+            "name": "write_pdf",
+            "label": "format:markdown",
+            "ms": 1642.7940419999995
+          },
+          {
+            "name": "start_search",
+            "label": "success",
+            "ms": 42.99495899999965
+          },
+          {
+            "name": "get_more_search_results",
+            "label": "success",
+            "ms": 0.9512080000004062
+          },
+          {
+            "name": "list_searches",
+            "label": "success",
+            "ms": 12.464458000000377
+          },
+          {
+            "name": "stop_search",
+            "label": "success",
+            "ms": 10.969208000000435
+          },
+          {
+            "name": "start_search",
+            "label": "active-cancel",
+            "ms": 50.221292000000176
+          },
+          {
+            "name": "stop_search",
+            "label": "active-cancel",
+            "ms": 9.063958000000639
+          },
+          {
+            "name": "get_more_search_results",
+            "label": "active-cancel",
+            "ms": 0.5968329999996058
+          },
+          {
+            "name": "start_process",
+            "label": "success",
+            "ms": 115.95779100000073
+          },
+          {
+            "name": "read_process_output",
+            "label": "success",
+            "ms": 17.33075000000099
+          },
+          {
+            "name": "interact_with_process",
+            "label": "success",
+            "ms": 23.002042000000074
+          },
+          {
+            "name": "list_sessions",
+            "label": "success",
+            "ms": 9.88616699999875
+          },
+          {
+            "name": "list_processes",
+            "label": "success",
+            "ms": 43.134125000000495
+          },
+          {
+            "name": "force_terminate",
+            "label": "success",
+            "ms": 10.010624999998981
+          },
+          {
+            "name": "force_terminate",
+            "label": "repeat",
+            "ms": 8.721042000001034
+          },
+          {
+            "name": "start_process",
+            "label": "success",
+            "ms": 111.35349999999926
+          },
+          {
+            "name": "kill_process",
+            "label": "success",
+            "ms": 12.592749999999796
+          },
+          {
+            "name": "get_usage_stats",
+            "label": "success",
+            "ms": 11.406791999999768
+          },
+          {
+            "name": "read_file",
+            "label": "error",
+            "ms": 18.012582999999722
+          },
+          {
+            "name": "read_multiple_files",
+            "label": "error",
+            "ms": 15.82854099999895
+          },
+          {
+            "name": "write_file",
+            "label": "error",
+            "ms": 15.664667000000918
+          },
+          {
+            "name": "write_pdf",
+            "label": "error",
+            "ms": 24.103375000000597
+          },
+          {
+            "name": "create_directory",
+            "label": "error",
+            "ms": 16.129917000000205
+          },
+          {
+            "name": "list_directory",
+            "label": "error",
+            "ms": 16.255333000000974
+          },
+          {
+            "name": "move_file",
+            "label": "error",
+            "ms": 9.030582999999751
+          },
+          {
+            "name": "start_search",
+            "label": "error",
+            "ms": 16.34416600000077
+          },
+          {
+            "name": "get_more_search_results",
+            "label": "error",
+            "ms": 8.197916999999507
+          },
+          {
+            "name": "stop_search",
+            "label": "error",
+            "ms": 8.19024999999965
+          },
+          {
+            "name": "get_file_info",
+            "label": "error",
+            "ms": 7.995458999999755
+          },
+          {
+            "name": "edit_block",
+            "label": "error",
+            "ms": 55.663000000000466
+          },
+          {
+            "name": "start_process",
+            "label": "error",
+            "ms": 7.565207999999984
+          },
+          {
+            "name": "read_process_output",
+            "label": "error",
+            "ms": 15.507708000001003
+          },
+          {
+            "name": "interact_with_process",
+            "label": "error",
+            "ms": 8.089374999999563
+          },
+          {
+            "name": "force_terminate",
+            "label": "error",
+            "ms": 14.632375000001048
+          },
+          {
+            "name": "kill_process",
+            "label": "error",
+            "ms": 7.729083000000173
+          },
+          {
+            "name": "read_file",
+            "label": "boundary:escape",
+            "ms": 15.810750000000553
+          },
+          {
+            "name": "read_file",
+            "label": "boundary:../outside.txt",
+            "ms": 24.754917000000205
+          },
+          {
+            "name": "read_multiple_files",
+            "label": "boundary",
+            "ms": 34.029749999999694
+          },
+          {
+            "name": "write_file",
+            "label": "boundary",
+            "ms": 25.285165999999663
+          },
+          {
+            "name": "write_pdf",
+            "label": "boundary",
+            "ms": 24.776334000000134
+          },
+          {
+            "name": "create_directory",
+            "label": "boundary",
+            "ms": 25.12091700000019
+          },
+          {
+            "name": "list_directory",
+            "label": "boundary",
+            "ms": 23.05320799999936
+          },
+          {
+            "name": "move_file",
+            "label": "boundary",
+            "ms": 23.065708000000086
+          },
+          {
+            "name": "get_file_info",
+            "label": "boundary",
+            "ms": 23.204540999999153
+          },
+          {
+            "name": "edit_block",
+            "label": "boundary",
+            "ms": 22.4754580000008
+          },
+          {
+            "name": "start_search",
+            "label": "boundary",
+            "ms": 22.255708000000595
+          },
+          {
+            "name": "start_process",
+            "label": "success",
+            "ms": 117.74837499999921
+          }
+        ],
+        "startupMs": 313.006792,
+        "schemaMatches": 22,
+        "advertised": [
+          "get_config",
+          "set_config_value",
+          "read_file",
+          "read_multiple_files",
+          "write_file",
+          "write_pdf",
+          "create_directory",
+          "list_directory",
+          "move_file",
+          "start_search",
+          "get_more_search_results",
+          "stop_search",
+          "list_searches",
+          "get_file_info",
+          "edit_block",
+          "start_process",
+          "read_process_output",
+          "interact_with_process",
+          "force_terminate",
+          "list_sessions",
+          "list_processes",
+          "kill_process",
+          "get_usage_stats",
+          "get_recent_tool_calls",
+          "give_feedback_to_desktop_commander",
+          "get_prompts"
+        ],
+        "rssKiB": 135488,
+        "writtenContent": "one\ntwo \u00e9\nappend\n",
+        "independentPdf": {
+          "pass": true,
+          "reader": "Apple PDFKit",
+          "output": "pages=1\nDEX independent PDF retained"
+        },
+        "formats": {
+          "docx": {
+            "write": true,
+            "read": true,
+            "independentContainerXml": true
+          },
+          "xlsx": {
+            "write": true,
+            "read": true,
+            "independentContainerXml": true
+          },
+          "png": {
+            "write": true,
+            "read": true,
+            "independentReader": true
+          },
+          "utf16": true
+        },
+        "malformedFormats": {
+          "pdf": true,
+          "docx": true,
+          "xlsx": true
+        },
+        "concurrentAppend": true,
+        "permissionRefused": true,
+        "markdownPdf": {
+          "success": true,
+          "independentParse": true
+        },
+        "activeSearchCancellation": {
+          "wasRunning": true,
+          "stopped": true
+        },
+        "fileBoundaries": {
+          "read_multiple_files": true,
+          "write_file": true,
+          "write_pdf": true,
+          "create_directory": true,
+          "list_directory": true,
+          "move_file": true,
+          "get_file_info": true,
+          "edit_block": true,
+          "start_search": true
+        },
+        "shutdownMs": 2169.559000000001,
+        "remainingOwnedPids": [
+          78703
+        ]
+      },
+      "records": {
+        "get_config": {
+          "success": {
+            "isError": false,
+            "normalized": "Current configuration:\n{\n  \"allowedDirectories\": [\n    \"<ROOT>\"\n  ],\n  \"telemetryEnabled\": false,\n  \"defaultShell\": \"/bin/sh\",\n  \"blockedCommands\": [],\n  \"fileReadLineLimit\": 1000,\n  \"fileWriteLineLimit\": 50,\n  \"welcomeOnboardingEligible\": false,\n  \"pendingWelcomeOnboarding\": false,\n  \"clientId\": \"547966db-d3c7-44b3-8a13-e5752e10f00f\",\n  \"version\": \"0.2.52\",\n  \"currentClient\": {\n    \"name\": \"dex-reach-parity\",\n    \"version\": \"1\"\n  },\n  \"featureFlags\": {},\n  \"systemInfo\": {\n    \"platform\": \"darwin\",\n    \"platformName\": \"macOS\",\n    \"defaultShell\": \"zsh\",\n    \"pathSeparator\": \"/\",\n    \"isWindows\": false,\n    \"isMacOS\": true,\n    \"isLinux\": false,\n    \"docker\": {\n      \"isContainer\": false,\n      \"containerType\": null,\n      \"orchestrator\": null,\n      \"isDocker\": false,\n      \"mountPoints\": [],\n      \"containerEnvironment\": {\n        \"containerName\": \"bigmac\"\n      }\n    },\n    \"isDXT\": false,\n    \"nodeInfo\": {\n      \"version\": \"26.12.1\",\n      \"path\": \"/opt/homebrew/Cellar/node/26.12.1_1/bin/node\"\n    },\n    \"pythonInfo\": {\n      \"available\": true,\n      \"command\": \"python3\",\n      \"version\": \"3.15.1\"\n    },\n    \"processInfo\": {\n      \"pid\": 78332,\n      \"arch\": \"arm64\",\n      \"platform\": \"darwin\",\n      \"versions\": {\n        \"node\": \"26.12.1\",\n        \"acorn\": \"8.19.0\",\n        \"ada\": \"4.0.0\",\n        \"amaro\": \"1.1.11\",\n        \"ares\": \"1.34.9\",\n        \"brotli\": \"1.2.1\",\n        \"cldr\": \"49.0\",\n        \"icu\": \"79.1\",\n        \"libffi\": \"3.8.0\",\n        \"llhttp\": \"9.4.3\",\n        \"merve\": \"1.2.2\",\n        \"modules\": \"147\",\n        \"napi\": \"10\",\n        \"nbytes\": \"0.1.4\",\n        \"ncrypto\": \"0.0.1\",\n        \"nghttp2\": \"1.70.0\",\n        \"nghttp3\": \"\",\n        \"ngtcp2\": \"\",\n        \"openssl\": \"4.1.0\",\n        \"simdjson\": \"5.0.5\",\n        \"simdutf\": \"9.3.2\",\n        \"sqlite\": \"3.54.1\",\n        \"tz\": \"2026e\",\n        \"undici\": \"8.12.2\",\n        \"unicode\": \"18.0\",\n        \"uv\": \"1.53.0\",\n        \"uvwasi\": \"0.0.23\",\n        \"v8\": \"14.6.202.34-node.40\",\n        \"zlib\": \"1.2.12\",\n        \"zstd\": \"1.5.7\"\n      }\n    },\n    \"examplePaths\": {\n      \"home\": \"/Users/username\",\n      \"temp\": \"/tmp\",\n      \"absolute\": \"/path/to/file.txt\"\n    },\n    \"memory\": {\n      \"rss\": \"102.58 MB\",\n      \"heapTotal\": \"75.72 MB\",\n      \"heapUsed\": \"57.64 MB\",\n      \"external\": \"5.80 MB\",\n      \"arrayBuffers\": \"1.53 MB\"\n    }\n  }\n}",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Current configuration:\n{\"allowedDirectories\":[\"<ROOT>\"],\"blockedCommands\":[],\"defaultShell\":\"/bin/sh\",\"fileReadLineLimit\":1000,\"fileWriteLineLimit\":50,\"pendingWelcomeOnboarding\":false,\"telemetryEnabled\":false,\"welcomeOnboardingEligible\":false}",
+                  "type": "text"
+                }
+              ],
+              "structuredContent": {
+                "config": {
+                  "allowedDirectories": [
+                    "<ROOT>"
+                  ],
+                  "blockedCommands": [],
+                  "defaultShell": "/bin/sh",
+                  "fileReadLineLimit": 1000,
+                  "fileWriteLineLimit": 50,
+                  "pendingWelcomeOnboarding": false,
+                  "telemetryEnabled": false,
+                  "welcomeOnboardingEligible": false
+                },
+                "entries": [
+                  {
+                    "editable": true,
+                    "key": "blockedCommands",
+                    "value": [],
+                    "valueType": "array"
+                  },
+                  {
+                    "editable": true,
+                    "key": "allowedDirectories",
+                    "value": [
+                      "<ROOT>"
+                    ],
+                    "valueType": "array"
+                  },
+                  {
+                    "editable": true,
+                    "key": "defaultShell",
+                    "value": "/bin/sh",
+                    "valueType": "string"
+                  },
+                  {
+                    "editable": true,
+                    "key": "telemetryEnabled",
+                    "value": false,
+                    "valueType": "boolean"
+                  },
+                  {
+                    "editable": true,
+                    "key": "fileReadLineLimit",
+                    "value": 1000,
+                    "valueType": "number"
+                  },
+                  {
+                    "editable": true,
+                    "key": "fileWriteLineLimit",
+                    "value": 50,
+                    "valueType": "number"
+                  }
+                ],
+                "uiHints": {
+                  "availableShells": [
+                    "zsh",
+                    "/bin/zsh",
+                    "/bin/bash",
+                    "/bin/csh",
+                    "/bin/dash",
+                    "/bin/ksh",
+                    "/bin/sh",
+                    "/bin/tcsh"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "read_file": {
+          "success": {
+            "isError": false,
+            "normalized": "[Reading 1 lines from line 1 (total: 3 lines, 1 remaining)]\n\nneedle \u00e9",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[Reading 1 lines from line 1 (total: 3 lines, 1 remaining)]\n\nneedle \u00e9",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:docx": {
+            "isError": false,
+            "normalized": "DOCX Outline: 3 body children, 2 paragraphs, 0 tables, 0 images\nEdit with: edit_block(file, old_string=\"<w:t>old text</w:t>\", new_string=\"<w:t>new text</w:t>\")\nRaw XML: use read_file with offset=1 to see pretty-printed XML for advanced edits.\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n[0] w:p style=\"Heading1\"\n  <w:t>DEX title</w:t>\n[1] w:p\n  <w:t xml:space=\"preserve\">paragraph unicode \u00e9</w:t>\n[2] w:sectPr (section properties)\n\nRaw XML: 22 lines, 0.4KB.\nFor bulk changes (translation, mass find/replace): use start_process with a Python script using zipfile to edit <w:t> elements.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "DOCX Outline: 3 body children, 2 paragraphs, 0 tables, 0 images\nEdit with: edit_block(file, old_string=\"<w:t>old text</w:t>\", new_string=\"<w:t>new text</w:t>\")\nRaw XML: use read_file with offset=1 to see pretty-printed XML for advanced edits.\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n[0] w:p style=\"Heading1\"\n  <w:t>DEX title</w:t>\n[1] w:p\n  <w:t xml:space=\"preserve\">paragraph unicode \u00e9</w:t>\n[2] w:sectPr (section properties)\n\nRaw XML: 22 lines, 0.4KB.\nFor bulk changes (translation, mass find/replace): use start_process with a Python script using zipfile to edit <w:t> elements.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:xlsx": {
+            "isError": false,
+            "normalized": "[Sheet: 'Sheet1' from <ROOT>/format.xlsx]\n[To MODIFY cells: use edit_block with range param, e.g., edit_block(path, {range: \"Sheet1!E5\", content: [[newValue]]}). read_file accepts the same range form, or pass sheet + range separately.]\n\n[[\"name\",\"value\"],[\"\u00e9 space\",42]]",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[Sheet: 'Sheet1' from <ROOT>/format.xlsx]\n[To MODIFY cells: use edit_block with range param, e.g., edit_block(path, {range: \"Sheet1!E5\", content: [[newValue]]}). read_file accepts the same range form, or pass sheet + range separately.]\n\n[[\"name\",\"value\"],[\"\u00e9 space\",42]]",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:png": {
+            "isError": false,
+            "normalized": "Image file: <ROOT>/image.png (image/png)\n",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Image file: <ROOT>/image.png (image/png)\n",
+                  "type": "text"
+                },
+                {
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1sAAAAASUVORK5CYII=",
+                  "mimeType": "image/png",
+                  "type": "image"
+                }
+              ]
+            }
+          },
+          "malformed:pdf": {
+            "isError": false,
+            "normalized": "Error reading PDF: Invalid PDF structure.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error reading PDF: Invalid PDF structure.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "malformed:docx": {
+            "isError": true,
+            "normalized": "Error: Can't find end of central directory : is this a zip file ?",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Can't find end of central directory : is this a zip file ?",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "malformed:xlsx": {
+            "isError": true,
+            "normalized": "Error: Can't find end of central directory : is this a zip file ? If it is, see https://stuk.github.io/jszip/documentation/howto/read_zip.html",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Can't find end of central directory : is this a zip file ? If it is, see https://stuk.github.io/jszip/documentation/howto/read_zip.html",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "utf16": {
+            "isError": false,
+            "normalized": "[Reading 2 lines from start (total: 2 lines, 0 remaining)]\n\nalpha\nneedle \u00e9",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[Reading 2 lines from start (total: 2 lines, 0 remaining)]\n\nalpha\nneedle \u00e9",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "permission": {
+            "isError": true,
+            "normalized": "Error: Cannot read file \u2014 permission denied (EACCES).\nPath: <ROOT>/denied.txt\n\n[AI: based on the path above, determine which cause is most likely and explain it to the user.]\n\nPossible causes and fixes:\n  1. File is in cloud storage (Google Drive / iCloud / Dropbox / OneDrive) but not downloaded locally.\n       \u2192 Right-click the file and choose \"Download Now\", \"Make Available Offline\", or \"Keep on This Device\".\n  2. Cloud storage app is not running or not signed in.\n       \u2192 Open your cloud storage app and make sure it is syncing.\n  3. File is on a network drive or virtual filesystem that is currently unavailable.\n       \u2192 Check that the network share or drive is mounted and accessible.\n  4. File has restricted permissions (e.g. system file, locked by another process, or chmod 000).\n       \u2192 Check file permissions or close any app that may have the file open.\n  5. The app does not have permission to access this location (macOS Full Disk Access).\n       \u2192 Go to System Settings \u2192 Privacy & Security \u2192 Full Disk Access and enable Claude.\n       \u2192 To open that pane directly, run in terminal:\n           open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\"\n         Then find \"Claude\" in the list and enable the toggle next to it.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Cannot read file \u2014 permission denied (EACCES).\nPath: <ROOT>/denied.txt\n\n[AI: based on the path above, determine which cause is most likely and explain it to the user.]\n\nPossible causes and fixes:\n  1. File is in cloud storage (Google Drive / iCloud / Dropbox / OneDrive) but not downloaded locally.\n       \u2192 Right-click the file and choose \"Download Now\", \"Make Available Offline\", or \"Keep on This Device\".\n  2. Cloud storage app is not running or not signed in.\n       \u2192 Open your cloud storage app and make sure it is syncing.\n  3. File is on a network drive or virtual filesystem that is currently unavailable.\n       \u2192 Check that the network share or drive is mounted and accessible.\n  4. File has restricted permissions (e.g. system file, locked by another process, or chmod 000).\n       \u2192 Check file permissions or close any app that may have the file open.\n  5. The app does not have permission to access this location (macOS Full Disk Access).\n       \u2192 Go to System Settings \u2192 Privacy & Security \u2192 Full Disk Access and enable Claude.\n       \u2192 To open that pane directly, run in terminal:\n           open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\"\n         Then find \"Claude\" in the list and enable the toggle next to it.",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: ENOENT: no such file or directory, stat '<ROOT>/missing'",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: ENOENT: no such file or directory, stat '<ROOT>/missing'",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary:escape": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <ROOT>/escape. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <ROOT>/escape. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary:../outside.txt": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "read_multiple_files": {
+          "success": {
+            "isError": false,
+            "normalized": "<ROOT>/unicode \u00e9 space.txt: text/plain (text)\n<ROOT>/missing: Error - ENOENT: no such file or directory, stat '<ROOT>/missing'\n\n--- <ROOT>/unicode \u00e9 space.txt contents: ---\n[Reading 3 lines from start (total: 3 lines, 0 remaining)]\n\nalpha\nneedle \u00e9\nomega",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "<ROOT>/unicode \u00e9 space.txt: text/plain (text)\n<ROOT>/missing: Error - ENOENT: no such file or directory, stat '<ROOT>/missing'",
+                  "type": "text"
+                },
+                {
+                  "text": "\n--- <ROOT>/unicode \u00e9 space.txt contents: ---\n[Reading 3 lines from start (total: 3 lines, 0 remaining)]\n\nalpha\nneedle \u00e9\nomega",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: [\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"array\",\n    \"received\": \"string\",\n    \"path\": [\n      \"paths\"\n    ],\n    \"message\": \"Expected array, received string\"\n  }\n]",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: [\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"array\",\n    \"received\": \"string\",\n    \"path\": [\n      \"paths\"\n    ],\n    \"message\": \"Expected array, received string\"\n  }\n]",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": false,
+            "normalized": "<ROOT>/unicode \u00e9 space.txt: text/plain (text)\n<FIXTURE>/outside.txt: Error - Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>\n\n--- <ROOT>/unicode \u00e9 space.txt contents: ---\n[Reading 3 lines from start (total: 3 lines, 0 remaining)]\n\nalpha\nneedle \u00e9\nomega",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "<ROOT>/unicode \u00e9 space.txt: text/plain (text)\n<FIXTURE>/outside.txt: Error - Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                },
+                {
+                  "text": "\n--- <ROOT>/unicode \u00e9 space.txt contents: ---\n[Reading 3 lines from start (total: 3 lines, 0 remaining)]\n\nalpha\nneedle \u00e9\nomega",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "write_file": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully wrote to <ROOT>/write.txt (3 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote to <ROOT>/write.txt (3 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "append": {
+            "isError": false,
+            "normalized": "Successfully appended to <ROOT>/write.txt (2 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully appended to <ROOT>/write.txt (2 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:docx": {
+            "isError": false,
+            "normalized": "Successfully wrote to <ROOT>/format.docx (2 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote to <ROOT>/format.docx (2 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:xlsx": {
+            "isError": false,
+            "normalized": "Successfully wrote to <ROOT>/format.xlsx (1 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote to <ROOT>/format.xlsx (1 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:png": {
+            "isError": false,
+            "normalized": "Successfully wrote to <ROOT>/image.png (1 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote to <ROOT>/image.png (1 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "concurrency:alpha": {
+            "isError": false,
+            "normalized": "Successfully appended to <ROOT>/concurrent.txt (2 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully appended to <ROOT>/concurrent.txt (2 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "concurrency:beta": {
+            "isError": false,
+            "normalized": "Successfully appended to <ROOT>/concurrent.txt (2 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully appended to <ROOT>/concurrent.txt (2 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: [\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"string\",\n    \"received\": \"number\",\n    \"path\": [\n      \"content\"\n    ],\n    \"message\": \"Expected string, received number\"\n  }\n]",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: [\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"string\",\n    \"received\": \"number\",\n    \"path\": [\n      \"content\"\n    ],\n    \"message\": \"Expected string, received number\"\n  }\n]",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "create_directory": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully created directory <ROOT>/new dir",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully created directory <ROOT>/new dir",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: EEXIST: file already exists, mkdir '<ROOT>/unicode \u00e9 space.txt'",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: EEXIST: file already exists, mkdir '<ROOT>/unicode \u00e9 space.txt'",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside-dir. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside-dir. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "list_directory": {
+          "success": {
+            "isError": false,
+            "normalized": "[FILE] escape\n[FILE] input.pdf\n[DIR] new dir\n[FILE] unicode \u00e9 space.txt\n[FILE] write.txt",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[FILE] escape\n[FILE] input.pdf\n[DIR] new dir\n[FILE] unicode \u00e9 space.txt\n[FILE] write.txt",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": false,
+            "normalized": "[NOT_FOUND] missing \u2014 path does not exist",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[NOT_FOUND] missing \u2014 path does not exist",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "move_file": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully moved <ROOT>/write.txt to <ROOT>/moved.txt",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully moved <ROOT>/write.txt to <ROOT>/moved.txt",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: ENOENT: no such file or directory, rename '<ROOT>/missing' -> '<ROOT>/absent'",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: ENOENT: no such file or directory, rename '<ROOT>/missing' -> '<ROOT>/absent'",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/moved-outside. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/moved-outside. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "get_file_info": {
+          "success": {
+            "isError": false,
+            "normalized": "size: 24\ncreated: \"<TIME>\"\nmodified: \"<TIME>\"\naccessed: \"<TIME>\"\nisDirectory: false\nisFile: true\npermissions: 644\nfileType: text\nlineCount: 3\nlastLine: 2\nappendPosition: 3",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "size: 24\ncreated: \"<TIME>\"\nmodified: \"<TIME>\"\naccessed: \"<TIME>\"\nisDirectory: false\nisFile: true\npermissions: 644\nfileType: text\nlineCount: 3\nlastLine: 2\nappendPosition: 3",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: ENOENT: no such file or directory, stat '<ROOT>/missing'",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: ENOENT: no such file or directory, stat '<ROOT>/missing'",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "edit_block": {
+          "success": {
+            "isError": false,
+            "normalized": "[Reading 4 lines from start (total: 4 lines, 0 remaining)]\n\nONE\ntwo \u00e9\nappend\n",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[Reading 4 lines from start (total: 4 lines, 0 remaining)]\n\nONE\ntwo \u00e9\nappend\n",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": false,
+            "normalized": "Search content not found in <ROOT>/unicode \u00e9 space.txt. The closest match was \"a\r\nneedle \u00e9\r\nomeg\" with only 24% similarity, which is below the 70% threshold. (Fuzzy search completed in 6.92ms)\n\nLog entry saved for analysis. Use the following command to check the log:\nCheck log: <FIXTURE>/home/.claude-server-commander-logs/fuzzy-search.log",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search content not found in <ROOT>/unicode \u00e9 space.txt. The closest match was \"a\r\nneedle \u00e9\r\nomeg\" with only 24% similarity, which is below the 70% threshold. (Fuzzy search completed in 6.92ms)\n\nLog entry saved for analysis. Use the following command to check the log:\nCheck log: <FIXTURE>/home/.claude-server-commander-logs/fuzzy-search.log",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "write_pdf": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully wrote PDF to <ROOT>/output.pdf\nOriginal file: <ROOT>/input.pdf",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote PDF to <ROOT>/output.pdf\nOriginal file: <ROOT>/input.pdf",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:markdown": {
+            "isError": false,
+            "normalized": "Successfully wrote PDF to <ROOT>/generated.pdf",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote PDF to <ROOT>/generated.pdf",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: ENOENT: no such file or directory, open '<ROOT>/missing.pdf'",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: ENOENT: no such file or directory, open '<ROOT>/missing.pdf'",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside.pdf. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside.pdf. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "start_search": {
+          "success": {
+            "isError": false,
+            "normalized": "Started content search session: <SEARCH>\nPattern: \"needle\"\nPath: <ROOT>\nStatus: RUNNING\nRuntime: <TIME>\nTotal results: 1\n\nInitial results:\n\ud83d\udcc4 <ROOT>/unicode \u00e9 space.txt:1 - alpha\n\ud83d\udcc4 <ROOT>/unicode \u00e9 space.txt:2 - needle\n\ud83d\udcc4 <ROOT>/unicode \u00e9 space.txt:3 - omega\n\n\ud83d\udd04 Search in progress. Use get_more_search_results to get more results.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Started content search session: <SEARCH>\nPattern: \"needle\"\nPath: <ROOT>\nStatus: RUNNING\nRuntime: <TIME>\nTotal results: 1\n\nInitial results:\n\ud83d\udcc4 <ROOT>/unicode \u00e9 space.txt:1 - alpha\n\ud83d\udcc4 <ROOT>/unicode \u00e9 space.txt:2 - needle\n\ud83d\udcc4 <ROOT>/unicode \u00e9 space.txt:3 - omega\n\n\ud83d\udd04 Search in progress. Use get_more_search_results to get more results.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "active-cancel": {
+            "isError": false,
+            "normalized": "Started content search session: <SEARCH>\nPattern: \"waiting\"\nPath: <ROOT>/cancel-search.fifo\nStatus: RUNNING\nRuntime: <TIME>\nTotal results: 0\n\n\n\ud83d\udd04 Search in progress. Use get_more_search_results to get more results.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Started content search session: <SEARCH>\nPattern: \"waiting\"\nPath: <ROOT>/cancel-search.fifo\nStatus: RUNNING\nRuntime: <TIME>\nTotal results: 0\n\n\n\ud83d\udd04 Search in progress. Use get_more_search_results to get more results.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Invalid arguments for start_search: [\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"string\",\n    \"received\": \"number\",\n    \"path\": [\n      \"pattern\"\n    ],\n    \"message\": \"Expected string, received number\"\n  }\n]",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Invalid arguments for start_search: [\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"string\",\n    \"received\": \"number\",\n    \"path\": [\n      \"pattern\"\n    ],\n    \"message\": \"Expected string, received number\"\n  }\n]",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error starting search session: Path not allowed: <FIXTURE>. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error starting search session: Path not allowed: <FIXTURE>. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "get_more_search_results": {
+          "success": {
+            "isError": false,
+            "normalized": "Search session: <SEARCH>\nStatus: COMPLETED\nRuntime: 0s\nTotal results found: 5 (2 matches)\nShowing results 0-0\n\nResults:\n\ud83d\udcc4 <ROOT>/unicode \u00e9 space.txt:1 - alpha\n\n\ud83d\udcd6 More results available. Use get_more_search_results with offset: 1\n\u2705 Search completed.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search session: <SEARCH>\nStatus: COMPLETED\nRuntime: 0s\nTotal results found: 5 (2 matches)\nShowing results 0-0\n\nResults:\n\ud83d\udcc4 <ROOT>/unicode \u00e9 space.txt:1 - alpha\n\n\ud83d\udcd6 More results available. Use get_more_search_results with offset: 1\n\u2705 Search completed.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "active-cancel": {
+            "isError": false,
+            "normalized": "Search session: <SEARCH>\nStatus: COMPLETED\nRuntime: 0s\nTotal results found: 0 (0 matches)\nShowing results 0--1\n\nNo matches found.\n\u2705 Search completed.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search session: <SEARCH>\nStatus: COMPLETED\nRuntime: 0s\nTotal results found: 0 (0 matches)\nShowing results 0--1\n\nNo matches found.\n\u2705 Search completed.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error reading search results: Search session invalid not found",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error reading search results: Search session invalid not found",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "list_searches": {
+          "success": {
+            "isError": false,
+            "normalized": "Active Searches (1):\n\nSession: <SEARCH>\n  Type: content\n  Pattern: \"needle\"\n  Status: \u2705 COMPLETED\n  Runtime: 0s\n  Results: 5\n\n",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Active Searches (1):\n\nSession: <SEARCH>\n  Type: content\n  Pattern: \"needle\"\n  Status: \u2705 COMPLETED\n  Runtime: 0s\n  Results: 5\n\n",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "stop_search": {
+          "success": {
+            "isError": false,
+            "normalized": "Search session <SEARCH> terminated successfully.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search session <SEARCH> terminated successfully.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "active-cancel": {
+            "isError": false,
+            "normalized": "Search session <SEARCH> terminated successfully.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search session <SEARCH> terminated successfully.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": false,
+            "normalized": "Search session invalid not found or already completed.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search session invalid not found or already completed.",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "start_process": {
+          "success": {
+            "isError": false,
+            "normalized": "Process started with PID <PID> (shell: /bin/sh)\nInitial output:\n\n\u23f3 Process is running. Use read_process_output to get more output.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Process started with PID <PID> (shell: /bin/sh)\nInitial output:\n\n\u23f3 Process is running. Use read_process_output to get more output.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: [\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"string\",\n    \"received\": \"number\",\n    \"path\": [\n      \"command\"\n    ],\n    \"message\": \"Expected string, received number\"\n  }\n]",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: [\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"string\",\n    \"received\": \"number\",\n    \"path\": [\n      \"command\"\n    ],\n    \"message\": \"Expected string, received number\"\n  }\n]",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "read_process_output": {
+          "success": {
+            "isError": false,
+            "normalized": "[Reading 2 new lines (total: 2 lines)]\n\nready\n",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[Reading 2 new lines (total: 2 lines)]\n\nready\n",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "No session found for PID <PID>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "No session found for PID <PID>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "interact_with_process": {
+          "success": {
+            "isError": false,
+            "normalized": "\u2705 Input sent to process <PID>. Use read_process_output to get the response.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "\u2705 Input sent to process <PID>. Use read_process_output to get the response.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: Failed to send input to process <PID>. The process may have exited or doesn't accept input.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Failed to send input to process <PID>. The process may have exited or doesn't accept input.",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "list_sessions": {
+          "success": {
+            "isError": false,
+            "normalized": "PID <PID>, Blocked: true, Runtime: 0s",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "PID <PID>, Blocked: true, Runtime: 0s",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "list_processes": {
+          "success": {
+            "isError": false,
+            "normalized": "<process listing withheld: host-wide volatile data>",
+            "normalizedResult": {
+              "scope": "host listing withheld",
+              "validLines": true
+            }
+          }
+        },
+        "force_terminate": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully initiated termination of session <PID>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully initiated termination of session <PID>",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "repeat": {
+            "isError": false,
+            "normalized": "Successfully initiated termination of session <PID>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully initiated termination of session <PID>",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": false,
+            "normalized": "No active session found for PID <PID>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "No active session found for PID <PID>",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "kill_process": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully terminated process <PID>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully terminated process <PID>",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: Failed to kill process: kill ESRCH",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Failed to kill process: kill ESRCH",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "get_usage_stats": {
+          "success": {
+            "isError": false,
+            "normalized": "\ud83d\udcca **Usage Summary**\n\u2022 Total calls: 41 (38 successful, 3 failed)\n\u2022 Success rate: 93%\n\u2022 Days using: 0\n\u2022 Sessions: 1\n\u2022 Unique tools: 21\n\u2022 Most used: read_file: 9, write_file: 7, write_pdf: 2, start_search: 2, get_more_search_results: 2\n\u2022 Feedback given: No\n\n**By Category:**\n\u2022 Filesystem: 21\n\u2022 Terminal: 3\n\u2022 Editing: 1\n\u2022 Search: 7\n\u2022 Config: 1\n\u2022 Process: 2",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "\ud83d\udcca **Usage Summary**\n\u2022 Total calls: 41 (38 successful, 3 failed)\n\u2022 Success rate: 93%\n\u2022 Days using: 0\n\u2022 Sessions: 1\n\u2022 Unique tools: 21\n\u2022 Most used: read_file: 9, write_file: 7, write_pdf: 2, start_search: 2, get_more_search_results: 2\n\u2022 Feedback given: No\n\n**By Category:**\n\u2022 Filesystem: 21\n\u2022 Terminal: 3\n\u2022 Editing: 1\n\u2022 Search: 7\n\u2022 Config: 1\n\u2022 Process: 2",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "candidate": {
+      "metrics": {
+        "latenciesMs": [
+          {
+            "name": "get_config",
+            "label": "success",
+            "ms": 10.872957999999926
+          },
+          {
+            "name": "read_file",
+            "label": "success",
+            "ms": 2.790999999999258
+          },
+          {
+            "name": "read_multiple_files",
+            "label": "success",
+            "ms": 1.4039169999996375
+          },
+          {
+            "name": "write_file",
+            "label": "success",
+            "ms": 0.8704159999997501
+          },
+          {
+            "name": "write_file",
+            "label": "append",
+            "ms": 0.4405829999996058
+          },
+          {
+            "name": "create_directory",
+            "label": "success",
+            "ms": 0.41883299999972223
+          },
+          {
+            "name": "list_directory",
+            "label": "success",
+            "ms": 0.48962500000016007
+          },
+          {
+            "name": "move_file",
+            "label": "success",
+            "ms": 0.5418329999993148
+          },
+          {
+            "name": "get_file_info",
+            "label": "success",
+            "ms": 0.6837919999998121
+          },
+          {
+            "name": "edit_block",
+            "label": "success",
+            "ms": 1.3172500000000582
+          },
+          {
+            "name": "write_pdf",
+            "label": "success",
+            "ms": 5.9244999999991705
+          },
+          {
+            "name": "write_file",
+            "label": "format:docx",
+            "ms": 4.152874999999767
+          },
+          {
+            "name": "read_file",
+            "label": "format:docx",
+            "ms": 2.779207999999926
+          },
+          {
+            "name": "write_file",
+            "label": "format:xlsx",
+            "ms": 8.947416999999405
+          },
+          {
+            "name": "read_file",
+            "label": "format:xlsx",
+            "ms": 26.863000000001193
+          },
+          {
+            "name": "write_file",
+            "label": "format:png",
+            "ms": 0.6045830000002752
+          },
+          {
+            "name": "read_file",
+            "label": "format:png",
+            "ms": 60.79962499999965
+          },
+          {
+            "name": "read_file",
+            "label": "malformed:pdf",
+            "ms": 23.506916999998793
+          },
+          {
+            "name": "read_file",
+            "label": "malformed:docx",
+            "ms": 0.6008750000000873
+          },
+          {
+            "name": "read_file",
+            "label": "malformed:xlsx",
+            "ms": 0.6317909999997937
+          },
+          {
+            "name": "write_file",
+            "label": "concurrency:alpha",
+            "ms": 0.3684999999968568
+          },
+          {
+            "name": "write_file",
+            "label": "concurrency:beta",
+            "ms": 0.3974999999991269
+          },
+          {
+            "name": "read_file",
+            "label": "utf16",
+            "ms": 0.7422499999993306
+          },
+          {
+            "name": "read_file",
+            "label": "permission",
+            "ms": 0.4942909999990661
+          },
+          {
+            "name": "write_pdf",
+            "label": "format:markdown",
+            "ms": 427.8814170000005
+          },
+          {
+            "name": "start_search",
+            "label": "success",
+            "ms": 44.34029200000077
+          },
+          {
+            "name": "get_more_search_results",
+            "label": "success",
+            "ms": 1.1841659999990952
+          },
+          {
+            "name": "list_searches",
+            "label": "success",
+            "ms": 0.48779100000319886
+          },
+          {
+            "name": "stop_search",
+            "label": "success",
+            "ms": 0.6183749999981956
+          },
+          {
+            "name": "start_search",
+            "label": "active-cancel",
+            "ms": 43.226458000001
+          },
+          {
+            "name": "stop_search",
+            "label": "active-cancel",
+            "ms": 0.6182500000031723
+          },
+          {
+            "name": "get_more_search_results",
+            "label": "active-cancel",
+            "ms": 1.4996659999997064
+          },
+          {
+            "name": "start_process",
+            "label": "success",
+            "ms": 109.71587499999805
+          },
+          {
+            "name": "read_process_output",
+            "label": "success",
+            "ms": 2.756875000002765
+          },
+          {
+            "name": "interact_with_process",
+            "label": "success",
+            "ms": 2.462083000002167
+          },
+          {
+            "name": "list_sessions",
+            "label": "success",
+            "ms": 1.123541999997542
+          },
+          {
+            "name": "list_processes",
+            "label": "success",
+            "ms": 67.32849999999962
+          },
+          {
+            "name": "force_terminate",
+            "label": "success",
+            "ms": 0.5557919999992009
+          },
+          {
+            "name": "force_terminate",
+            "label": "repeat",
+            "ms": 0.17341600000145263
+          },
+          {
+            "name": "start_process",
+            "label": "success",
+            "ms": 103.56966599999942
+          },
+          {
+            "name": "kill_process",
+            "label": "success",
+            "ms": 0.8187080000025162
+          },
+          {
+            "name": "get_usage_stats",
+            "label": "success",
+            "ms": 0.9981669999979204
+          },
+          {
+            "name": "read_file",
+            "label": "error",
+            "ms": 1.3814999999995052
+          },
+          {
+            "name": "read_multiple_files",
+            "label": "error",
+            "ms": 0.885707999997976
+          },
+          {
+            "name": "write_file",
+            "label": "error",
+            "ms": 0.421875
+          },
+          {
+            "name": "write_pdf",
+            "label": "error",
+            "ms": 0.7159580000006827
+          },
+          {
+            "name": "create_directory",
+            "label": "error",
+            "ms": 0.5819580000024871
+          },
+          {
+            "name": "list_directory",
+            "label": "error",
+            "ms": 0.6162499999991269
+          },
+          {
+            "name": "move_file",
+            "label": "error",
+            "ms": 0.7888750000020082
+          },
+          {
+            "name": "start_search",
+            "label": "error",
+            "ms": 0.3694579999973939
+          },
+          {
+            "name": "get_more_search_results",
+            "label": "error",
+            "ms": 0.33237499999813735
+          },
+          {
+            "name": "stop_search",
+            "label": "error",
+            "ms": 0.2559580000015558
+          },
+          {
+            "name": "get_file_info",
+            "label": "error",
+            "ms": 0.4717080000009446
+          },
+          {
+            "name": "edit_block",
+            "label": "error",
+            "ms": 16.640708000002633
+          },
+          {
+            "name": "start_process",
+            "label": "error",
+            "ms": 0.3257919999996375
+          },
+          {
+            "name": "read_process_output",
+            "label": "error",
+            "ms": 0.19816699999864795
+          },
+          {
+            "name": "interact_with_process",
+            "label": "error",
+            "ms": 0.18362499999784632
+          },
+          {
+            "name": "force_terminate",
+            "label": "error",
+            "ms": 0.19216700000106357
+          },
+          {
+            "name": "kill_process",
+            "label": "error",
+            "ms": 0.3087500000001455
+          },
+          {
+            "name": "read_file",
+            "label": "boundary:escape",
+            "ms": 0.4187920000003942
+          },
+          {
+            "name": "read_file",
+            "label": "boundary:../outside.txt",
+            "ms": 0.2998750000006112
+          },
+          {
+            "name": "read_multiple_files",
+            "label": "boundary",
+            "ms": 1.1621250000025611
+          },
+          {
+            "name": "write_file",
+            "label": "boundary",
+            "ms": 0.2756249999983993
+          },
+          {
+            "name": "write_pdf",
+            "label": "boundary",
+            "ms": 0.35716600000159815
+          },
+          {
+            "name": "create_directory",
+            "label": "boundary",
+            "ms": 0.22049999999944703
+          },
+          {
+            "name": "list_directory",
+            "label": "boundary",
+            "ms": 0.1735000000007858
+          },
+          {
+            "name": "move_file",
+            "label": "boundary",
+            "ms": 0.2471670000013546
+          },
+          {
+            "name": "get_file_info",
+            "label": "boundary",
+            "ms": 0.18866699999853154
+          },
+          {
+            "name": "edit_block",
+            "label": "boundary",
+            "ms": 0.1946669999997539
+          },
+          {
+            "name": "start_search",
+            "label": "boundary",
+            "ms": 0.221916999998939
+          },
+          {
+            "name": "set_config_value",
+            "label": "owner-refusal",
+            "ms": 0.11741600000095787
+          },
+          {
+            "name": "get_recent_tool_calls",
+            "label": "owner-refusal",
+            "ms": 0.11599999999816646
+          },
+          {
+            "name": "give_feedback_to_desktop_commander",
+            "label": "owner-refusal",
+            "ms": 0.0930000000007567
+          },
+          {
+            "name": "get_prompts",
+            "label": "owner-refusal",
+            "ms": 0.11929199999940465
+          },
+          {
+            "name": "toString",
+            "label": "owner-refusal",
+            "ms": 0.10704199999963748
+          },
+          {
+            "name": "get_config",
+            "label": "after-refusals",
+            "ms": 14.047166000000288
+          },
+          {
+            "name": "start_process",
+            "label": "success",
+            "ms": 103.18125000000146
+          }
+        ],
+        "startupMs": 299.1306249999998,
+        "schemaMatches": 22,
+        "advertised": [
+          "get_config",
+          "read_file",
+          "read_multiple_files",
+          "write_file",
+          "write_pdf",
+          "create_directory",
+          "list_directory",
+          "move_file",
+          "start_search",
+          "get_more_search_results",
+          "stop_search",
+          "list_searches",
+          "get_file_info",
+          "edit_block",
+          "start_process",
+          "read_process_output",
+          "interact_with_process",
+          "force_terminate",
+          "list_sessions",
+          "list_processes",
+          "kill_process",
+          "get_usage_stats"
+        ],
+        "rssKiB": 121120,
+        "writtenContent": "one\ntwo \u00e9\nappend\n",
+        "independentPdf": {
+          "pass": true,
+          "reader": "Apple PDFKit",
+          "output": "pages=1\nDEX independent PDF retained"
+        },
+        "formats": {
+          "docx": {
+            "write": true,
+            "read": true,
+            "independentContainerXml": true
+          },
+          "xlsx": {
+            "write": true,
+            "read": true,
+            "independentContainerXml": true
+          },
+          "png": {
+            "write": true,
+            "read": true,
+            "independentReader": true
+          },
+          "utf16": true
+        },
+        "malformedFormats": {
+          "pdf": true,
+          "docx": true,
+          "xlsx": true
+        },
+        "concurrentAppend": true,
+        "permissionRefused": true,
+        "markdownPdf": {
+          "success": true,
+          "independentParse": true
+        },
+        "activeSearchCancellation": {
+          "wasRunning": true,
+          "stopped": true
+        },
+        "fileBoundaries": {
+          "read_multiple_files": true,
+          "write_file": true,
+          "write_pdf": true,
+          "create_directory": true,
+          "list_directory": true,
+          "move_file": true,
+          "get_file_info": true,
+          "edit_block": true,
+          "start_search": true
+        },
+        "rootsUnchanged": true,
+        "ownerLocalRefused": true,
+        "shutdownMs": 187.37549999999828,
+        "remainingOwnedPids": []
+      },
+      "records": {
+        "get_config": {
+          "success": {
+            "isError": false,
+            "normalized": "Current configuration:\n{\n  \"allowedDirectories\": [\n    \"<ROOT>\"\n  ],\n  \"telemetryEnabled\": false,\n  \"defaultShell\": \"/bin/sh\",\n  \"blockedCommands\": [],\n  \"fileReadLineLimit\": 1000,\n  \"fileWriteLineLimit\": 50,\n  \"welcomeOnboardingEligible\": false,\n  \"pendingWelcomeOnboarding\": false,\n  \"version\": \"1.0.0\",\n  \"currentClient\": {\n    \"name\": \"dex-reach-node\",\n    \"version\": \"candidate\"\n  },\n  \"featureFlags\": {},\n  \"systemInfo\": {\n    \"platform\": \"darwin\",\n    \"platformName\": \"macOS\",\n    \"defaultShell\": \"zsh\",\n    \"pathSeparator\": \"/\",\n    \"isWindows\": false,\n    \"isMacOS\": true,\n    \"isLinux\": false,\n    \"docker\": {\n      \"isContainer\": false,\n      \"containerType\": null,\n      \"orchestrator\": null,\n      \"isDocker\": false,\n      \"mountPoints\": [],\n      \"containerEnvironment\": {\n        \"containerName\": \"bigmac\"\n      }\n    },\n    \"isDXT\": false,\n    \"nodeInfo\": {\n      \"version\": \"26.12.1\",\n      \"path\": \"/opt/homebrew/Cellar/node/26.12.1_1/bin/node\"\n    },\n    \"pythonInfo\": {\n      \"available\": true,\n      \"command\": \"python3\",\n      \"version\": \"3.15.1\"\n    },\n    \"processInfo\": {\n      \"pid\": 78738,\n      \"arch\": \"arm64\",\n      \"platform\": \"darwin\",\n      \"versions\": {\n        \"node\": \"26.12.1\",\n        \"acorn\": \"8.19.0\",\n        \"ada\": \"4.0.0\",\n        \"amaro\": \"1.1.11\",\n        \"ares\": \"1.34.9\",\n        \"brotli\": \"1.2.1\",\n        \"cldr\": \"49.0\",\n        \"icu\": \"79.1\",\n        \"libffi\": \"3.8.0\",\n        \"llhttp\": \"9.4.3\",\n        \"merve\": \"1.2.2\",\n        \"modules\": \"147\",\n        \"napi\": \"10\",\n        \"nbytes\": \"0.1.4\",\n        \"ncrypto\": \"0.0.1\",\n        \"nghttp2\": \"1.70.0\",\n        \"nghttp3\": \"\",\n        \"ngtcp2\": \"\",\n        \"openssl\": \"4.1.0\",\n        \"simdjson\": \"5.0.5\",\n        \"simdutf\": \"9.3.2\",\n        \"sqlite\": \"3.54.1\",\n        \"tz\": \"2026e\",\n        \"undici\": \"8.12.2\",\n        \"unicode\": \"18.0\",\n        \"uv\": \"1.53.0\",\n        \"uvwasi\": \"0.0.23\",\n        \"v8\": \"14.6.202.34-node.40\",\n        \"zlib\": \"1.2.12\",\n        \"zstd\": \"1.5.7\"\n      }\n    },\n    \"examplePaths\": {\n      \"home\": \"/Users/username\",\n      \"temp\": \"/tmp\",\n      \"absolute\": \"/path/to/file.txt\"\n    },\n    \"memory\": {\n      \"rss\": \"87.87 MB\",\n      \"heapTotal\": \"63.67 MB\",\n      \"heapUsed\": \"39.37 MB\",\n      \"external\": \"5.73 MB\",\n      \"arrayBuffers\": \"1.47 MB\"\n    }\n  }\n}",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Current configuration:\n{\"allowedDirectories\":[\"<ROOT>\"],\"blockedCommands\":[],\"defaultShell\":\"/bin/sh\",\"fileReadLineLimit\":1000,\"fileWriteLineLimit\":50,\"pendingWelcomeOnboarding\":false,\"telemetryEnabled\":false,\"welcomeOnboardingEligible\":false}",
+                  "type": "text"
+                }
+              ],
+              "structuredContent": {
+                "config": {
+                  "allowedDirectories": [
+                    "<ROOT>"
+                  ],
+                  "blockedCommands": [],
+                  "defaultShell": "/bin/sh",
+                  "fileReadLineLimit": 1000,
+                  "fileWriteLineLimit": 50,
+                  "pendingWelcomeOnboarding": false,
+                  "telemetryEnabled": false,
+                  "welcomeOnboardingEligible": false
+                },
+                "entries": [
+                  {
+                    "editable": true,
+                    "key": "blockedCommands",
+                    "value": [],
+                    "valueType": "array"
+                  },
+                  {
+                    "editable": true,
+                    "key": "allowedDirectories",
+                    "value": [
+                      "<ROOT>"
+                    ],
+                    "valueType": "array"
+                  },
+                  {
+                    "editable": true,
+                    "key": "defaultShell",
+                    "value": "/bin/sh",
+                    "valueType": "string"
+                  },
+                  {
+                    "editable": true,
+                    "key": "telemetryEnabled",
+                    "value": false,
+                    "valueType": "boolean"
+                  },
+                  {
+                    "editable": true,
+                    "key": "fileReadLineLimit",
+                    "value": 1000,
+                    "valueType": "number"
+                  },
+                  {
+                    "editable": true,
+                    "key": "fileWriteLineLimit",
+                    "value": 50,
+                    "valueType": "number"
+                  }
+                ],
+                "uiHints": {
+                  "availableShells": [
+                    "zsh",
+                    "/bin/zsh",
+                    "/bin/bash",
+                    "/bin/csh",
+                    "/bin/dash",
+                    "/bin/ksh",
+                    "/bin/sh",
+                    "/bin/tcsh"
+                  ]
+                }
+              }
+            }
+          },
+          "after-refusals": {
+            "isError": false,
+            "normalized": "Current configuration:\n{\n  \"allowedDirectories\": [\n    \"<ROOT>\"\n  ],\n  \"telemetryEnabled\": false,\n  \"defaultShell\": \"/bin/sh\",\n  \"blockedCommands\": [],\n  \"fileReadLineLimit\": 1000,\n  \"fileWriteLineLimit\": 50,\n  \"welcomeOnboardingEligible\": false,\n  \"pendingWelcomeOnboarding\": false,\n  \"usageStats\": {\n    \"filesystemOperations\": 36,\n    \"terminalOperations\": 4,\n    \"editOperations\": 3,\n    \"searchOperations\": 11,\n    \"configOperations\": 1,\n    \"processOperations\": 3,\n    \"totalToolCalls\": 70,\n    \"successfulCalls\": 44,\n    \"failedCalls\": 26,\n    \"toolCounts\": {\n      \"get_config\": 1,\n      \"read_file\": 12,\n      \"read_multiple_files\": 3,\n      \"write_file\": 9,\n      \"create_directory\": 3,\n      \"list_directory\": 3,\n      \"move_file\": 3,\n      \"get_file_info\": 3,\n      \"edit_block\": 3,\n      \"write_pdf\": 4,\n      \"start_search\": 4,\n      \"get_more_search_results\": 3,\n      \"list_searches\": 1,\n      \"stop_search\": 3,\n      \"start_process\": 3,\n      \"read_process_output\": 2,\n      \"interact_with_process\": 2,\n      \"list_sessions\": 1,\n      \"list_processes\": 1,\n      \"force_terminate\": 3,\n      \"kill_process\": 2,\n      \"get_usage_stats\": 1\n    },\n    \"firstUsed\": 1793036879132,\n    \"lastUsed\": 1793036889511,\n    \"totalSessions\": 1,\n    \"lastFeedbackPrompt\": 0\n  },\n  \"version\": \"1.0.0\",\n  \"currentClient\": {\n    \"name\": \"dex-reach-node\",\n    \"version\": \"candidate\"\n  },\n  \"featureFlags\": {},\n  \"systemInfo\": {\n    \"platform\": \"darwin\",\n    \"platformName\": \"macOS\",\n    \"defaultShell\": \"zsh\",\n    \"pathSeparator\": \"/\",\n    \"isWindows\": false,\n    \"isMacOS\": true,\n    \"isLinux\": false,\n    \"docker\": {\n      \"isContainer\": false,\n      \"containerType\": null,\n      \"orchestrator\": null,\n      \"isDocker\": false,\n      \"mountPoints\": [],\n      \"containerEnvironment\": {\n        \"containerName\": \"bigmac\"\n      }\n    },\n    \"isDXT\": false,\n    \"nodeInfo\": {\n      \"version\": \"26.12.1\",\n      \"path\": \"/opt/homebrew/Cellar/node/26.12.1_1/bin/node\"\n    },\n    \"pythonInfo\": {\n      \"available\": true,\n      \"command\": \"python3\",\n      \"version\": \"3.15.1\"\n    },\n    \"processInfo\": {\n      \"pid\": 78738,\n      \"arch\": \"arm64\",\n      \"platform\": \"darwin\",\n      \"versions\": {\n        \"node\": \"26.12.1\",\n        \"acorn\": \"8.19.0\",\n        \"ada\": \"4.0.0\",\n        \"amaro\": \"1.1.11\",\n        \"ares\": \"1.34.9\",\n        \"brotli\": \"1.2.1\",\n        \"cldr\": \"49.0\",\n        \"icu\": \"79.1\",\n        \"libffi\": \"3.8.0\",\n        \"llhttp\": \"9.4.3\",\n        \"merve\": \"1.2.2\",\n        \"modules\": \"147\",\n        \"napi\": \"10\",\n        \"nbytes\": \"0.1.4\",\n        \"ncrypto\": \"0.0.1\",\n        \"nghttp2\": \"1.70.0\",\n        \"nghttp3\": \"\",\n        \"ngtcp2\": \"\",\n        \"openssl\": \"4.1.0\",\n        \"simdjson\": \"5.0.5\",\n        \"simdutf\": \"9.3.2\",\n        \"sqlite\": \"3.54.1\",\n        \"tz\": \"2026e\",\n        \"undici\": \"8.12.2\",\n        \"unicode\": \"18.0\",\n        \"uv\": \"1.53.0\",\n        \"uvwasi\": \"0.0.23\",\n        \"v8\": \"14.6.202.34-node.40\",\n        \"zlib\": \"1.2.12\",\n        \"zstd\": \"1.5.7\"\n      }\n    },\n    \"examplePaths\": {\n      \"home\": \"/Users/username\",\n      \"temp\": \"/tmp\",\n      \"absolute\": \"/path/to/file.txt\"\n    },\n    \"memory\": {\n      \"rss\": \"124.53 MB\",\n      \"heapTotal\": \"78.92 MB\",\n      \"heapUsed\": \"60.98 MB\",\n      \"external\": \"17.14 MB\",\n      \"arrayBuffers\": \"11.20 MB\"\n    }\n  }\n}",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Current configuration:\n{\"allowedDirectories\":[\"<ROOT>\"],\"blockedCommands\":[],\"defaultShell\":\"/bin/sh\",\"fileReadLineLimit\":1000,\"fileWriteLineLimit\":50,\"pendingWelcomeOnboarding\":false,\"telemetryEnabled\":false,\"welcomeOnboardingEligible\":false}",
+                  "type": "text"
+                }
+              ],
+              "structuredContent": {
+                "config": {
+                  "allowedDirectories": [
+                    "<ROOT>"
+                  ],
+                  "blockedCommands": [],
+                  "defaultShell": "/bin/sh",
+                  "fileReadLineLimit": 1000,
+                  "fileWriteLineLimit": 50,
+                  "pendingWelcomeOnboarding": false,
+                  "telemetryEnabled": false,
+                  "welcomeOnboardingEligible": false
+                },
+                "entries": [
+                  {
+                    "editable": true,
+                    "key": "blockedCommands",
+                    "value": [],
+                    "valueType": "array"
+                  },
+                  {
+                    "editable": true,
+                    "key": "allowedDirectories",
+                    "value": [
+                      "<ROOT>"
+                    ],
+                    "valueType": "array"
+                  },
+                  {
+                    "editable": true,
+                    "key": "defaultShell",
+                    "value": "/bin/sh",
+                    "valueType": "string"
+                  },
+                  {
+                    "editable": true,
+                    "key": "telemetryEnabled",
+                    "value": false,
+                    "valueType": "boolean"
+                  },
+                  {
+                    "editable": true,
+                    "key": "fileReadLineLimit",
+                    "value": 1000,
+                    "valueType": "number"
+                  },
+                  {
+                    "editable": true,
+                    "key": "fileWriteLineLimit",
+                    "value": 50,
+                    "valueType": "number"
+                  }
+                ],
+                "uiHints": {
+                  "availableShells": [
+                    "zsh",
+                    "/bin/zsh",
+                    "/bin/bash",
+                    "/bin/csh",
+                    "/bin/dash",
+                    "/bin/ksh",
+                    "/bin/sh",
+                    "/bin/tcsh"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "read_file": {
+          "success": {
+            "isError": false,
+            "normalized": "[Reading 1 lines from line 1 (total: 3 lines, 1 remaining)]\n\nneedle \u00e9",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[Reading 1 lines from line 1 (total: 3 lines, 1 remaining)]\n\nneedle \u00e9",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:docx": {
+            "isError": false,
+            "normalized": "DOCX Outline: 3 body children, 2 paragraphs, 0 tables, 0 images\nEdit with: edit_block(file, old_string=\"<w:t>old text</w:t>\", new_string=\"<w:t>new text</w:t>\")\nRaw XML: use read_file with offset=1 to see pretty-printed XML for advanced edits.\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n[0] w:p style=\"Heading1\"\n  <w:t>DEX title</w:t>\n[1] w:p\n  <w:t xml:space=\"preserve\">paragraph unicode \u00e9</w:t>\n[2] w:sectPr (section properties)\n\nRaw XML: 22 lines, 0.4KB.\nFor bulk changes (translation, mass find/replace): use start_process with a Python script using zipfile to edit <w:t> elements.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "DOCX Outline: 3 body children, 2 paragraphs, 0 tables, 0 images\nEdit with: edit_block(file, old_string=\"<w:t>old text</w:t>\", new_string=\"<w:t>new text</w:t>\")\nRaw XML: use read_file with offset=1 to see pretty-printed XML for advanced edits.\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n[0] w:p style=\"Heading1\"\n  <w:t>DEX title</w:t>\n[1] w:p\n  <w:t xml:space=\"preserve\">paragraph unicode \u00e9</w:t>\n[2] w:sectPr (section properties)\n\nRaw XML: 22 lines, 0.4KB.\nFor bulk changes (translation, mass find/replace): use start_process with a Python script using zipfile to edit <w:t> elements.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:xlsx": {
+            "isError": false,
+            "normalized": "[Sheet: 'Sheet1' from <ROOT>/format.xlsx]\n[To MODIFY cells: use edit_block with range param, e.g., edit_block(path, {range: \"Sheet1!E5\", content: [[newValue]]}). read_file accepts the same range form, or pass sheet + range separately.]\n\n[[\"name\",\"value\"],[\"\u00e9 space\",42]]",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[Sheet: 'Sheet1' from <ROOT>/format.xlsx]\n[To MODIFY cells: use edit_block with range param, e.g., edit_block(path, {range: \"Sheet1!E5\", content: [[newValue]]}). read_file accepts the same range form, or pass sheet + range separately.]\n\n[[\"name\",\"value\"],[\"\u00e9 space\",42]]",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:png": {
+            "isError": false,
+            "normalized": "Image file: <ROOT>/image.png (image/png)\n",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Image file: <ROOT>/image.png (image/png)\n",
+                  "type": "text"
+                },
+                {
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1sAAAAASUVORK5CYII=",
+                  "mimeType": "image/png",
+                  "type": "image"
+                }
+              ]
+            }
+          },
+          "malformed:pdf": {
+            "isError": false,
+            "normalized": "Error reading PDF: Invalid PDF structure.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error reading PDF: Invalid PDF structure.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "malformed:docx": {
+            "isError": true,
+            "normalized": "Error: Can't find end of central directory : is this a zip file ?",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Can't find end of central directory : is this a zip file ?",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "malformed:xlsx": {
+            "isError": true,
+            "normalized": "Error: Can't find end of central directory : is this a zip file ? If it is, see https://stuk.github.io/jszip/documentation/howto/read_zip.html",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Can't find end of central directory : is this a zip file ? If it is, see https://stuk.github.io/jszip/documentation/howto/read_zip.html",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "utf16": {
+            "isError": false,
+            "normalized": "[Reading 2 lines from start (total: 2 lines, 0 remaining)]\n\nalpha\nneedle \u00e9",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[Reading 2 lines from start (total: 2 lines, 0 remaining)]\n\nalpha\nneedle \u00e9",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "permission": {
+            "isError": true,
+            "normalized": "Error: Cannot read file \u2014 permission denied (EACCES).\nPath: <ROOT>/denied.txt\n\n[AI: based on the path above, determine which cause is most likely and explain it to the user.]\n\nPossible causes and fixes:\n  1. File is in cloud storage (Google Drive / iCloud / Dropbox / OneDrive) but not downloaded locally.\n       \u2192 Right-click the file and choose \"Download Now\", \"Make Available Offline\", or \"Keep on This Device\".\n  2. Cloud storage app is not running or not signed in.\n       \u2192 Open your cloud storage app and make sure it is syncing.\n  3. File is on a network drive or virtual filesystem that is currently unavailable.\n       \u2192 Check that the network share or drive is mounted and accessible.\n  4. File has restricted permissions (e.g. system file, locked by another process, or chmod 000).\n       \u2192 Check file permissions or close any app that may have the file open.\n  5. The app does not have permission to access this location (macOS Full Disk Access).\n       \u2192 Go to System Settings \u2192 Privacy & Security \u2192 Full Disk Access and enable Claude.\n       \u2192 To open that pane directly, run in terminal:\n           open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\"\n         Then find \"Claude\" in the list and enable the toggle next to it.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Cannot read file \u2014 permission denied (EACCES).\nPath: <ROOT>/denied.txt\n\n[AI: based on the path above, determine which cause is most likely and explain it to the user.]\n\nPossible causes and fixes:\n  1. File is in cloud storage (Google Drive / iCloud / Dropbox / OneDrive) but not downloaded locally.\n       \u2192 Right-click the file and choose \"Download Now\", \"Make Available Offline\", or \"Keep on This Device\".\n  2. Cloud storage app is not running or not signed in.\n       \u2192 Open your cloud storage app and make sure it is syncing.\n  3. File is on a network drive or virtual filesystem that is currently unavailable.\n       \u2192 Check that the network share or drive is mounted and accessible.\n  4. File has restricted permissions (e.g. system file, locked by another process, or chmod 000).\n       \u2192 Check file permissions or close any app that may have the file open.\n  5. The app does not have permission to access this location (macOS Full Disk Access).\n       \u2192 Go to System Settings \u2192 Privacy & Security \u2192 Full Disk Access and enable Claude.\n       \u2192 To open that pane directly, run in terminal:\n           open \"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles\"\n         Then find \"Claude\" in the list and enable the toggle next to it.",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: ENOENT: no such file or directory, stat '<ROOT>/missing'",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: ENOENT: no such file or directory, stat '<ROOT>/missing'",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary:escape": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <ROOT>/escape. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <ROOT>/escape. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary:../outside.txt": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "read_multiple_files": {
+          "success": {
+            "isError": false,
+            "normalized": "<ROOT>/unicode \u00e9 space.txt: text/plain (text)\n<ROOT>/missing: Error - ENOENT: no such file or directory, stat '<ROOT>/missing'\n\n--- <ROOT>/unicode \u00e9 space.txt contents: ---\n[Reading 3 lines from start (total: 3 lines, 0 remaining)]\n\nalpha\nneedle \u00e9\nomega",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "<ROOT>/unicode \u00e9 space.txt: text/plain (text)\n<ROOT>/missing: Error - ENOENT: no such file or directory, stat '<ROOT>/missing'",
+                  "type": "text"
+                },
+                {
+                  "text": "\n--- <ROOT>/unicode \u00e9 space.txt contents: ---\n[Reading 3 lines from start (total: 3 lines, 0 remaining)]\n\nalpha\nneedle \u00e9\nomega",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"paths\"\n    ],\n    \"message\": \"Invalid input: expected array, received string\"\n  }\n]",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"paths\"\n    ],\n    \"message\": \"Invalid input: expected array, received string\"\n  }\n]",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": false,
+            "normalized": "<ROOT>/unicode \u00e9 space.txt: text/plain (text)\n<FIXTURE>/outside.txt: Error - Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>\n\n--- <ROOT>/unicode \u00e9 space.txt contents: ---\n[Reading 3 lines from start (total: 3 lines, 0 remaining)]\n\nalpha\nneedle \u00e9\nomega",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "<ROOT>/unicode \u00e9 space.txt: text/plain (text)\n<FIXTURE>/outside.txt: Error - Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                },
+                {
+                  "text": "\n--- <ROOT>/unicode \u00e9 space.txt contents: ---\n[Reading 3 lines from start (total: 3 lines, 0 remaining)]\n\nalpha\nneedle \u00e9\nomega",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "write_file": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully wrote to <ROOT>/write.txt (3 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote to <ROOT>/write.txt (3 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "append": {
+            "isError": false,
+            "normalized": "Successfully appended to <ROOT>/write.txt (2 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully appended to <ROOT>/write.txt (2 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:docx": {
+            "isError": false,
+            "normalized": "Successfully wrote to <ROOT>/format.docx (2 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote to <ROOT>/format.docx (2 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:xlsx": {
+            "isError": false,
+            "normalized": "Successfully wrote to <ROOT>/format.xlsx (1 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote to <ROOT>/format.xlsx (1 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:png": {
+            "isError": false,
+            "normalized": "Successfully wrote to <ROOT>/image.png (1 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote to <ROOT>/image.png (1 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "concurrency:alpha": {
+            "isError": false,
+            "normalized": "Successfully appended to <ROOT>/concurrent.txt (2 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully appended to <ROOT>/concurrent.txt (2 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "concurrency:beta": {
+            "isError": false,
+            "normalized": "Successfully appended to <ROOT>/concurrent.txt (2 lines) ",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully appended to <ROOT>/concurrent.txt (2 lines) ",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"content\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"content\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "create_directory": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully created directory <ROOT>/new dir",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully created directory <ROOT>/new dir",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: EEXIST: file already exists, mkdir '<ROOT>/unicode \u00e9 space.txt'",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: EEXIST: file already exists, mkdir '<ROOT>/unicode \u00e9 space.txt'",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside-dir. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside-dir. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "list_directory": {
+          "success": {
+            "isError": false,
+            "normalized": "[FILE] escape\n[FILE] input.pdf\n[DIR] new dir\n[FILE] unicode \u00e9 space.txt\n[FILE] write.txt",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[FILE] escape\n[FILE] input.pdf\n[DIR] new dir\n[FILE] unicode \u00e9 space.txt\n[FILE] write.txt",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": false,
+            "normalized": "[NOT_FOUND] missing \u2014 path does not exist",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[NOT_FOUND] missing \u2014 path does not exist",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "move_file": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully moved <ROOT>/write.txt to <ROOT>/moved.txt",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully moved <ROOT>/write.txt to <ROOT>/moved.txt",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: ENOENT: no such file or directory, rename '<ROOT>/missing' -> '<ROOT>/absent'",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: ENOENT: no such file or directory, rename '<ROOT>/missing' -> '<ROOT>/absent'",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/moved-outside. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/moved-outside. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "get_file_info": {
+          "success": {
+            "isError": false,
+            "normalized": "size: 24\ncreated: \"<TIME>\"\nmodified: \"<TIME>\"\naccessed: \"<TIME>\"\nisDirectory: false\nisFile: true\npermissions: 644\nfileType: text\nlineCount: 3\nlastLine: 2\nappendPosition: 3",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "size: 24\ncreated: \"<TIME>\"\nmodified: \"<TIME>\"\naccessed: \"<TIME>\"\nisDirectory: false\nisFile: true\npermissions: 644\nfileType: text\nlineCount: 3\nlastLine: 2\nappendPosition: 3",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: ENOENT: no such file or directory, stat '<ROOT>/missing'",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: ENOENT: no such file or directory, stat '<ROOT>/missing'",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "edit_block": {
+          "success": {
+            "isError": false,
+            "normalized": "[Reading 4 lines from start (total: 4 lines, 0 remaining)]\n\nONE\ntwo \u00e9\nappend\n",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[Reading 4 lines from start (total: 4 lines, 0 remaining)]\n\nONE\ntwo \u00e9\nappend\n",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": false,
+            "normalized": "Search content not found in <ROOT>/unicode \u00e9 space.txt. The closest match was \"a\r\nneedle \u00e9\r\nomeg\" with only 24% similarity, which is below the 70% threshold. (Fuzzy search completed in 14.41ms)\n\nLog entry saved for analysis. Use the following command to check the log:\nCheck log: <FIXTURE>/home/.claude-server-commander-logs/fuzzy-search.log",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search content not found in <ROOT>/unicode \u00e9 space.txt. The closest match was \"a\r\nneedle \u00e9\r\nomeg\" with only 24% similarity, which is below the 70% threshold. (Fuzzy search completed in 14.41ms)\n\nLog entry saved for analysis. Use the following command to check the log:\nCheck log: <FIXTURE>/home/.claude-server-commander-logs/fuzzy-search.log",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside.txt. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "write_pdf": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully wrote PDF to <ROOT>/output.pdf\nOriginal file: <ROOT>/input.pdf",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote PDF to <ROOT>/output.pdf\nOriginal file: <ROOT>/input.pdf",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "format:markdown": {
+            "isError": false,
+            "normalized": "Successfully wrote PDF to <ROOT>/generated.pdf",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully wrote PDF to <ROOT>/generated.pdf",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: ENOENT: no such file or directory, open '<ROOT>/missing.pdf'",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: ENOENT: no such file or directory, open '<ROOT>/missing.pdf'",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error: Path not allowed: <FIXTURE>/outside.pdf. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Path not allowed: <FIXTURE>/outside.pdf. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "start_search": {
+          "success": {
+            "isError": false,
+            "normalized": "Started content search session: <SEARCH>\nPattern: \"needle\"\nPath: <ROOT>\nStatus: RUNNING\nRuntime: <TIME>\nTotal results: 0\n\n\n\ud83d\udd04 Search in progress. Use get_more_search_results to get more results.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Started content search session: <SEARCH>\nPattern: \"needle\"\nPath: <ROOT>\nStatus: RUNNING\nRuntime: <TIME>\nTotal results: 0\n\n\n\ud83d\udd04 Search in progress. Use get_more_search_results to get more results.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "active-cancel": {
+            "isError": false,
+            "normalized": "Started content search session: <SEARCH>\nPattern: \"waiting\"\nPath: <ROOT>/cancel-search.fifo\nStatus: RUNNING\nRuntime: <TIME>\nTotal results: 0\n\n\n\ud83d\udd04 Search in progress. Use get_more_search_results to get more results.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Started content search session: <SEARCH>\nPattern: \"waiting\"\nPath: <ROOT>/cancel-search.fifo\nStatus: RUNNING\nRuntime: <TIME>\nTotal results: 0\n\n\n\ud83d\udd04 Search in progress. Use get_more_search_results to get more results.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Invalid arguments for start_search: [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"pattern\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Invalid arguments for start_search: [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"pattern\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          },
+          "boundary": {
+            "isError": true,
+            "normalized": "Error starting search session: Path not allowed: <FIXTURE>. Must be within one of these directories: <ROOT>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error starting search session: Path not allowed: <FIXTURE>. Must be within one of these directories: <ROOT>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "get_more_search_results": {
+          "success": {
+            "isError": false,
+            "normalized": "Search session: <SEARCH>\nStatus: COMPLETED\nRuntime: 0s\nTotal results found: 5 (2 matches)\nShowing results 0-0\n\nResults:\n\ud83d\udcc4 <ROOT>/unicode \u00e9 space.txt:1 - alpha\n\n\ud83d\udcd6 More results available. Use get_more_search_results with offset: 1\n\u2705 Search completed.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search session: <SEARCH>\nStatus: COMPLETED\nRuntime: 0s\nTotal results found: 5 (2 matches)\nShowing results 0-0\n\nResults:\n\ud83d\udcc4 <ROOT>/unicode \u00e9 space.txt:1 - alpha\n\n\ud83d\udcd6 More results available. Use get_more_search_results with offset: 1\n\u2705 Search completed.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "active-cancel": {
+            "isError": false,
+            "normalized": "Search session: <SEARCH>\nStatus: COMPLETED\nRuntime: 0s\nTotal results found: 0 (0 matches)\nShowing results 0--1\n\nNo matches found.\n\u2705 Search completed.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search session: <SEARCH>\nStatus: COMPLETED\nRuntime: 0s\nTotal results found: 0 (0 matches)\nShowing results 0--1\n\nNo matches found.\n\u2705 Search completed.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error reading search results: Search session invalid not found",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error reading search results: Search session invalid not found",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "list_searches": {
+          "success": {
+            "isError": false,
+            "normalized": "Active Searches (1):\n\nSession: <SEARCH>\n  Type: content\n  Pattern: \"needle\"\n  Status: \u2705 COMPLETED\n  Runtime: 0s\n  Results: 5\n\n",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Active Searches (1):\n\nSession: <SEARCH>\n  Type: content\n  Pattern: \"needle\"\n  Status: \u2705 COMPLETED\n  Runtime: 0s\n  Results: 5\n\n",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "stop_search": {
+          "success": {
+            "isError": false,
+            "normalized": "Search session <SEARCH> terminated successfully.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search session <SEARCH> terminated successfully.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "active-cancel": {
+            "isError": false,
+            "normalized": "Search session <SEARCH> terminated successfully.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search session <SEARCH> terminated successfully.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": false,
+            "normalized": "Search session invalid not found or already completed.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Search session invalid not found or already completed.",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "start_process": {
+          "success": {
+            "isError": false,
+            "normalized": "Process started with PID <PID> (shell: /bin/sh)\nInitial output:\n\n\u23f3 Process is running. Use read_process_output to get more output.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Process started with PID <PID> (shell: /bin/sh)\nInitial output:\n\n\u23f3 Process is running. Use read_process_output to get more output.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"command\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"command\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "read_process_output": {
+          "success": {
+            "isError": false,
+            "normalized": "[Reading 2 new lines (total: 2 lines)]\n\nready\n",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "[Reading 2 new lines (total: 2 lines)]\n\nready\n",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "No session found for PID <PID>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "No session found for PID <PID>",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "interact_with_process": {
+          "success": {
+            "isError": false,
+            "normalized": "\u2705 Input sent to process <PID>. Use read_process_output to get the response.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "\u2705 Input sent to process <PID>. Use read_process_output to get the response.",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: Failed to send input to process <PID>. The process may have exited or doesn't accept input.",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Failed to send input to process <PID>. The process may have exited or doesn't accept input.",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "list_sessions": {
+          "success": {
+            "isError": false,
+            "normalized": "PID <PID>, Blocked: true, Runtime: 0s",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "PID <PID>, Blocked: true, Runtime: 0s",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "list_processes": {
+          "success": {
+            "isError": false,
+            "normalized": "<process listing withheld: host-wide volatile data>",
+            "normalizedResult": {
+              "scope": "host listing withheld",
+              "validLines": true
+            }
+          }
+        },
+        "force_terminate": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully initiated termination of session <PID>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully initiated termination of session <PID>",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "repeat": {
+            "isError": false,
+            "normalized": "Successfully initiated termination of session <PID>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully initiated termination of session <PID>",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": false,
+            "normalized": "No active session found for PID <PID>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "No active session found for PID <PID>",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "kill_process": {
+          "success": {
+            "isError": false,
+            "normalized": "Successfully terminated process <PID>",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Successfully terminated process <PID>",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "error": {
+            "isError": true,
+            "normalized": "Error: Failed to kill process: kill ESRCH",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Failed to kill process: kill ESRCH",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "get_usage_stats": {
+          "success": {
+            "isError": false,
+            "normalized": "\ud83d\udcca **Usage Summary**\n\u2022 Total calls: 41 (38 successful, 3 failed)\n\u2022 Success rate: 93%\n\u2022 Days using: 0\n\u2022 Sessions: 1\n\u2022 Unique tools: 21\n\u2022 Most used: read_file: 9, write_file: 7, write_pdf: 2, start_search: 2, get_more_search_results: 2\n\u2022 Feedback given: No\n\n**By Category:**\n\u2022 Filesystem: 21\n\u2022 Terminal: 3\n\u2022 Editing: 1\n\u2022 Search: 7\n\u2022 Config: 1\n\u2022 Process: 2",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "\ud83d\udcca **Usage Summary**\n\u2022 Total calls: 41 (38 successful, 3 failed)\n\u2022 Success rate: 93%\n\u2022 Days using: 0\n\u2022 Sessions: 1\n\u2022 Unique tools: 21\n\u2022 Most used: read_file: 9, write_file: 7, write_pdf: 2, start_search: 2, get_more_search_results: 2\n\u2022 Feedback given: No\n\n**By Category:**\n\u2022 Filesystem: 21\n\u2022 Terminal: 3\n\u2022 Editing: 1\n\u2022 Search: 7\n\u2022 Config: 1\n\u2022 Process: 2",
+                  "type": "text"
+                }
+              ]
+            }
+          }
+        },
+        "set_config_value": {
+          "owner-refusal": {
+            "isError": true,
+            "normalized": "Error: Unknown tool: set_config_value",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Unknown tool: set_config_value",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "get_recent_tool_calls": {
+          "owner-refusal": {
+            "isError": true,
+            "normalized": "Error: Unknown tool: get_recent_tool_calls",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Unknown tool: get_recent_tool_calls",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "give_feedback_to_desktop_commander": {
+          "owner-refusal": {
+            "isError": true,
+            "normalized": "Error: Unknown tool: give_feedback_to_desktop_commander",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Unknown tool: give_feedback_to_desktop_commander",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        },
+        "get_prompts": {
+          "owner-refusal": {
+            "isError": true,
+            "normalized": "Error: Unknown tool: get_prompts",
+            "normalizedResult": {
+              "content": [
+                {
+                  "text": "Error: Unknown tool: get_prompts",
+                  "type": "text"
+                }
+              ],
+              "isError": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "rows": [
+    {
+      "tool": "get_config",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "UNVERIFIED",
+      "error": "NOT_APPLICABLE: no parameter-dependent error",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "UNVERIFIED",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "read_file",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "read_multiple_files",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "UNVERIFIED",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "write_file",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "UNVERIFIED",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "write_pdf",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "create_directory",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "list_directory",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "move_file",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "start_search",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "UNVERIFIED",
+      "error": "PASS",
+      "normalizedStructuredResult": "UNVERIFIED",
+      "normalizedErrorText": "UNVERIFIED",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS",
+      "asynchronousContinuation": "PASS"
+    },
+    {
+      "tool": "get_more_search_results",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "stop_search",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "list_searches",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "NOT_APPLICABLE: no parameter-dependent error",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "UNVERIFIED",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "get_file_info",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "edit_block",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "UNVERIFIED",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "start_process",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "UNVERIFIED",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "read_process_output",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "interact_with_process",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "force_terminate",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "list_sessions",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "NOT_APPLICABLE: no parameter-dependent error",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "UNVERIFIED",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "list_processes",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "UNVERIFIED",
+      "error": "NOT_APPLICABLE: no parameter-dependent error",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "UNVERIFIED",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "kill_process",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "PASS",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "PASS",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    },
+    {
+      "tool": "get_usage_stats",
+      "schema": "PASS",
+      "success": "PASS",
+      "normalizedText": "PASS",
+      "error": "NOT_APPLICABLE: no parameter-dependent error",
+      "normalizedStructuredResult": "PASS",
+      "normalizedErrorText": "UNVERIFIED",
+      "authorization": "UNVERIFIED: real node executor not exercised",
+      "lifecycle": "UNVERIFIED: extended cases pending",
+      "implementation": "DEX dispatcher; MIT-derived operation handlers",
+      "overall": "PASS_RECORDED_CASES",
+      "outputContract": "PASS"
+    }
+  ],
+  "failures": [],
+  "sourceHashes": {
+    "server.js": "0a513eca2c7fc30eece6247aaf8b960a8870d8396b3ba5f7be6a6ecc41fe1258",
+    "index.js": "cfe476c7cc87dbc03ccb10bfb20c0bbe7ba819597ffcb566874ae2c0c4682861",
+    "search-manager.js": "68d71fe499b710f5e5acc22f7961238de5e92bb9f4074474e12c1fe062b6f737",
+    "terminal-manager.js": "cc0c428ffca7fb05127dfc484a7fd36b1dc15593c58721e7c605fb8dc3d5e9bf",
+    "utils/capture.js": "ab49e6cccb4fe135fb8b1f77022fd8545855c0c821e4ba34cdfd346b50f913ca",
+    "utils/trackTools.js": "2f7e4230aeaf5c4cc43d9a7280266c395987dad73776f764dfb7d22ade8ec59d",
+    "tools/pdf/markdown.js": "9dbcaff5a9e918f06b1fbf1c7a157beaa72685f23936416424bf581cfb198df6"
+  },
+  "incumbentEntry": "stock index with HTTP listeners forced to loopback; telemetry-off seeded; existing isolated browser cache; feature flag loopback refused",
+  "packageRoot": "/tmp/DEX-native-backend-release-gate-20261026",
+  "packageSourceHashes": {
+    "package.json": "aff94af8897f9624086c5d2e6c4fed07ca712c39339ca0b84d3ce6cbbcb0cb52",
+    "runtime-files.json": "a358757b2a45402b2faa4eafe8dfe094d8136855731b81dd5884e2328ef4befd",
+    "LICENSE": "e77cff545e0506903bf6a4bf29169fa40911eb76d70d239267df10c5c59370dd",
+    "NOTICE.md": "520c8822b61671232194bf372e1257ae3fa318a0a070c211bdca4b97b69ef795",
+    "runtime/bootstrap.js": "0541ff14ab9cd75fc84272c535902f8efc2f7f3d046d4c2ce8f95115cc59fdb4",
+    "runtime/command-manager.js": "4d55de79684136a5ff198c0ec52889015eed1242a86900687c9f32dd841416e4",
+    "runtime/config-field-definitions.js": "550065e85ab34cceaccd7762ecc8b969db06ceea837e40b584fcf43d07d14343",
+    "runtime/config-manager.js": "a133c52234f88a20e3ae7492dbb92823392644e5fff0e8bfa3ba9985da7c894d",
+    "runtime/config.js": "81117d84afe32b414b79aed2a01a00f8388686cb030641906d7af55a697ed7c7",
+    "runtime/custom-stdio.js": "9fc39e01ef24ac016a50548dda0ee7d6d2c98a053ee2dc859a7c79545a483155",
+    "runtime/error-handlers.js": "3112f3b6c25625992931c147f4e88ab9f4b48dddee86bef2993f7698bd5ea1bd",
+    "runtime/fixtures/desktop-commander-0.2.52-remote-contract.json": "1d10d5b9b43b0f7ab0d83be849c5ade4bb9f4bc93067d9b1376197d2a4d740b8",
+    "runtime/handlers/edit-search-handlers.js": "8f3b60d694d1cee03baa50d6648006b1ab4c929da7098bd46f5be7921db65ad3",
+    "runtime/handlers/filesystem-handlers.js": "7408410222bde1d3973d504c2acc29817585691839436421b7689e8f38069ca0",
+    "runtime/handlers/history-handlers.js": "10001f313d61ee9d5e49356d88920f8d748476f4161ae7b9c53c233e3182068a",
+    "runtime/handlers/index.js": "0830582e4a5f202ed60ff3b6cc81f9978306d75fb64ed0affa99f880aa1a58a3",
+    "runtime/handlers/process-handlers.js": "9f9f53d3bf322c4dc813cb9fdf0357993fd209620a344a5025507460c99356c1",
+    "runtime/handlers/search-handlers.js": "e42e617918fc363264da2955ddf5c9067bb5dd73fe1ed8440b6410fba1f502e5",
+    "runtime/handlers/terminal-handlers.js": "e0e67f4ed78e421bd42dc438fb48f5994347f14437a5c2516fb9ed197405236d",
+    "runtime/index.js": "cfe476c7cc87dbc03ccb10bfb20c0bbe7ba819597ffcb566874ae2c0c4682861",
+    "runtime/search-manager.js": "68d71fe499b710f5e5acc22f7961238de5e92bb9f4074474e12c1fe062b6f737",
+    "runtime/server.js": "0a513eca2c7fc30eece6247aaf8b960a8870d8396b3ba5f7be6a6ecc41fe1258",
+    "runtime/terminal-manager.js": "cc0c428ffca7fb05127dfc484a7fd36b1dc15593c58721e7c605fb8dc3d5e9bf",
+    "runtime/tools/config.js": "9964c761a429319d54d22126326cf64fd8c90c550a902428cb976be84289c067",
+    "runtime/tools/edit.js": "e06c62cd0eed4a60f51488b648227ec4aa253ea9a5309fa75e3f6acce84a561f",
+    "runtime/tools/filesystem.js": "20a0325a93ceaafac8424f10fa1c8a11f7ed3733a2773cbdc89f98c20e4e52e6",
+    "runtime/tools/fuzzySearch.js": "8df3534ef1f084eb9a27d0182c9f9f8601c7ad36fbd62fefdc192c677771267b",
+    "runtime/tools/fuzzySearchCore.js": "002518e4afe32adc3dfccf5e8b6d1733e5962d6652144b776b1784e7d190dc25",
+    "runtime/tools/improved-process-tools.js": "5b34b6753cf00fa25e5c73ef3ba9a10b48aa844a6356bf65c3d9fa042a65417b",
+    "runtime/tools/mime-types.js": "15197d204ace163c59cce3dad358616928b1ba0acfbb0390eb533335ae5287b7",
+    "runtime/tools/pdf/extract-images.js": "b7830fa8758211bf89ecb9df501293e1856e1672b28dbfec01bc1a84e5adf793",
+    "runtime/tools/pdf/index.js": "d58afad5e9bb31c86859bc017e7c6c998d2ea83cfefefad8288044e2eb0985dc",
+    "runtime/tools/pdf/lib/pdf2md.js": "fbcff6b076b04240916b37d3969893ee3784c1ee673b32b052f96a3a9ca63ccf",
+    "runtime/tools/pdf/manipulations.js": "79f60eeb790ad4f60d6774aa65ddf99d99cd2e1099f1ed6b5a1ba763838eec38",
+    "runtime/tools/pdf/markdown-render.js": "ba07ff740b60fce9b1bbecb0f325c879cf141db5fa2dd8764f3d65e4cd799efe",
+    "runtime/tools/pdf/markdown.js": "9dbcaff5a9e918f06b1fbf1c7a157beaa72685f23936416424bf581cfb198df6",
+    "runtime/tools/pdf/utils.js": "e22a4c088d4526b948187a3d49c0fd6a4048715c8e97a33e11330cbb5637ddb0",
+    "runtime/tools/process.js": "e3965e913e1a0c0840a666861529e85c0b80d5e97147cada4737ddec5a6fb384",
+    "runtime/tools/schemas.js": "f342345e34e48769dabaefe1b932f09d41e2e207b422f7794a15ee50ffa8f140",
+    "runtime/tools/usage.js": "c88eb8017f9e12c9fafe2bead0869c8fcea4a6d701535593979204abeed9a882",
+    "runtime/ui/file-preview/shared/preview-file-types.js": "40b9bf401684ed3184a72f08a0293cf9243f8b521cf01aa2d06ef069e905a939",
+    "runtime/utils/argument-limits.js": "7323565f4b035aef675326b70b7056f343a01913c2db1f1deed364ed827b56f1",
+    "runtime/utils/capture.js": "ab49e6cccb4fe135fb8b1f77022fd8545855c0c821e4ba34cdfd346b50f913ca",
+    "runtime/utils/feature-flags.js": "537db6e7988d191dcafce8d5182b32bfb53962497dfcf0bcbb49ffbbcc4b6000",
+    "runtime/utils/files/base.js": "14736f040ea165a425ad7be4335d83cc7ccda2e2e80e32c135fe43cb1931e495",
+    "runtime/utils/files/binary.js": "7761c317b6514ce178c37310f8a86e94d9071f2b29d4f6b6e636f523bfd065b8",
+    "runtime/utils/files/docx.js": "bb43669c1fce89e8ffeb64d931c054e4733d4127b441aef00bea034cf5a28c50",
+    "runtime/utils/files/excel.js": "85ee955845e98dec3aaffe3a88a26a30dde271152b3e96ac2f0e3aa7a9aa6297",
+    "runtime/utils/files/factory.js": "1586041ed9bc17eee46fe338655b832c8f1e00ad2184b008576db2343203c8e8",
+    "runtime/utils/files/image.js": "b9d5112d9cbd5e5fb9109e086716f1b50a52e24a8dbe363eb230a7917a1893f5",
+    "runtime/utils/files/index.js": "c45ea1f7c548527435868355a63eb2b94e79dbabf49be5df974772984091b409",
+    "runtime/utils/files/pdf.js": "8678f41e7513267d2d7ee659db7f4aae9624c41cc9e500d710d451ba0f920e71",
+    "runtime/utils/files/text.js": "96023c9641a51a0f8db7c50fb456a895c861b1945af7f5beb7d8b5db0d0857ce",
+    "runtime/utils/fuzzySearchLogger.js": "01cca1e415e91da50f24d36c454e3cca8a0170f71940725528f6569b9cdfc9f8",
+    "runtime/utils/lineEndingHandler.js": "cef890fec1ac2fd2269c01de12517ed654c1259537acd0a6d0c4af50dc05c550",
+    "runtime/utils/logger.js": "378b723404132042593b9728dc22ecfb8355cdb4681cdbf0732d2fe2904cd91d",
+    "runtime/utils/process-detection.js": "50b11aa5d3258692c2844befc197aa1845770fe6857e4fc51471108a9934201f",
+    "runtime/utils/resource-limits.js": "488eefbfc207d439182f8946adddd694bec039fa5445598416b14e9608e05afa",
+    "runtime/utils/ripgrep-resolver.js": "ff7fc330760c07b6aa2fe5b9b43862b2d296056e8361d03a86d64f5a829da7be",
+    "runtime/utils/system-info.js": "101955412d1f9b11933cdd285742512b0cda13b054e0be40ddc2ec41507d8956",
+    "runtime/utils/toolHistory.js": "9ba40b29b628af7fa4e336d9c88a00880948c4bf532af272c74b1fef5311f641",
+    "runtime/utils/usageTracker.js": "b31c040c156d3815df4af646c87e9a7509520e2e6034d236cbf8cd688dd20339",
+    "runtime/utils/withTimeout.js": "74898565ec58a6621a102606552b3c1b364f57d6b7d2f9ed3ccbf2aaa71cb3d4",
+    "runtime/version.js": "f8448a246bc6ef6717d714e05727c35197845a1869c92c398df972273a06f3a1",
+    "package-lock.json": "7904283ff5cb1f17ca29237fe0dcb8a44eb96fe3119202eda8b084d3fc2f187b"
+  },
+  "verdict": "PASS_RECORDED_CASES",
+  "normalizationNotes": [
+    "Paths/PIDs/search handles and timestamps normalized.",
+    "get_config identity, telemetry client identifier and volatile system/counter fields excluded; remaining structured shape/data compared.",
+    "start_search initial progress snapshot may precede first match; stable admission prefix and completed continuation compared; both raw normalized startup snapshots retained.",
+    "Inherited text-error responses with isError=false are preserved and classified explicitly."
+  ]
+}

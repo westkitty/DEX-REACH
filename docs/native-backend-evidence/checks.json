@@ -1,0 +1,136 @@
+{
+  "verdict": "PASS_CANDIDATE_SOURCE_AND_ISOLATED_RUNTIME",
+  "deployment": false,
+  "commit": false,
+  "push": false,
+  "target": {
+    "host": "bigmac",
+    "account": "bigmac",
+    "platform": "Darwin arm64",
+    "root": "/Users/bigmac/DEX-REACH-bigmac-hub-candidate",
+    "branch": "main",
+    "base": "274ba16e058e2b1e855a8ae4a5c30ad63ea81363",
+    "headUnchanged": true,
+    "remote": "https://github.com/westkitty/DEX-REACH.git"
+  },
+  "productionDefault": "NativeCompatibilityAdapter",
+  "incumbent": "development-only 0.2.52; absent from clean production install",
+  "fullSuite": {
+    "tests": 973,
+    "pass": 973,
+    "fail": 0,
+    "skipped": 0,
+    "durationMs": 207755.104291
+  },
+  "typecheck": "PASS",
+  "invariants": "42/42 PASS",
+  "build": "PASS including packaged runtime",
+  "productionAudit": {
+    "info": 0,
+    "low": 0,
+    "moderate": 0,
+    "high": 0,
+    "critical": 0,
+    "total": 0
+  },
+  "auditExceptions": [],
+  "cleanInstall": {
+    "path": "/tmp/DEX-native-production-clean-20261026",
+    "command": "npm ci --omit=dev --ignore-scripts",
+    "installedPackages": 254,
+    "desktopCommanderPresent": false
+  },
+  "replacementProbe": {
+    "ok": true,
+    "count": 22,
+    "names": [
+      "get_config",
+      "read_file",
+      "read_multiple_files",
+      "write_file",
+      "write_pdf",
+      "create_directory",
+      "list_directory",
+      "move_file",
+      "start_search",
+      "get_more_search_results",
+      "stop_search",
+      "list_searches",
+      "get_file_info",
+      "edit_block",
+      "start_process",
+      "read_process_output",
+      "interact_with_process",
+      "force_terminate",
+      "list_sessions",
+      "list_processes",
+      "kill_process",
+      "get_usage_stats"
+    ],
+    "implementation": "@dex-reach/native-backend",
+    "sourceHash": "2289fcfd600d52331e4321ebf3169afb70e05288714da0d924387cdf1256d698",
+    "scope": "compiled backend in isolated state; no live node or service"
+  },
+  "compiledProductionDefaultExecutorIntegration": "PASS: real registry/node/coordinator, isolated synthetic state",
+  "nodeAuthorization": {
+    "offTools": 22,
+    "missingGrantTools": 22,
+    "readOnly": "read allowed, write refused",
+    "deniedRoot": true,
+    "grantRevocation": true,
+    "nodeRevocation": true,
+    "clientCeilings": true,
+    "timedExpiry": true,
+    "ownerLocalRefusal": true,
+    "noFallback": true,
+    "durableCompletion": true
+  },
+  "independentReview": "No outstanding Critical or Important in reviewed boundaries, renderer, lifecycle, integration. Static review; not independent test execution.",
+  "lifecycle": [
+    "SIGTERM and EOF",
+    "owned shell/descendant cleanup",
+    "virtual success/unref child",
+    "TERM-resistant child/descendant timeout and force termination",
+    "virtual cap16/active4/output256K/timeout30s",
+    "shell/search concurrency caps",
+    "search active FIFO cancellation",
+    "actual310s completed-search expiry"
+  ],
+  "sourceHashes": {
+    "package.json": "286e5dc3854b0f8b3265c6cdb1df107bd0d45a5b2f3630da8c28069b2967f338",
+    "package-lock.json": "191f252a568155801d3d61e8e822e658f38a10d258194a962260ef8b83eca7ca",
+    "src/node/main.ts": "01887b4e6819a515d97a7f714735d7637627d3be0c184c313d7e7d1ad33f2fb1",
+    "src/node/adapters/desktop-commander.ts": "0ede6669f08d8f42f0b1e11cc7f0cf7bce0d90e8fcebcf3cbcefc735813ff0df",
+    "src/node/adapters/native-compatibility.ts": "912c9fbf2d90f95042b1e679dd0e3a7a3f6921a82e5846c4cf3ae6c340349610",
+    "scripts/package-native-backend.mjs": "cb4ef20818b79f8d82c22fbe4c46450b046576ec1391197d0bb6dfd5f0c6b950",
+    "scripts/probe-backend.ts": "d980ea847ceaf8d5328d2326f4e4d7acfdf91519c2304f9ac232cb5dff7609a5",
+    "security/audit-exceptions.json": "732176eb2caf8c14d37621481fcd0915b482094566c001b3014d732105193171",
+    "dist/src/node/main.js": "f662f2bbc47e84f7a4c1dccf5156f667698ffaa44dcb88ec5c1f38c38821fe02",
+    "dist/src/node/adapters/native-compatibility.js": "966fc3ac5c4b7a9865746a0c41ffabe6d2802a5a63701f6737ebfe9bde3fc19d"
+  },
+  "live": {
+    "pid": 54439,
+    "entry": "/Users/bigmac/DEX-REACH/dist/src/node/main.js",
+    "started": "Sun Oct 25 14:40:54 2026",
+    "version": "not reattested; prior observation 0.3.2",
+    "mutated": false
+  },
+  "checkpoints": {
+    "original": {
+      "path": "/tmp/DEX-REACH-bigmac-candidate-pre-native-backend-20261026T015615Z.tar.gz",
+      "sha256": "bfaac955e5a1316782ba560779c500f59fe0e9c43121fa0dc58e984ef3584acc"
+    },
+    "continuation": {
+      "path": "/tmp/DEX-REACH-bigmac-native-continuation-20261026.tar.gz",
+      "sha256": "2e67e944d7055a16f707496c16c18b089e13aa0c0391fcb22785cd2515cc2cc0"
+    },
+    "restoreExecuted": false
+  },
+  "scopeLimits": [
+    "Synthetic isolated data/processes; no live chaos, install, activation, service restart, deployment or human acceptance.",
+    "Application resource envelope is not an operating-system sandbox; local read admission checks metadata before handlers read.",
+    "Error prose/identity fields/async initial search snapshots can differ; normalized stable outputs and completed search continuation compared.",
+    "Desktop Commander remains a vulnerable development reference, not a production dependency."
+  ],
+  "recordType": "prepublication verification snapshot; subsequent publication is established by Git history and remote ref"
+}

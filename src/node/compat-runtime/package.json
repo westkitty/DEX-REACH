@@ -1,0 +1,33 @@
+{
+  "name": "@dex-reach/native-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "main": "runtime/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@opendocsg/pdf2md": "0.2.9",
+    "@vscode/ripgrep": "1.18.0",
+    "cross-fetch": "4.1.0",
+    "exceljs": "4.4.0",
+    "fastest-levenshtein": "1.0.16",
+    "isbinaryfile": "5.0.7",
+    "marked": "4.3.0",
+    "pdf-lib": "1.17.1",
+    "pizzip": "3.2.0",
+    "proper-lockfile": "4.1.2",
+    "puppeteer-core": "25.16.0",
+    "sharp": "0.35.5",
+    "unpdf": "1.8.1",
+    "zod": "4.6.7"
+  },
+  "overrides": {
+    "zod": "4.6.7",
+    "uuid": "11.1.1",
+    "sharp": "0.35.5"
+  }
+}

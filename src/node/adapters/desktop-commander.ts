@@ -29,6 +29,45 @@ import { finishProcessActivityByPid, startProcessActivity, touchProcessActivityB
 
 const SENSITIVE_ENV_KEY = /(^DEX_REACH_(?:NODE_TOKEN|OWNER_PASSWORD|ENV_FILE)$|TOKEN|PASSWORD|PASSWD|SECRET|AUTHORIZATION|COOKIE|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)/i;
 
+// Bound compatibility arguments before the MCP client forwards them to Desktop Commander's
+// Zod schemas. The node WebSocket has a 1 MiB frame cap before JSON parsing; these tighter
+// per-call limits prevent a small frame containing deeply nested or oversized collections from
+// consuming disproportionate validation memory.
+export const COMPAT_ARGUMENT_LIMITS = Object.freeze({
+  bytes: 256 * 1024,
+  collectionItems: 256,
+  objectProperties: 256,
+  nodes: 4096,
+  depth: 24
+});
+
+export function validateCompatibilityArguments(value: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('compatibility arguments must be a JSON object');
+  const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  let nodes = 0;
+  let bytes = 2; // object braces
+  while (stack.length) {
+    const current = stack.pop()!;
+    if (++nodes > COMPAT_ARGUMENT_LIMITS.nodes) throw new Error('compatibility arguments exceed the structural item limit');
+    if (current.depth > COMPAT_ARGUMENT_LIMITS.depth) throw new Error('compatibility arguments exceed the nesting limit');
+    const item = current.value;
+    if (typeof item === 'string') {
+      bytes += Buffer.byteLength(item, 'utf8') + 2;
+    } else if (Array.isArray(item)) {
+      if (item.length > COMPAT_ARGUMENT_LIMITS.collectionItems) throw new Error('compatibility argument collection exceeds 256 items');
+      for (const child of item) stack.push({ value: child, depth: current.depth + 1 });
+    } else if (item && typeof item === 'object') {
+      const entries = Object.entries(item as Record<string, unknown>);
+      if (entries.length > COMPAT_ARGUMENT_LIMITS.objectProperties) throw new Error('compatibility argument object exceeds 256 properties');
+      for (const [key, child] of entries) {
+        bytes += Buffer.byteLength(key, 'utf8') + 3;
+        stack.push({ value: child, depth: current.depth + 1 });
+      }
+    }
+    if (bytes > COMPAT_ARGUMENT_LIMITS.bytes) throw new Error('compatibility arguments exceed 256 KiB');
+  }
+}
+
 function compatibilityEnvironment(home: string): Record<string, string> {
   const base = getDefaultEnvironment();
   const safe = Object.fromEntries(Object.entries(base).filter(([key]) => !SENSITIVE_ENV_KEY.test(key)));
@@ -107,18 +146,30 @@ export class DesktopCommanderAdapter {
 
   constructor(private readonly registry: AdapterRegistry) {}
 
+  protected resolveSource(): Promise<ResolvedAdapterSource> { return resolveDesktopCommanderSource(); }
+  protected manifestForSource(source: ResolvedAdapterSource): AdapterManifest { return loadDesktopCommanderManifest(source); }
+  protected runtimeEnvironment(home: string, _allowedRoots: string[]): Record<string,string> { return compatibilityEnvironment(home); }
+  protected ownerConfigurationRequired(): boolean { return true; }
+  protected verifyOfferedTools(offered: string[], admitted: Set<string>): void {
+    const missing = [...admitted].filter(name => !offered.includes(name));
+    if (missing.length) throw new Error('compatibility adapter does not offer admitted tools: '+missing.join(', '));
+  }
   async start(allowedRoots: string[]): Promise<void> {
-    const source = await resolveDesktopCommanderSource();
+    try { await this.startRuntime(allowedRoots); }
+    catch (error) { await this.close(); throw error; }
+  }
+  private async startRuntime(allowedRoots: string[]): Promise<void> {
+    const source = await this.resolveSource();
     // Install before the process starts. A manifest DEX cannot corroborate must stop the node from
     // coming up at all, rather than leaving a running adapter whose surface nobody agreed on.
-    this.admission = this.registry.install(loadDesktopCommanderManifest(source));
+    this.admission = this.registry.install(this.manifestForSource(source));
 
     const isolatedHome = path.join(stateDir(), 'compat-home');
     await fs.mkdir(isolatedHome, { recursive: true, mode: 0o700 });
     this.transport = new StdioClientTransport({
       command: process.execPath,
       args: [source.entry, '--no-onboarding'],
-      env: compatibilityEnvironment(isolatedHome),
+      env: this.runtimeEnvironment(isolatedHome, allowedRoots),
       stderr: 'pipe'
     });
     this.client = new Client({ name: 'dex-reach-node', version: DEX_REACH_VERSION });
@@ -133,16 +184,14 @@ export class DesktopCommanderAdapter {
       .filter(tool => remoteSurface.has(tool.name))
       .map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema }));
 
-    const offered = new Set(listed.tools.map(tool => tool.name));
-    const missing = [...remoteSurface].filter(name => !offered.has(name));
-    if (missing.length) {
-      throw new Error(`compatibility adapter does not offer admitted tools: ${missing.join(', ')}`);
-    }
+    this.verifyOfferedTools(listed.tools.map(tool => tool.name), remoteSurface);
 
     // These are security boundaries, not optional polish. If the compatibility backend cannot accept
     // or report them, the node must fail to start instead of silently running with wider access.
-    await this.callTool('set_config_value', { key: 'telemetryEnabled', value: false });
-    await this.callTool('set_config_value', { key: 'allowedDirectories', value: allowedRoots });
+    if (this.ownerConfigurationRequired()) {
+      await this.callTool('set_config_value', { key: 'telemetryEnabled', value: false });
+      await this.callTool('set_config_value', { key: 'allowedDirectories', value: allowedRoots });
+    }
     const configResult = await this.callTool('get_config', {});
     const config = findConfig(configResult);
     if (!config) throw new Error('compatibility backend did not return a verifiable configuration');
@@ -166,6 +215,7 @@ export class DesktopCommanderAdapter {
    */
   async callTool(name: string, args: Record<string, unknown>, context: ProcessExecutionContext = {}): Promise<unknown> {
     if (!this.client) throw new Error('Desktop Commander adapter is not started');
+    validateCompatibilityArguments(args);
     const result = await this.client.callTool({ name, arguments: args });
     if (result.isError) {
       const message = Array.isArray(result.content)

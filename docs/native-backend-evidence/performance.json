@@ -1,0 +1,78 @@
+{
+  "at": "2026-10-26T17:46:11.881Z",
+  "scope": "three alternating rounds, 100 identical reads; actual incumbent index, preseeded telemetry-off config and existing browser cache, flags pointed to refused loopback",
+  "rows": [
+    {
+      "round": 0,
+      "kind": "incumbent",
+      "startupMs": 324.53733300000005,
+      "rssInitialKiB": 136112,
+      "rssFinalKiB": 162832,
+      "requests": 100,
+      "latencyMedianMs": 15.801958000000013,
+      "latencyP95Ms": 18.287582999999984,
+      "closeMs": 10.235417000000098,
+      "childExited": true
+    },
+    {
+      "round": 0,
+      "kind": "candidate",
+      "startupMs": 256.9078340000001,
+      "rssInitialKiB": 118960,
+      "rssFinalKiB": 126816,
+      "requests": 100,
+      "latencyMedianMs": 0.44112500000028376,
+      "latencyP95Ms": 0.6892909999996846,
+      "closeMs": 3.2040000000001783,
+      "childExited": true
+    },
+    {
+      "round": 1,
+      "kind": "incumbent",
+      "startupMs": 307.2493340000001,
+      "rssInitialKiB": 135760,
+      "rssFinalKiB": 163216,
+      "requests": 100,
+      "latencyMedianMs": 15.773916999999983,
+      "latencyP95Ms": 18.607208999999784,
+      "closeMs": 10.412792000000081,
+      "childExited": true
+    },
+    {
+      "round": 1,
+      "kind": "candidate",
+      "startupMs": 265.00354199999947,
+      "rssInitialKiB": 120624,
+      "rssFinalKiB": 138016,
+      "requests": 100,
+      "latencyMedianMs": 0.4550420000005033,
+      "latencyP95Ms": 0.7981659999995827,
+      "closeMs": 3.0887080000002243,
+      "childExited": true
+    },
+    {
+      "round": 2,
+      "kind": "incumbent",
+      "startupMs": 320.5778339999997,
+      "rssInitialKiB": 136384,
+      "rssFinalKiB": 157504,
+      "requests": 100,
+      "latencyMedianMs": 16.290374999999585,
+      "latencyP95Ms": 17.857624999999643,
+      "closeMs": 10.73870799999986,
+      "childExited": true
+    },
+    {
+      "round": 2,
+      "kind": "candidate",
+      "startupMs": 268.3870000000006,
+      "rssInitialKiB": 120592,
+      "rssFinalKiB": 137696,
+      "requests": 100,
+      "latencyMedianMs": 0.43991600000026665,
+      "latencyP95Ms": 0.6947089999994205,
+      "closeMs": 2.909042000000227,
+      "childExited": true
+    }
+  ]
+}

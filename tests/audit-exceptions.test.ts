@@ -108,8 +108,11 @@ test('malformed exception entries are rejected', () => {
   assert.equal(parseExceptionFile({ exceptions: [] }).file, null);
 });
 
-test('the committed exception file is valid and covers only the approved advisory', () => {
+test('the native production tree retires the advisory exception and keeps the incumbent development-only', () => {
   const parsed = parseExceptionFile(JSON.parse(fs.readFileSync(new URL('../security/audit-exceptions.json', import.meta.url), 'utf8')));
   assert.deepEqual(parsed.errors, []);
-  assert.deepEqual(parsed.file!.exceptions.map(e => [e.advisory, e.package, e.path, e.installedVersion, e.dependents]), [['GHSA-mrhx-c7xc-m3w5', 'zod', ZOD, '3.25.76', [DC]]]);
+  assert.deepEqual(parsed.file!.exceptions, []);
+  const lock=JSON.parse(fs.readFileSync(new URL('../package-lock.json',import.meta.url),'utf8'));
+  for(const [name,pkg]of Object.entries(lock.packages) as Array<[string,{dev?:boolean}]>)
+    if(name.includes('@wonderwhy-er/desktop-commander'))assert.equal(pkg.dev,true,'incumbent must not be in production: '+name);
 });

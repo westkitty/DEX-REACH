@@ -1,3 +1,5 @@
+import { pathToFileURL } from 'node:url';
+import {NativeCompatibilityAdapter} from './adapters/native-compatibility.js';
 import { boundedAdmissionMs, MAX_ADMISSION_MS } from '../shared/request-deadlines.js';
 import { acquireTaskAdmission, waitingStatusWriter } from './task-admission.js';
 import { persistTaskFailure, persistProcessExitFailure } from './task-failure.js';
@@ -63,10 +65,13 @@ import type { ProcessExecutionContext } from '../shared/activity.js';
 import { durableCapabilityRefusal, NodeNegotiation } from '../shared/protocol-negotiation.js';
 import { CheckpointAdmissionClosedError, checkpointControlFromEnv, processCheckpoint } from '../shared/checkpoint.js';
 
+export type NodeBackend = Pick<DesktopCommanderAdapter,'start'|'close'|'listTools'|'manifest'|'callTool'>;
+/** Production and isolated verification use the same executor. Injection is code-only, never a remote option. */
+export async function runNode(createBackend: (registry: AdapterRegistry) => NodeBackend = registry => new NativeCompatibilityAdapter(registry)): Promise<void> {
 loadLocalSecrets();
 const config = loadNodeConfig();
 const adapters = new AdapterRegistry();
-const backend = new DesktopCommanderAdapter(adapters);
+const backend = createBackend(adapters);
 const results = new ResultStore();
 const taskStore = new NodeTaskStore();
 const audit = new AuditLog();
@@ -771,3 +776,6 @@ async function shutdown(): Promise<void> {
 process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
 await connect();
+
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await runNode();

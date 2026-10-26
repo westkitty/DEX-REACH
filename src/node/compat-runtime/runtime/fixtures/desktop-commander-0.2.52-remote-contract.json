@@ -1,0 +1,590 @@
+{
+  "source": "@wonderwhy-er/desktop-commander",
+  "version": "0.2.52",
+  "tools": [
+    {
+      "name": "get_config",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "enum": [
+              "ui",
+              "llm"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "read_file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "isUrl": {
+            "type": "boolean",
+            "default": false
+          },
+          "offset": {
+            "type": "number",
+            "default": 0
+          },
+          "length": {
+            "type": "number",
+            "default": 1000
+          },
+          "sheet": {
+            "type": "string"
+          },
+          "range": {
+            "type": "string"
+          },
+          "options": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "ui",
+              "llm"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "read_multiple_files",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "write_file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "rewrite",
+              "append"
+            ],
+            "default": "rewrite"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "ui",
+              "llm"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "write_pdf",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "insert"
+                        },
+                        "pageIndex": {
+                          "type": "number"
+                        },
+                        "markdown": {
+                          "type": "string"
+                        },
+                        "sourcePdfPath": {
+                          "type": "string"
+                        },
+                        "pdfOptions": {
+                          "type": "object",
+                          "properties": {},
+                          "additionalProperties": true
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "pageIndex"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "delete"
+                        },
+                        "pageIndexes": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "pageIndexes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "outputPath": {
+            "type": "string"
+          },
+          "options": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "create_directory",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_directory",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "number",
+            "default": 2
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "ui",
+              "llm"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "move_file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "start_search",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "searchType": {
+            "type": "string",
+            "enum": [
+              "files",
+              "content"
+            ],
+            "default": "files"
+          },
+          "filePattern": {
+            "type": "string"
+          },
+          "ignoreCase": {
+            "type": "boolean",
+            "default": true
+          },
+          "maxResults": {
+            "type": "number"
+          },
+          "includeHidden": {
+            "type": "boolean",
+            "default": false
+          },
+          "contextLines": {
+            "type": "number",
+            "default": 5
+          },
+          "timeout_ms": {
+            "type": "number"
+          },
+          "earlyTermination": {
+            "type": "boolean"
+          },
+          "literalSearch": {
+            "type": "boolean",
+            "default": false
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "ui",
+              "llm"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "pattern"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_more_search_results",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "number",
+            "default": 0
+          },
+          "length": {
+            "type": "number",
+            "default": 100
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "stop_search",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_searches",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_file_info",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "edit_block",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string"
+          },
+          "old_string": {
+            "type": "string"
+          },
+          "new_string": {
+            "type": "string"
+          },
+          "expected_replacements": {
+            "type": "number",
+            "default": 1
+          },
+          "range": {
+            "type": "string"
+          },
+          "content": {},
+          "options": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "ui",
+              "llm"
+            ]
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "start_process",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "number"
+          },
+          "shell": {
+            "type": "string"
+          },
+          "verbose_timing": {
+            "type": "boolean"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "ui",
+              "llm"
+            ]
+          }
+        },
+        "required": [
+          "command",
+          "timeout_ms"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "read_process_output",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pid": {
+            "type": "number"
+          },
+          "timeout_ms": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          },
+          "length": {
+            "type": "number"
+          },
+          "verbose_timing": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pid"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "interact_with_process",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pid": {
+            "type": "number"
+          },
+          "input": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "number"
+          },
+          "wait_for_prompt": {
+            "type": "boolean"
+          },
+          "verbose_timing": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pid",
+          "input"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "force_terminate",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pid": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "pid"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_sessions",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "list_processes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "kill_process",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pid": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "pid"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "get_usage_stats",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  ]
+}
