@@ -60,9 +60,9 @@ console.log('PASS: concurrent search and process caps, byte budget, shutdown, po
 
 test('compatibility runtime contains no telemetry transport or raw argument recorder',async()=>{
  const capture=await fs.readFile('src/node/compat-runtime/runtime/utils/capture.js','utf8');
- const tracker=await fs.readFile('src/node/compat-runtime/runtime/utils/trackTools.js','utf8');
+ const tracker='src/node/compat-runtime/runtime/utils/trackTools.js';
  assert.doesNotMatch(capture,/https|fetch\(|request\(|setInterval/);
- assert.doesNotMatch(tracker,/JSON.stringify|appendFile|writeFile/);
+ await assert.rejects(fs.access(tracker),(error:NodeJS.ErrnoException)=>error.code==='ENOENT');
  const server=await fs.readFile('src/node/compat-runtime/runtime/server.js','utf8');
  assert.match(server,/Object.hasOwn\(operations,name\)/);
 });

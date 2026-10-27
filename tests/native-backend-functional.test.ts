@@ -38,6 +38,7 @@ test('standalone native backend: real PDF security/parse, process exits and EOF 
   const bounded=await call('read_file',{path:hugeLine,length:1});assert.equal(bounded.isError,true);assert.match(text(bounded),/2 MiB/);
   await fs.unlink(sparse);await fs.unlink(hugeLine);
   const output=path.join(root,'markdown.pdf'),sideEffect=path.join(root,'forbidden.txt');
+  const canUseSwiftPdfKit=process.platform==='darwin'&&await fs.access('/usr/bin/swift').then(()=>true,()=>false);
   const unsafe=await call('write_pdf',{path:output,content:'x',options:{launch_options:{executablePath:'/bin/sh',args:['-c','touch '+sideEffect]}}});
   assert.equal(unsafe.isError,true);await assert.rejects(fs.access(sideEffect));
   const pathOption=await call('write_pdf',{path:output,content:'x',options:{pdf_options:{path:sideEffect}}});
@@ -46,9 +47,11 @@ test('standalone native backend: real PDF security/parse, process exits and EOF 
   await ok('write_pdf',{path:output,content,options:{pdf_options:{format:'A4',landscape:false}}});
   assert.equal(requests,0,'rendering must not fetch external images or execute scripts');
   const swift=path.join(dir,'parse.swift');
-  await fs.writeFile(swift,'import Foundation\nimport PDFKit\nguard let d=PDFDocument(url:URL(fileURLWithPath:CommandLine.arguments[1])) else {exit(2)}\nprint(d.pageCount)\nprint(d.string ?? "")\n');
-  const parsed=await exec('/usr/bin/swift',[swift,output],{timeout:60000,env:{PATH:'/usr/bin:/bin',HOME:home,CLANG_MODULE_CACHE_PATH:path.join(home,'clang')}});
-  assert.match(parsed.stdout,/DEX native markdown/);assert.match(parsed.stdout,/Retained PDF text/);
+  if(canUseSwiftPdfKit){
+   await fs.writeFile(swift,'import Foundation\nimport PDFKit\nguard let d=PDFDocument(url:URL(fileURLWithPath:CommandLine.arguments[1])) else {exit(2)}\nprint(d.pageCount)\nprint(d.string ?? "")\n');
+   const parsed=await exec('/usr/bin/swift',[swift,output],{timeout:60000,env:{PATH:'/usr/bin:/bin',HOME:home,CLANG_MODULE_CACHE_PATH:path.join(home,'clang')}});
+   assert.match(parsed.stdout,/DEX native markdown/);assert.match(parsed.stdout,/Retained PDF text/);
+  }
   const reopened=await ok('read_file',{path:output});assert.match(text(reopened),/Retained PDF text/);
   // Document frontmatter cannot select a filesystem destination.
   await ok('write_pdf',{path:path.join(root,'frontmatter.pdf'),content:'---\ndest: '+sideEffect+'\n---\n# harmless'});
@@ -57,8 +60,14 @@ test('standalone native backend: real PDF security/parse, process exits and EOF 
   const resourceContent='# Resource refusal\n<style>@import url(http://127.0.0.1:'+port+'/css);</style><iframe src="file://'+path.join(root,'local-secret.txt')+'"></iframe><iframe src="http://127.0.0.1:'+port+'/frame"></iframe><meta http-equiv="refresh" content="0;url=http://127.0.0.1:'+port+'/navigation">';
   await ok('write_pdf',{path:path.join(root,'resources.pdf'),content:resourceContent});
   assert.equal(requests,0);
-  const resourceParsed=await exec('/usr/bin/swift',[swift,path.join(root,'resources.pdf')],{timeout:60000,env:{PATH:'/usr/bin:/bin',HOME:home,CLANG_MODULE_CACHE_PATH:path.join(home,'clang')}});
-  assert.doesNotMatch(resourceParsed.stdout,/LOCAL_RESOURCE_SENTINEL/);
+  const resourcePdf=path.join(root,'resources.pdf');
+  if(canUseSwiftPdfKit){
+   const resourceParsed=await exec('/usr/bin/swift',[swift,resourcePdf],{timeout:60000,env:{PATH:'/usr/bin:/bin',HOME:home,CLANG_MODULE_CACHE_PATH:path.join(home,'clang')}});
+   assert.doesNotMatch(resourceParsed.stdout,/LOCAL_RESOURCE_SENTINEL/);
+  }else{
+   const resourceParsed=await ok('read_file',{path:resourcePdf});
+   assert.doesNotMatch(text(resourceParsed),/LOCAL_RESOURCE_SENTINEL/);
+  }
   const urlPdf=await ok('read_file',{path:'http://127.0.0.1:'+port+'/fixture.pdf',isUrl:true});assert.match(text(urlPdf),/Retained PDF text/);
   const urlLimit=await call('read_file',{path:'http://127.0.0.1:'+port+'/oversized',isUrl:true});
   assert.equal(urlLimit.isError,true);assert.match(text(urlLimit),/size|limit|exceed/i);

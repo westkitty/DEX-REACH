@@ -3,7 +3,7 @@
   "version": "0.4.0",
   "description": "Secure AI-native remote computing control plane and MCP gateway",
   "scripts": {
-    "test": "node --test --import tsx tests/*.test.ts",
+    "test": "node --test --test-concurrency=2 --import tsx tests/*.test.ts",
     "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -27,6 +27,7 @@
     "stress:c14": "tsx scripts/c14-stress.ts",
     "verify:clean-build": "tsx scripts/verify-clean-build.ts",
     "release:provenance": "tsx scripts/release-provenance.ts",
+    "preproof": "npm run build",
     "proof": "tsx scripts/proof-run.ts",
     "install:node": "npm run build && tsx scripts/install-node.ts",
     "bigmac:stage-node-upgrade": "tsx scripts/stage-bigmac-node-upgrade.ts",
