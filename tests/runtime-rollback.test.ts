@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {
   prepareRuntimeRollbackSnapshot,
   restoreRuntimeRollbackSnapshot,
@@ -21,6 +22,11 @@ const requiredEntries = [
   'dist/src/worker/main.js',
   'dist/src/gateway/main.js',
   'dist/src/node/main.js',
+  'dist/src/node/compat-runtime/package.json',
+  'dist/src/node/compat-runtime/runtime-files.json',
+  'dist/src/node/compat-runtime/source-hashes.json',
+  'dist/src/node/compat-runtime/runtime/index.js',
+  'dist/src/node/compat-runtime/runtime/server.js',
   'dist/scripts/oauth-canary.js',
   'dist/scripts/reload-launchagents.js',
   'node_modules/@modelcontextprotocol/client/package.json'
@@ -48,6 +54,19 @@ function plist(label: string, release: string, root: string): string {
 
 async function release(root: string): Promise<void> {
   for (const entry of requiredEntries) await write(path.join(root, entry), `fixture:${entry}`);
+  const packageRoot = path.join(root, 'dist/src/node/compat-runtime');
+  const files: Record<string, string> = {
+    'package.json': JSON.stringify({ name: '@dex-reach/native-backend', version: 'test' }),
+    'runtime-files.json': JSON.stringify(['index.js', 'server.js']),
+    'LICENSE': 'test license', 'NOTICE.md': 'test notice',
+    'runtime/index.js': 'test entry', 'runtime/server.js': 'test server'
+  };
+  const hashes: Record<string, string> = {};
+  for (const [file, value] of Object.entries(files)) {
+    await write(path.join(packageRoot, file), value);
+    hashes[file] = crypto.createHash('sha256').update(value).digest('hex');
+  }
+  await write(path.join(packageRoot, 'source-hashes.json'), JSON.stringify(hashes));
 }
 
 async function fixture(workerLocation: 'inside' | 'sibling' = 'inside'): Promise<{

@@ -14,6 +14,11 @@ const REQUIRED_RUNTIME_ENTRIES = [
   'dist/src/worker/main.js',
   'dist/src/gateway/main.js',
   'dist/src/node/main.js',
+  'dist/src/node/compat-runtime/package.json',
+  'dist/src/node/compat-runtime/runtime-files.json',
+  'dist/src/node/compat-runtime/source-hashes.json',
+  'dist/src/node/compat-runtime/runtime/index.js',
+  'dist/src/node/compat-runtime/runtime/server.js',
   'dist/scripts/oauth-canary.js',
   'dist/scripts/reload-launchagents.js',
   'node_modules/@modelcontextprotocol/client/package.json'
@@ -69,6 +74,54 @@ export async function verifyRuntimeRelease(root: string): Promise<void> {
     if (!await exists(path.join(root, entry))) {
       throw new Error(`runtime release is incomplete: missing ${entry}`);
     }
+  }
+  await verifyNativeCompatibilityPackage(path.join(root, 'dist/src/node/compat-runtime'));
+}
+
+/** Verify every allowlisted native backend asset before a release can be activated. */
+export async function verifyNativeCompatibilityPackage(root: string): Promise<void> {
+  let pkg: { name?: string; version?: string };
+  let inventory: unknown;
+  let hashes: unknown;
+  try {
+    [pkg, inventory, hashes] = await Promise.all([
+      fs.readFile(path.join(root, 'package.json'), 'utf8').then(JSON.parse),
+      fs.readFile(path.join(root, 'runtime-files.json'), 'utf8').then(JSON.parse),
+      fs.readFile(path.join(root, 'source-hashes.json'), 'utf8').then(JSON.parse)
+    ]);
+  } catch {
+    throw new Error('runtime release is incomplete: native backend package metadata is unreadable');
+  }
+  if (pkg.name !== '@dex-reach/native-backend' || typeof pkg.version !== 'string' || !pkg.version ||
+      !Array.isArray(inventory) || inventory.some(file => typeof file !== 'string') ||
+      !hashes || typeof hashes !== 'object' || Array.isArray(hashes)) {
+    throw new Error('runtime release is incomplete: native backend package metadata is invalid');
+  }
+  const required = ['package.json', 'runtime-files.json', 'LICENSE', 'NOTICE.md',
+    ...inventory.map(file => `runtime/${file}`)];
+  const canonicalRoot = await fs.realpath(root);
+  const hashMap = hashes as Record<string, unknown>;
+  if (new Set(required).size !== required.length || !inventory.includes('index.js') || !inventory.includes('server.js') ||
+      required.some(file => typeof hashMap[file] !== 'string' || !/^[a-f0-9]{64}$/.test(hashMap[file] as string)) ||
+      Object.keys(hashMap).some(file => !required.includes(file) && file !== 'package-lock.json')) {
+    throw new Error('runtime release is incomplete: native backend source manifest is incomplete');
+  }
+  for (const [relative, expected] of Object.entries(hashMap)) {
+    if (path.isAbsolute(relative) || relative.split('/').includes('..')) {
+      throw new Error(`runtime release is invalid: native backend manifest path ${relative}`);
+    }
+    const file = path.join(root, relative);
+    let stat: Awaited<ReturnType<typeof fs.lstat>>;
+    try { stat = await fs.lstat(file); } catch {
+      throw new Error(`runtime release is incomplete: missing native backend asset ${relative}`);
+    }
+    if (!stat.isFile()) throw new Error(`runtime release is invalid: native backend asset is not a file ${relative}`);
+    const canonicalFile = await fs.realpath(file);
+    if (!canonicalFile.startsWith(canonicalRoot + path.sep)) {
+      throw new Error(`runtime release is invalid: native backend asset escapes package ${relative}`);
+    }
+    const actual = crypto.createHash('sha256').update(await fs.readFile(canonicalFile)).digest('hex');
+    if (actual !== expected) throw new Error(`runtime release is corrupt: native backend asset ${relative}`);
   }
 }
 
@@ -153,5 +206,9 @@ export async function buildRuntimeRelease(
       cwd: sourceRoot,
       maxBuffer: 10 * 1024 * 1024
     });
+    await execFileAsync(nodeBin, [
+      path.join(sourceRoot, 'scripts/package-native-backend.mjs'),
+      '--destination', path.join(staging, 'dist/src/node/compat-runtime')
+    ], { cwd: sourceRoot, maxBuffer: 10 * 1024 * 1024 });
   });
 }
