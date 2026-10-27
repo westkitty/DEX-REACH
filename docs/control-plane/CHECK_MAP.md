@@ -1,0 +1,17 @@
+# Existing-check trigger map
+
+Run from the bound source root. `package.json` and named scripts remain authoritative. Choose checks for the changed behavior; do not run every row for a documentation edit. Record command, final exit and what it actually witnesses. A missing dependency or failed command is not a pass.
+
+| Trigger | Existing owner/check | Evidence and limit |
+| --- | --- | --- |
+| TypeScript source or protocol types | `npm run typecheck` | Static source consistency; no runtime witness. |
+| Security, routing, policy, execution or public tool changes | Relevant existing `tests/*.test.ts`; `npm run invariants -- --check`; release-sized change: `npm run verify` | Preserve invariant IDs, exact tool set/order, explicit-node refusal, owner authority, grants, budgets, coordination and receipt integrity. `verify` builds and audits dependencies; backend probe does not certify installed clients. |
+| Isolated end-to-end contract | `npm run proof` (`scripts/proof-run.ts`) | Temporary state and real socket/OAuth/MCP proof; inspect each recorded observation. Physical hardware and unavailable surfaces remain explicitly unverified. Not a default for doc edits. |
+| Repository inspection performance | `node --import tsx scripts/proof-repo-inspection.ts --baseline /absolute/exact-phase1-checkout --out /absolute/evidence.json` | Frozen compatible baseline plus current candidate; five alternating matched workflows after warmups, equivalence, refusals and signed chains. [Acceptance protocol](PERFORMANCE_ACCEPTANCE.md). |
+| Reproducible release/build | `npm run verify:clean-build`; `npm run release:provenance` | Existing tracked-source comparison and provenance manifest. Read options first; preserve dirty work. Source/build proof alone does not install anything. |
+| Installed diagnostics | `npm run dex -- doctor --share`; `npm run dex -- work-status --share` | Read-only current owner/runtime and coordination observations, with shared-output redaction. Do not dump private state or credentials. Read actual service release paths and install receipt state where the task requires installation proof. |
+| Authorized install | `npm run install:macos` and existing installer receipt at `~/.dex-reach/install-macos.status.json` | Installation mutates persistent services. Wait for `complete`, then independently witness gateway, node identity/access/profile, online node count and required runtime entries. HTTP success alone is not health; healthy primary-machine acceptance requires exactly one expected node and `on/full-local` when that is the agreed contract. |
+| Authorized hosted acceptance | Existing `npm run smoke`, `npm run oauth:canary`, `npm run oauth:health` / `npm run verify:golden` as appropriate | These can contact the configured gateway and persist canary state. Run only inside authorized external/runtime scope; never print token material. Independently observe the intended refreshed hosted connector's exact 16-tool surface and actual call. A public discovery pass cannot prove a cached chat registration changed. |
+| Launcher, device or human experience | Existing launcher and requested ordinary-input/client/device route | Bind bundle/path, endpoint and source/runtime identity. Direct HTTP or synthetic tests cannot establish cold-launch, physical playback or human acceptance. |
+
+For a documentation-only map update, resolve all referenced files/commands and run `git diff --check`. No duplicate verification harness is needed.

@@ -65,3 +65,7 @@ Affected files: gateway MCP schema; node request/native execution; new shared in
 Receipt chain-head and parsed Ed25519 key caching were evaluated and deferred. Current predecessor recovery rereads the authoritative receipt log. A safe replacement needs separate crash/restart, stale-head, concurrent append and tamper recovery proof, plus key-identity invalidation. This patch retains existing receipt guarantees.
 
 Source implementation and isolated MCP acceptance passed. Installed ChatGPT/Claude experience, hosted CI and model reasoning-time savings remain unverified. Deployment recommendation: review this branch, then authorize a coordinator-mediated installation and real installed-client acceptance separately. This task performs no deployment.
+
+## Current acceptance protocol
+
+The October 2 observations above remain historical. Use [the existing-check trigger map](control-plane/CHECK_MAP.md) and [matched acceptance protocol with the October 4 current-source rerun](control-plane/PERFORMANCE_ACCEPTANCE.md) for new claims. The fresh record separates the measured source revision from the historical harness base literal and retains installed-client/model-time limits.

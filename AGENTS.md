@@ -1,0 +1,8 @@
+# DEX//REACH agent entrypoint
+
+- Bind the Git root and host before work. Canonical source is `/Users/andrew/DEX-REACH`; `/Users/andrew/Dex_Reach` contains candidate/worktree material and is not interchangeable. Read actual branch, revision and dirty ownership; preserve unrelated files, including maintenance Python caches. Stop on an explicitly required identity mismatch.
+- Start with `OPERATIONAL_STATE.md` for present state and unresolved evidence; use `README.md` for architecture. Read relevant `docs/INVARIANTS.md` sections before execution, routing, authentication, policy or install changes. Historical state is not current runtime proof.
+- Code ownership: `src/gateway` is the authenticated Model Context Protocol (MCP) gateway; `src/node` enforces owner policy and executes; `src/shared` owns contracts/security/coordination; `scripts` and `tests` own existing verification. Do not bypass explicit node selection, grants, budgets, signed receipts or coordinator admission.
+- Select existing checks from [the trigger map](docs/control-plane/CHECK_MAP.md). Source validation, isolated socket proof, installed health, hosted connector discovery and human/device acceptance are separate witnesses.
+- Installation uses immutable releases, not checkout `dist`. Installation, service replacement, publication and credential changes require inclusion in the accepted task. Do not infer them from a request to fix source or documentation.
+- After substantial work, record target, starting/preserved work, required versus observed states, exact checks, remaining acceptance and COMPLETE/NOT COMPLETE within the agreed scope. Git and runtime readback own current facts; do not embed a moving HEAD or deployment claim in this file.

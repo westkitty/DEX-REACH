@@ -1,0 +1,265 @@
+{
+  "baselineCommit": "935e7a6f0a1fb5e38e7f47045043d9a0cca7dcfe",
+  "candidateBase": "935e7a6f0a1fb5e38e7f47045043d9a0cca7dcfe",
+  "transport": "real OAuth-authorized MCP Streamable HTTP; loopback ephemeral ports",
+  "fixtureUtf8Bytes": 468,
+  "fixtureFiles": [
+    "src/access.ts",
+    "src/router.ts",
+    "src/client.ts"
+  ],
+  "intent": "repo info + depth-2 tree + two literal searches + three six-line reads",
+  "discoveryCallsExcludedPerVersion": 1,
+  "initializationExcluded": true,
+  "warmups": [
+    {
+      "calls": 9,
+      "serialClientAwaitBoundaries": 9,
+      "elapsedMs": 428.2336670000004,
+      "responseUtf8Bytes": 3856,
+      "resultContinuationCalls": 0,
+      "searchRetrievalCalls": 2,
+      "routedMs": [
+        70.47529100000247,
+        37.611417000000074,
+        60.23479099999895,
+        56.34387499999866,
+        61.90429199999926,
+        44.58941599999889,
+        43.831333999998606,
+        26.63800000000265,
+        23.91016700000182
+      ],
+      "equivalentEvidence": true
+    },
+    {
+      "calls": 1,
+      "serialClientAwaitBoundaries": 1,
+      "elapsedMs": 100.84304200000042,
+      "responseUtf8Bytes": 5505,
+      "resultContinuationCalls": 0,
+      "searchRetrievalCalls": 0,
+      "routedMs": [
+        81.57666600000084
+      ],
+      "equivalentEvidence": true
+    }
+  ],
+  "measured": {
+    "baseline": [
+      {
+        "calls": 9,
+        "serialClientAwaitBoundaries": 9,
+        "elapsedMs": 331.69525000000067,
+        "responseUtf8Bytes": 3979,
+        "resultContinuationCalls": 0,
+        "searchRetrievalCalls": 2,
+        "routedMs": [
+          33.24945900000239,
+          7.194084000002476,
+          43.73504200000025,
+          59.8171250000014,
+          66.4989999999998,
+          40.804833999998664,
+          40.04424999999901,
+          20.70929099999921,
+          19.158000000003085
+        ],
+        "equivalentEvidence": true
+      },
+      {
+        "calls": 9,
+        "serialClientAwaitBoundaries": 9,
+        "elapsedMs": 354.3323339999988,
+        "responseUtf8Bytes": 3979,
+        "resultContinuationCalls": 0,
+        "searchRetrievalCalls": 2,
+        "routedMs": [
+          28.05987499999901,
+          7.114417000000685,
+          41.88683400000082,
+          63.443999999999505,
+          67.82841700000063,
+          42.49883300000147,
+          61.50525000000198,
+          21.415957999997772,
+          20.15033400000175
+        ],
+        "equivalentEvidence": true
+      },
+      {
+        "calls": 9,
+        "serialClientAwaitBoundaries": 9,
+        "elapsedMs": 336.5498329999973,
+        "responseUtf8Bytes": 3979,
+        "resultContinuationCalls": 0,
+        "searchRetrievalCalls": 2,
+        "routedMs": [
+          29.15583400000105,
+          7.6336669999982405,
+          44.4977910000016,
+          65.5722919999971,
+          60.699875000002066,
+          43.52291700000205,
+          43.38116699999955,
+          22.991916999999376,
+          18.74208400000134
+        ],
+        "equivalentEvidence": true
+      },
+      {
+        "calls": 9,
+        "serialClientAwaitBoundaries": 9,
+        "elapsedMs": 317.39720800000214,
+        "responseUtf8Bytes": 3981,
+        "resultContinuationCalls": 0,
+        "searchRetrievalCalls": 2,
+        "routedMs": [
+          25.936540999999124,
+          6.592541999998502,
+          42.570542000001296,
+          58.76137500000186,
+          58.63008300000001,
+          44.447541000001365,
+          42.31875000000218,
+          18.97020899999916,
+          18.760167000000365
+        ],
+        "equivalentEvidence": true
+      },
+      {
+        "calls": 9,
+        "serialClientAwaitBoundaries": 9,
+        "elapsedMs": 302.38945800000147,
+        "responseUtf8Bytes": 3983,
+        "resultContinuationCalls": 0,
+        "searchRetrievalCalls": 2,
+        "routedMs": [
+          28.05937499999709,
+          7.37341600000218,
+          41.484542000001966,
+          54.816374999998516,
+          55.464082999998936,
+          38.70354199999929,
+          38.459083999998256,
+          18.711208000000624,
+          19.03254200000083
+        ],
+        "equivalentEvidence": true
+      }
+    ],
+    "candidate": [
+      {
+        "calls": 1,
+        "serialClientAwaitBoundaries": 1,
+        "elapsedMs": 46.061249999998836,
+        "responseUtf8Bytes": 5505,
+        "resultContinuationCalls": 0,
+        "searchRetrievalCalls": 0,
+        "routedMs": [
+          45.531042000002344
+        ],
+        "equivalentEvidence": true
+      },
+      {
+        "calls": 1,
+        "serialClientAwaitBoundaries": 1,
+        "elapsedMs": 42.63641700000153,
+        "responseUtf8Bytes": 5505,
+        "resultContinuationCalls": 0,
+        "searchRetrievalCalls": 0,
+        "routedMs": [
+          42.2254580000008
+        ],
+        "equivalentEvidence": true
+      },
+      {
+        "calls": 1,
+        "serialClientAwaitBoundaries": 1,
+        "elapsedMs": 39.756625000001804,
+        "responseUtf8Bytes": 5505,
+        "resultContinuationCalls": 0,
+        "searchRetrievalCalls": 0,
+        "routedMs": [
+          39.333458999997674
+        ],
+        "equivalentEvidence": true
+      },
+      {
+        "calls": 1,
+        "serialClientAwaitBoundaries": 1,
+        "elapsedMs": 39.14308399999936,
+        "responseUtf8Bytes": 5505,
+        "resultContinuationCalls": 0,
+        "searchRetrievalCalls": 0,
+        "routedMs": [
+          38.78308399999878
+        ],
+        "equivalentEvidence": true
+      },
+      {
+        "calls": 1,
+        "serialClientAwaitBoundaries": 1,
+        "elapsedMs": 42.39091700000063,
+        "responseUtf8Bytes": 5505,
+        "resultContinuationCalls": 0,
+        "searchRetrievalCalls": 0,
+        "routedMs": [
+          42.110249999997905
+        ],
+        "equivalentEvidence": true
+      }
+    ]
+  },
+  "summary": {
+    "baseline": {
+      "workflows": 5,
+      "callsPerIntent": [
+        9,
+        9,
+        9,
+        9,
+        9
+      ],
+      "medianWallMs": 331.69525000000067,
+      "medianResponseUtf8Bytes": 3979,
+      "resultContinuationRequired": false
+    },
+    "candidate": {
+      "workflows": 5,
+      "callsPerIntent": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "medianWallMs": 42.39091700000063,
+      "medianResponseUtf8Bytes": 5505,
+      "resultContinuationRequired": false
+    }
+  },
+  "equivalentEvidence": true,
+  "signedReceiptChainsValid": true,
+  "explicitUnknownNodeRefused": true,
+  "nodeScopeRefusals": true,
+  "installedClientExperience": "UNVERIFIED",
+  "modelReasoningTimeSavings": "not measured",
+  "runBinding": {
+    "date": "2026-10-04",
+    "timezone": "America/Detroit",
+    "baselineRevision": "935e7a6f0a1fb5e38e7f47045043d9a0cca7dcfe",
+    "candidateRevision": "5da188b56650f8c8eb02efbdc0566afc1803eb1f",
+    "candidateSourceModified": false,
+    "hardware": "MacBookAir10,1; Apple M1; 8 logical CPUs; 8589934592 bytes memory",
+    "os": "macOS26.6.2 build25G83",
+    "node": "v26.9.0",
+    "dependencyBinding": "baseline and candidate package-lock.json byte-identical; scratch baseline uses same installed node_modules",
+    "baselineExport": "git archive of exact clean baseline, exported outside canonical root; no branch changes",
+    "legacyCandidateBaseField": "Historical hardcoded harness field; runBinding candidateRevision is the measured revision",
+    "persistentServices": "not restarted or installed",
+    "models": "no models or weights loaded",
+    "harnessExit": 0,
+    "setupFailure": "first invocation used nonexistent baseline cwd; moved scratch export to intended path and reran unchanged harness successfully"
+  }
+}
