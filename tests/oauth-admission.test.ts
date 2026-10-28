@@ -105,7 +105,7 @@ test('the shared registration ceiling holds against many addresses', async () =>
 
 test('the per-client store holds at most its key ceiling and refuses unseen keys past it', async () => {
   const store = new BoundedWindowStore(3);
-  store.init({ windowMs: 80 });
+  store.init({ windowMs: 1_000 });
   for (const key of ['a', 'b', 'c']) assert.equal((await store.increment(key)).totalHits, 1);
   assert.equal((await store.increment('d')).totalHits, Number.MAX_SAFE_INTEGER, 'an unseen key past the ceiling is over limit');
   assert.equal(await store.get('d'), undefined, 'and is never stored');
@@ -113,18 +113,22 @@ test('the per-client store holds at most its key ceiling and refuses unseen keys
   assert.equal(store.size, 3);
   for (let i = 0; i < 1000; i++) await store.increment(`burst-${i}`);
   assert.equal(store.size, 3, 'a high-cardinality burst cannot grow it');
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await new Promise(resolve => setTimeout(resolve, 1_100));
   assert.equal((await store.increment('d')).totalHits, 1, 'the window reset admits new clients again');
   assert.equal(store.size, 1);
 });
 
-test('throttled token requests are visible in token-endpoint health', async () => {
+test('throttled token requests are recorded in health at most once per window', async () => {
   await withGateway(async h => {
-    for (let i = 0; i <= OAUTH_RATE_LIMITS.token.client; i++) await hit(h, 'token', '198.51.100.70');
-    await new Promise(resolve => setTimeout(resolve, 50));
-    const health = await readOAuthRuntimeHealth(h.dir);
-    assert.equal(health?.lastFailureCode, 'temporarily_unavailable');
-    assert.ok((health?.token4xx ?? 0) > OAUTH_RATE_LIMITS.token.client - 1, 'every refusal and handler failure is counted');
+    for (let i = 0; i < OAUTH_RATE_LIMITS.token.client + 200; i++) await hit(h, 'token', '198.51.100.70');
+    let health = await readOAuthRuntimeHealth(h.dir);
+    for (let i = 0; i < 100 && health?.lastFailureCode !== 'temporarily_unavailable'; i++) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      health = await readOAuthRuntimeHealth(h.dir);
+    }
+    assert.equal(health?.lastFailureCode, 'temporarily_unavailable', 'throttling is visible to doctor');
+    // Handler failures (all budgeted requests use an unknown client) plus exactly one throttle record.
+    assert.equal(health?.tokenRequests, OAUTH_RATE_LIMITS.token.client + 1, '200 refusals produced one write, not 200');
   });
 });
 
@@ -223,7 +227,17 @@ test('the production consent route stops owner-password guessing per client and 
     for (let i = 0; i < ceiling + 20; i++) if ((await approve(h, ticket, `guess-${i}`, `203.0.113.${i}`)).status === 401) checked += 1;
     assert.equal(checked, ceiling, 'distributed guessing stops at the aggregate ceiling');
   });
-  const gateway = await fs.readFile('src/gateway/main.ts', 'utf8');
+  await withGateway(async h => {
+    const ticket = await consentTicket(h);
+    const budget = OAUTH_RATE_LIMITS.approve.client;
+    const ceiling = OAUTH_RATE_LIMITS.approve.route!;
+    // One address far over its own budget spends only its own share of the ceiling.
+    for (let i = 0; i < budget * 5; i++) await approve(h, ticket, `flood-${i}`, '198.51.100.50');
+    let checked = 0;
+    for (let i = 0; i < ceiling - budget; i++) if ((await approve(h, ticket, `other-${i}`, `203.0.113.${i}`)).status === 401) checked += 1;
+    assert.equal(checked, ceiling - budget, 'per-client refusals never consume the shared ceiling');
+  });
+  const gateway = await fs.readFile(new URL('../src/gateway/main.ts', import.meta.url), 'utf8');
   assert.match(gateway, /app\.use\(createConsentRouter\(oauth\)\);/, 'the gateway mounts the tested consent router');
   assert.doesNotMatch(gateway, /app\.post\('\/dex\/approve'/, 'and no unthrottled duplicate');
   assert.match(gateway, /app\.set\('trust proxy', 'loopback'\)/, 'client identity derivation matches the tested proxy trust');

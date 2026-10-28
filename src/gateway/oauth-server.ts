@@ -266,10 +266,18 @@ export function oauthProtectedResourceMetadataUrl(resourceUrl: URL): string {
 export function createOAuthRouter(options: OAuthRouterOptions): express.Router {
   const { provider, issuerUrl, resourceUrl } = options;
   const router = express.Router();
+  // Throttled token requests never reach the handler, so record them here or health would show none.
+  // At most once per window: a write per refusal would turn a flood into an unbounded disk-write queue.
+  let throttleRecordedAt = 0;
+  const recordThrottle = () => {
+    const now = Date.now();
+    if (now - throttleRecordedAt < OAUTH_RATE_WINDOW_MS) return;
+    throttleRecordedAt = now;
+    void options.health?.record(429, OAuthErrorCode.TemporarilyUnavailable).catch(() => undefined);
+  };
   const admit = (route: OAuthRateLimitedRoute) => oauthRateLimit(route, {
     store: options.rateLimitStore && (tier => options.rateLimitStore!(route, tier)),
-    // Throttled token requests never reach the handler, so record them here or health would show none.
-    onRefuse: route === 'token' ? () => { void options.health?.record(429, OAuthErrorCode.TemporarilyUnavailable).catch(() => undefined); } : undefined
+    onRefuse: route === 'token' ? recordThrottle : undefined
   });
 
   const metadata = {
