@@ -27,6 +27,7 @@
     "stress:c14": "tsx scripts/c14-stress.ts",
     "verify:clean-build": "tsx scripts/verify-clean-build.ts",
     "release:provenance": "tsx scripts/release-provenance.ts",
+    "release:reproduce": "tsx scripts/reproduce-runtime-release.ts",
     "preproof": "npm run build",
     "proof": "tsx scripts/proof-run.ts",
     "install:node": "npm run build && tsx scripts/install-node.ts",

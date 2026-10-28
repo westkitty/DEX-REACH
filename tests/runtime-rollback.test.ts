@@ -9,13 +9,16 @@ import {
   restoreRuntimeRollbackSnapshot,
   runtimeTreeSha256,
   validateRuntimeRollbackSnapshot,
+  TRUSTED_RUNTIME_RELEASES,
   verifyTrustedLegacyRuntimeRelease,
   verifiedOnlineNodeCount,
-  type RuntimeRollbackService
+  type RuntimeRollbackService,
+  type TrustedRuntimeRelease
 } from '../scripts/lib/runtime-rollback.js';
 import { reloadLaunchdService } from '../scripts/lib/service-reloader.js';
 import type { LaunchctlRunner } from '../scripts/lib/launchctl.js';
 import { verifyRuntimeRelease } from '../scripts/lib/runtime-release.js';
+import { RETAINED_RELEASE, RETAINED_SOURCE, RETAINED_TREE } from '../scripts/lib/c14-recovery-preflight.js';
 
 const labels = ['coordinator', 'worker', 'gateway', 'node', 'oauth-canary']
   .map(name => `com.stinkyweasel.dex-reach.${name}`);
@@ -71,19 +74,41 @@ async function release(root: string): Promise<void> {
   await write(path.join(packageRoot, 'source-hashes.json'), JSON.stringify(hashes));
 }
 
-async function markAsLegacyAndTrust(f: Awaited<ReturnType<typeof fixture>>): Promise<string> {
+const LEGACY_SOURCE = '0123456789ab' + 'c'.repeat(28);
+const LEGACY_ID = '0.3.2-0123456789ab-2f44ae46b11b';
+const PINNED_INSTALLED_ID = '0.4.0-274ba16e058e-2d5b454853af';
+
+type Fixture = Awaited<ReturnType<typeof fixture>>;
+
+/** Turn the previous release into a pre-native tree carrying the package identity its id implies. */
+async function markAsLegacy(f: Fixture): Promise<void> {
+  const version = f.previousId.split('-', 1)[0]!;
   await fs.rm(path.join(f.previousRoot, 'dist/src/node/compat-runtime'), { recursive: true, force: true });
-  await write(path.join(f.previousRoot, 'package.json'), JSON.stringify({ name: 'dex-reach', version: '0.3.2' }));
+  await write(path.join(f.previousRoot, 'package.json'), JSON.stringify({ name: 'dex-reach', version }));
   await write(path.join(f.previousRoot, 'package-lock.json'), JSON.stringify({
-    name: 'dex-reach', version: '0.3.2', lockfileVersion: 3,
-    packages: { '': { name: 'dex-reach', version: '0.3.2' } }
+    name: 'dex-reach', version, lockfileVersion: 3, packages: { '': { name: 'dex-reach', version } }
   }));
+}
+
+/** Stand in for a reviewed source pin of the fixture's current tree. */
+async function pin(f: Fixture): Promise<string> {
   const digest = await runtimeTreeSha256(f.previousRoot);
+  f.trusted[f.previousId] = { layout: 'legacy', sourceSha: LEGACY_SOURCE, treeSha256: digest };
+  return digest;
+}
+
+async function markAsLegacyAndPin(f: Fixture): Promise<string> {
+  await markAsLegacy(f);
+  return pin(f);
+}
+
+/** What an attacker with the owner's uid can write: a schema-valid, owner-private v1 snapshot. */
+async function forgeOwnerPrivateSnapshot(f: Fixture, candidateDigest: string): Promise<void> {
   const olderId = '0.3.2-older-retained';
   const snapshot = {
     schemaVersion: 1,
     candidateReleaseId: f.previousId,
-    candidateReleaseSha256: digest,
+    candidateReleaseSha256: candidateDigest,
     previousReleaseId: olderId,
     preparedAt: new Date(0).toISOString(),
     previousReleaseSha256: 'a'.repeat(64),
@@ -108,20 +133,24 @@ async function markAsLegacyAndTrust(f: Awaited<ReturnType<typeof fixture>>): Pro
   await fs.chmod(directory, 0o700);
   await fs.writeFile(path.join(directory, 'snapshot.json'), `${JSON.stringify(snapshot)}\n`, { mode: 0o600 });
   await fs.chmod(path.join(directory, 'snapshot.json'), 0o600);
-  return digest;
 }
 
-async function fixture(workerLocation: 'inside' | 'sibling' = 'inside'): Promise<{
+async function activeState(f: Fixture): Promise<string[]> {
+  return Promise.all([...f.services.map(service => fs.readFile(service.target, 'utf8')), fs.readFile(f.workerConfigPath, 'utf8')]);
+}
+
+async function fixture(workerLocation: 'inside' | 'sibling' = 'inside', previousId = '0.3.2-known-good'): Promise<{
   base: string; stateDir: string; agentsDir: string; workerConfigPath: string;
   candidateId: string; previousId: string; candidateRoot: string; previousRoot: string;
   services: RuntimeRollbackService[]; candidatePlists: Record<string, string>;
   previousPlists: Map<string, string>; previousConfig: string; candidateConfig: string;
+  trusted: Record<string, TrustedRuntimeRelease>;
   snapshot: (workerConfigOverride?: string) => Promise<string>;
 }> {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-rollback-'));
   const stateDir = path.join(base, 'state');
   const agentsDir = path.join(base, 'LaunchAgents');
-  const previousId = '0.3.2-known-good';
+  const trusted: Record<string, TrustedRuntimeRelease> = {};
   const candidateId = '0.3.2-candidate';
   const releasesDir = path.join(stateDir, 'runtime', 'releases');
   const previousRoot = path.join(releasesDir, previousId);
@@ -150,10 +179,11 @@ async function fixture(workerLocation: 'inside' | 'sibling' = 'inside'): Promise
   }
   return {
     base, stateDir, agentsDir, workerConfigPath, candidateId, previousId, candidateRoot, previousRoot,
-    services, candidatePlists, previousPlists, previousConfig, candidateConfig,
+    services, candidatePlists, previousPlists, previousConfig, candidateConfig, trusted,
     snapshot: (workerConfigOverride = workerConfigPath) => prepareRuntimeRollbackSnapshot({
       stateDir, agentsDir, candidateReleaseId: candidateId, candidateReleaseRoot: candidateRoot,
-      services, candidatePlists, workerConfigPath: workerConfigOverride, candidateWorkerConfig: candidateConfig
+      services, candidatePlists, workerConfigPath: workerConfigOverride, candidateWorkerConfig: candidateConfig,
+      trustedReleases: trusted
     }).then(value => {
       if (!value) throw new Error('expected a previous runtime snapshot');
       return value;
@@ -433,126 +463,214 @@ test('modified prior runtime fails its integrity check before restoration', asyn
   } finally { await fs.rm(f.base, { recursive: true, force: true }); }
 });
 
-test('authenticated pre-native legacy release passes recovery verification while strict candidate verification rejects it', async () => {
-  const f = await fixture();
+test('pinned pre-native legacy release passes recovery verification while strict candidate verification rejects it', async () => {
+  const f = await fixture('inside', LEGACY_ID);
   try {
-    const digest = await markAsLegacyAndTrust(f);
+    const digest = await markAsLegacyAndPin(f);
     await assert.rejects(verifyRuntimeRelease(f.previousRoot), /missing dist\/src\/node\/compat-runtime\/package\.json/);
-    await verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest });
-    assert.equal(await runtimeTreeSha256(f.previousRoot), digest);
+    await verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, trustedReleases: f.trusted });
+    await verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest, trustedReleases: f.trusted });
+    assert.equal(await runtimeTreeSha256(f.previousRoot), digest, 'recovery verification leaves the historical layout untouched');
   } finally { await fs.rm(f.base, { recursive: true, force: true }); }
 });
 
-test('legacy previous release participates in snapshot preparation and read-only restore preflight', async () => {
-  const f = await fixture();
+test('legacy previous release binds its reviewed digest into the snapshot and passes a write-free restore preflight', async () => {
+  const f = await fixture('inside', LEGACY_ID);
   try {
-    const digest = await markAsLegacyAndTrust(f);
+    const digest = await markAsLegacyAndPin(f);
     const snapshotPath = await f.snapshot();
     const snapshot = JSON.parse(await fs.readFile(snapshotPath, 'utf8')) as { previousReleaseId: string; previousReleaseSha256: string };
     assert.equal(snapshot.previousReleaseId, f.previousId);
     assert.equal(snapshot.previousReleaseSha256, digest);
     for (const service of f.services) await write(service.target, f.candidatePlists[service.label]!);
     await write(f.workerConfigPath, f.candidateConfig);
+    const before = await activeState(f);
     assert.equal(await validateRuntimeRollbackSnapshot({ snapshotPath, stateDir: f.stateDir, agentsDir: f.agentsDir,
-      workerConfigPath: f.workerConfigPath, services: f.services }), f.previousId);
+      workerConfigPath: f.workerConfigPath, services: f.services, trustedReleases: f.trusted }), f.previousId);
+    assert.deepEqual(await activeState(f), before, 'preflight performs no writes');
+    assert.equal(await restoreRuntimeRollbackSnapshot({ snapshotPath, stateDir: f.stateDir, agentsDir: f.agentsDir,
+      workerConfigPath: f.workerConfigPath, services: f.services, trustedReleases: f.trusted }), f.previousId);
+    assert.deepEqual(await Promise.all(f.services.map(service => fs.readFile(service.target, 'utf8'))),
+      f.services.map(service => f.previousPlists.get(service.label)));
   } finally { await fs.rm(f.base, { recursive: true, force: true }); }
 });
 
-test('legacy recovery refuses unknown identity, missing or public provenance, and mismatched expected digest', async () => {
-  const f = await fixture();
+test('a fabricated owner-private snapshot cannot authenticate a fabricated tree under the reviewed pins', async () => {
+  // The defect this guards: a same-owner actor writes a schema-valid 0700/0600 snapshot whose
+  // candidate digest matches a tree they built. No injected trust table here: production pins only.
+  for (const releaseId of [PINNED_INSTALLED_ID, '0.4.0-0123456789ab-feedfacecafe']) {
+    const f = await fixture('inside', releaseId);
+    try {
+      await markAsLegacy(f);
+      const forgedDigest = await runtimeTreeSha256(f.previousRoot);
+      await forgeOwnerPrivateSnapshot(f, forgedDigest);
+      const expected = releaseId === PINNED_INSTALLED_ID ? /does not match its reviewed digest/ : /is not pinned in reviewed source/;
+      await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId }), expected);
+      await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId, expectedTreeSha256: forgedDigest }),
+        releaseId === PINNED_INSTALLED_ID ? /does not match the reviewed pin/ : /is not pinned in reviewed source/);
+      const before = await activeState(f);
+      await assert.rejects(prepareRuntimeRollbackSnapshot({
+        stateDir: f.stateDir, agentsDir: f.agentsDir, candidateReleaseId: f.candidateId, candidateReleaseRoot: f.candidateRoot,
+        services: f.services, candidatePlists: f.candidatePlists, workerConfigPath: f.workerConfigPath, candidateWorkerConfig: f.candidateConfig
+      }), expected);
+      await assert.rejects(fs.lstat(path.join(f.stateDir, 'runtime/rollback', f.candidateId)), /ENOENT/);
+      assert.deepEqual(await activeState(f), before, 'a refused preparation writes nothing');
+    } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+  }
+});
+
+test('a forged rollback transaction digest for a pinned legacy release is refused before any restoration write', async () => {
+  const f = await fixture('inside', LEGACY_ID);
   try {
-    const digest = await markAsLegacyAndTrust(f);
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: '0.3.2-fabricated', expectedTreeSha256: digest }), /provenance is missing/);
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: 'd'.repeat(64) }), /identity or digest mismatch/);
-    const snapshotPath = path.join(f.stateDir, 'runtime/rollback', f.previousId, 'snapshot.json');
-    await fs.chmod(snapshotPath, 0o644);
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /provenance is not owner-private/);
-    await fs.rm(snapshotPath);
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /provenance is missing/);
+    await markAsLegacyAndPin(f);
+    const snapshotPath = await f.snapshot();
+    // Modify the retained tree, then rewrite the transaction to bind the modified tree's digest.
+    await write(path.join(f.previousRoot, 'dist/src/gateway/main.js'), 'implant');
+    const raw = JSON.parse(await fs.readFile(snapshotPath, 'utf8')) as { previousReleaseSha256: string };
+    raw.previousReleaseSha256 = await runtimeTreeSha256(f.previousRoot);
+    await fs.writeFile(snapshotPath, `${JSON.stringify(raw)}\n`, { mode: 0o600 });
+    for (const service of f.services) await write(service.target, f.candidatePlists[service.label]!);
+    await write(f.workerConfigPath, f.candidateConfig);
+    const before = await activeState(f);
+    const input = { snapshotPath, stateDir: f.stateDir, agentsDir: f.agentsDir, workerConfigPath: f.workerConfigPath,
+      services: f.services, trustedReleases: f.trusted };
+    await assert.rejects(validateRuntimeRollbackSnapshot(input), /does not match the reviewed pin/);
+    await assert.rejects(restoreRuntimeRollbackSnapshot(input), /does not match the reviewed pin/);
+    assert.deepEqual(await activeState(f), before);
   } finally { await fs.rm(f.base, { recursive: true, force: true }); }
 });
 
-test('legacy recovery rejects tampered files, changed modes, missing runtime entry points, and escaping links', async () => {
-  const f = await fixture();
+test('an unpinned pre-native previous release is refused rather than admitted through a recorded snapshot', async () => {
+  const f = await fixture('inside', LEGACY_ID);
   try {
-    const digest = await markAsLegacyAndTrust(f);
+    await markAsLegacy(f);
+    await forgeOwnerPrivateSnapshot(f, await runtimeTreeSha256(f.previousRoot));
+    await assert.rejects(f.snapshot(), /is not pinned in reviewed source/);
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, trustedReleases: f.trusted }),
+      /is not pinned in reviewed source/);
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
+test('legacy recovery refuses a mismatched transaction digest and malformed or wrong-layout pins', async () => {
+  const f = await fixture('inside', LEGACY_ID);
+  try {
+    const digest = await markAsLegacyAndPin(f);
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: 'd'.repeat(64), trustedReleases: f.trusted }),
+      /does not match the reviewed pin/);
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId,
+      trustedReleases: { [f.previousId]: { layout: 'legacy', sourceSha: 'f'.repeat(40), treeSha256: digest } } }), /trust entry is malformed/);
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId,
+      trustedReleases: { [f.previousId]: { layout: 'native', sourceSha: LEGACY_SOURCE, treeSha256: digest } } }), /is not pinned in reviewed source/);
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: 'constructor', trustedReleases: f.trusted }), /is not pinned/);
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
+test('legacy recovery rejects tampered files, changed modes, missing entry points, and escaping or dangling links', async () => {
+  const f = await fixture('inside', LEGACY_ID);
+  try {
+    await markAsLegacyAndPin(f);
+    const verify = () => verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, trustedReleases: f.trusted });
     const main = path.join(f.previousRoot, 'dist/src/node/main.js');
     await write(main, 'changed');
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /integrity check failed/);
+    await assert.rejects(verify(), /integrity check failed/);
     await write(main, 'fixture:dist/src/node/main.js');
     await fs.chmod(main, 0o600);
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /integrity check failed/);
+    await assert.rejects(verify(), /integrity check failed/);
     await fs.chmod(main, 0o644);
+    await verify();
     await fs.rm(path.join(f.previousRoot, 'dist/src/gateway/main.js'));
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /missing dist\/src\/gateway\/main\.js/);
+    await assert.rejects(verify(), /missing dist\/src\/gateway\/main\.js/);
   } finally { await fs.rm(f.base, { recursive: true, force: true }); }
 
-  const linked = await fixture();
-  try {
-    const digest = await markAsLegacyAndTrust(linked);
-    const external = path.join(linked.base, 'external.txt');
-    await write(external, 'outside');
-    await fs.symlink(external, path.join(linked.previousRoot, 'escape'));
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: linked.stateDir, releaseId: linked.previousId, expectedTreeSha256: digest }), /link escapes its release/);
-  } finally { await fs.rm(linked.base, { recursive: true, force: true }); }
+  for (const kind of ['escape', 'dangling'] as const) {
+    const linked = await fixture('inside', LEGACY_ID);
+    try {
+      await markAsLegacy(linked);
+      const target = path.join(linked.base, kind === 'escape' ? 'external.txt' : 'missing.txt');
+      if (kind === 'escape') await write(target, 'outside');
+      await fs.symlink(target, path.join(linked.previousRoot, 'link'));
+      await pin(linked);
+      await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: linked.stateDir, releaseId: linked.previousId, trustedReleases: linked.trusted }),
+        kind === 'escape' ? /link escapes its release/ : /dangling link/);
+    } finally { await fs.rm(linked.base, { recursive: true, force: true }); }
+  }
 });
 
 test('partial native packaging cannot use the legacy recovery path', async () => {
-  const f = await fixture();
+  const f = await fixture('inside', LEGACY_ID);
   try {
-    const digest = await markAsLegacyAndTrust(f);
+    await markAsLegacyAndPin(f);
+    const verify = () => verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, trustedReleases: f.trusted });
     const packageRoot = path.join(f.previousRoot, 'dist/src/node/compat-runtime');
     await write(path.join(packageRoot, 'runtime/index.js'), 'partial');
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /partial native compatibility package/);
+    await assert.rejects(verify(), /partial native compatibility package/);
     await fs.rm(packageRoot, { recursive: true, force: true });
     await write(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@dex-reach/native-backend' }));
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /partial native compatibility package/);
+    await assert.rejects(verify(), /partial native compatibility package/);
   } finally { await fs.rm(f.base, { recursive: true, force: true }); }
 });
 
-test('legacy package lock must match a supported historical format', async () => {
-  const f = await fixture();
+test('legacy package identity must match the release id and a supported historical lock format', async () => {
+  const f = await fixture('inside', LEGACY_ID);
   try {
-    const digest = await markAsLegacyAndTrust(f);
-    await write(path.join(f.previousRoot, 'package-lock.json'), JSON.stringify({
-      name: 'dex-reach', version: '0.3.2', lockfileVersion: 4
-    }));
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /package identity does not match/);
+    await markAsLegacyAndPin(f);
+    const verify = () => verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, trustedReleases: f.trusted });
+    const lock = path.join(f.previousRoot, 'package-lock.json');
+    const original = await fs.readFile(lock, 'utf8');
+    await write(lock, JSON.stringify({ name: 'dex-reach', version: '0.3.2', lockfileVersion: 4 }));
+    await assert.rejects(verify(), /package identity does not match/);
+    await write(lock, original);
+    await write(path.join(f.previousRoot, 'package.json'), JSON.stringify({ name: 'dex-reach', version: '0.4.0' }));
+    await assert.rejects(verify(), /package identity does not match/);
   } finally { await fs.rm(f.base, { recursive: true, force: true }); }
 });
 
-test('malformed provenance and a snapshot bound to the wrong previous release fail before restoration writes', async () => {
-  const malformed = await fixture();
-  try {
-    const digest = await markAsLegacyAndTrust(malformed);
-    const anchor = path.join(malformed.stateDir, 'runtime/rollback', malformed.previousId, 'snapshot.json');
-    await fs.writeFile(anchor, '{broken');
-    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: malformed.stateDir, releaseId: malformed.previousId, expectedTreeSha256: digest }), /provenance is invalid/);
-  } finally { await fs.rm(malformed.base, { recursive: true, force: true }); }
-
+test('a snapshot bound to the wrong previous release or candidate fails before restoration writes', async () => {
   const wrong = await fixture();
   try {
     const snapshotPath = await wrong.snapshot();
     const raw = JSON.parse(await fs.readFile(snapshotPath, 'utf8')) as { previousReleaseId: string };
     raw.previousReleaseId = '0.3.2-other-release';
     await fs.writeFile(snapshotPath, `${JSON.stringify(raw)}\n`);
-    const before = await Promise.all(wrong.services.map(service => fs.readFile(service.target, 'utf8')));
+    const before = await activeState(wrong);
     await assert.rejects(validateRuntimeRollbackSnapshot({ snapshotPath, stateDir: wrong.stateDir, agentsDir: wrong.agentsDir,
       workerConfigPath: wrong.workerConfigPath, services: wrong.services }), /saved LaunchAgent integrity mismatch/);
-    assert.deepEqual(await Promise.all(wrong.services.map(service => fs.readFile(service.target, 'utf8'))), before);
+    assert.deepEqual(await activeState(wrong), before);
   } finally { await fs.rm(wrong.base, { recursive: true, force: true }); }
+
+  const mixed = await fixture('inside', LEGACY_ID);
+  try {
+    await markAsLegacyAndPin(mixed);
+    const first = mixed.services[0]!;
+    await write(first.target, plist(first.label, PINNED_INSTALLED_ID, path.join(mixed.stateDir, 'runtime/releases', PINNED_INSTALLED_ID)));
+    await assert.rejects(mixed.snapshot(), /do not share one runtime release/);
+  } finally { await fs.rm(mixed.base, { recursive: true, force: true }); }
 });
 
 test('repeated legacy verification is deterministic and does not mutate the release or owner files', async () => {
-  const f = await fixture();
+  const f = await fixture('inside', LEGACY_ID);
   try {
-    const digest = await markAsLegacyAndTrust(f);
+    await markAsLegacyAndPin(f);
     const before = await runtimeTreeSha256(f.previousRoot);
-    const agentsBefore = await Promise.all(f.services.map(service => fs.readFile(service.target)));
-    const configBefore = await fs.readFile(f.workerConfigPath);
-    for (let i = 0; i < 3; i++) await verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest });
+    const state = await activeState(f);
+    for (let i = 0; i < 3; i++) await verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, trustedReleases: f.trusted });
     assert.equal(await runtimeTreeSha256(f.previousRoot), before);
-    assert.deepEqual(await Promise.all(f.services.map(service => fs.readFile(service.target))), agentsBefore);
-    assert.deepEqual(await fs.readFile(f.workerConfigPath), configBefore);
+    assert.deepEqual(await activeState(f), state);
   } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
+test('reviewed runtime pins are frozen, well-formed, agree with the C14 retained record, and production never overrides them', async () => {
+  assert.ok(Object.isFrozen(TRUSTED_RUNTIME_RELEASES));
+  for (const [id, entry] of Object.entries(TRUSTED_RUNTIME_RELEASES)) {
+    assert.ok(Object.isFrozen(entry), id);
+    assert.match(entry.treeSha256, /^[a-f0-9]{64}$/);
+    assert.match(entry.sourceSha, /^[a-f0-9]{40}$/);
+    assert.equal(id.split('-')[1], entry.sourceSha.slice(0, 12), `${id} commit component`);
+  }
+  assert.deepEqual(Object.keys(TRUSTED_RUNTIME_RELEASES).sort(), [RETAINED_RELEASE, PINNED_INSTALLED_ID].sort());
+  assert.equal(TRUSTED_RUNTIME_RELEASES[RETAINED_RELEASE]?.treeSha256, RETAINED_TREE);
+  assert.equal(TRUSTED_RUNTIME_RELEASES[RETAINED_RELEASE]?.sourceSha, RETAINED_SOURCE);
+  for (const caller of ['scripts/install-macos.ts', 'scripts/rollback-macos.ts', 'scripts/c13-maintenance.ts']) {
+    assert.doesNotMatch(await fs.readFile(caller, 'utf8'), /trustedReleases/, `${caller} must rely on the reviewed pins`);
+  }
 });

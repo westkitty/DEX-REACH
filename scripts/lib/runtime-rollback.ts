@@ -52,6 +52,31 @@ const REQUIRED_LEGACY_RUNTIME_ENTRIES = [
 ] as const;
 const LEGACY_PACKAGE_LOCK_FORMATS: Record<string, number> = { '0.3.2': 3, '0.4.0': 3 };
 
+export type TrustedRuntimeRelease = Readonly<{ layout: 'legacy' | 'native'; sourceSha: string; treeSha256: string }>;
+export type TrustedRuntimeReleases = Readonly<Record<string, TrustedRuntimeRelease>>;
+
+/**
+ * Runtime trees whose complete digest is pinned in reviewed source. Each digest was reproduced
+ * byte-for-byte from a clean checkout of `sourceSha` (`npm ci` against its committed lockfile, then
+ * that commit's own buildRuntimeRelease), so the anchor is reviewed history, not anything writable on
+ * the host. Rollback snapshots are transaction metadata: their digest must agree with this table and
+ * can never add to it. Entries are added only by a reviewed change after `npm run release:reproduce`.
+ */
+export const TRUSTED_RUNTIME_RELEASES: TrustedRuntimeReleases = Object.freeze({
+  // C13 Last Known Good. Also recorded on GitHub since PR #17 (2026-10-11) as RETAINED_TREE.
+  '0.3.2-87a99494ebb3-2f44ae46b11b': Object.freeze({
+    layout: 'legacy',
+    sourceSha: '87a99494ebb3471d3ecc3a79acd630ec18858a92',
+    treeSha256: 'fcb78a6b99db10aac565a1b2b4af90faf142ef5bd5162523a662febeafd36b12'
+  }),
+  // 0.4.0 installed 2026-10-24 from PR #22's merge. No contemporaneous record exists; reproduced 2026-10-28.
+  '0.4.0-274ba16e058e-2d5b454853af': Object.freeze({
+    layout: 'legacy',
+    sourceSha: '274ba16e058e2b1e855a8ae4a5c30ad63ea81363',
+    treeSha256: 'aa966f25b316de98a696ad740c27f82e63454cb5cc988ddbae62c65685e99280'
+  })
+});
+
 function safeReleaseId(value: string): string {
   if (!/^[a-z0-9][a-z0-9._-]{0,119}$/.test(value)) throw new Error('invalid runtime release id');
   return value;
@@ -204,19 +229,37 @@ async function assertRealDirectory(file: string, message: string): Promise<void>
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(message);
 }
 
+function pinnedRelease(releaseId: string, trusted: TrustedRuntimeReleases): TrustedRuntimeRelease | undefined {
+  if (!Object.prototype.hasOwnProperty.call(trusted, releaseId)) return undefined;
+  const entry = trusted[releaseId];
+  if (!entry || !/^[a-f0-9]{64}$/.test(entry.treeSha256) || !/^[a-f0-9]{40}$/.test(entry.sourceSha) ||
+      releaseId.split('-')[1] !== entry.sourceSha.slice(0, 12)) {
+    throw new Error(`reviewed runtime trust entry is malformed: ${releaseId}`);
+  }
+  return entry;
+}
+
 /**
- * Recover only a legacy release whose identity and complete-tree digest were recorded when it
- * was installed. The release's own version-1 rollback snapshot is the independent local anchor;
- * the digest is never learned from the tree being checked. New candidates must use the strict
- * verifier in runtime-release.ts and cannot enter through this function.
+ * Recover only a pre-native release whose identity and complete-tree digest are pinned in reviewed
+ * source. Nothing on the host can supply or widen the expected digest: a caller's
+ * `expectedTreeSha256` (a rollback transaction's record) must agree with the pin, or verification
+ * fails. New candidates must use the strict verifier in runtime-release.ts and cannot enter here.
+ * `trustedReleases` exists for test fixtures; production callers rely on the default.
  */
 export async function verifyTrustedLegacyRuntimeRelease(input: {
   stateDir: string;
   releaseId: string;
-  expectedTreeSha256: string;
+  expectedTreeSha256?: string;
+  trustedReleases?: TrustedRuntimeReleases;
 }): Promise<void> {
   const releaseId = safeReleaseId(input.releaseId);
-  if (!/^[a-f0-9]{64}$/.test(input.expectedTreeSha256)) throw new Error('invalid trusted legacy runtime digest');
+  const pinned = pinnedRelease(releaseId, input.trustedReleases ?? TRUSTED_RUNTIME_RELEASES);
+  if (!pinned || pinned.layout !== 'legacy') {
+    throw new Error(`legacy runtime release ${releaseId} is not pinned in reviewed source; reproduce it and pin its digest before it can be a recovery target`);
+  }
+  if (input.expectedTreeSha256 !== undefined && input.expectedTreeSha256 !== pinned.treeSha256) {
+    throw new Error(`rollback transaction digest for ${releaseId} does not match the reviewed pin`);
+  }
   const releaseRoot = path.resolve(input.stateDir, 'runtime', 'releases', releaseId);
   const runtimeRoot = path.resolve(input.stateDir, 'runtime');
   const releasesRoot = path.join(runtimeRoot, 'releases');
@@ -225,9 +268,6 @@ export async function verifyTrustedLegacyRuntimeRelease(input: {
   }
   await assertRealDirectory(runtimeRoot, 'legacy runtime state path is not a real directory');
   await assertRealDirectory(releasesRoot, 'legacy runtime release parent is not a real directory');
-
-  const recordedDigest = await recordedCandidateDigest(input.stateDir, releaseId);
-  if (recordedDigest !== input.expectedTreeSha256) throw new Error('trusted legacy runtime identity or digest mismatch');
 
   let rootStat: Awaited<ReturnType<typeof fs.lstat>>;
   try { rootStat = await fs.lstat(releaseRoot); }
@@ -279,9 +319,33 @@ export async function verifyTrustedLegacyRuntimeRelease(input: {
   };
   await verifyLinks(releaseRoot);
 
-  if (await runtimeTreeSha256(releaseRoot) !== input.expectedTreeSha256) {
-    throw new Error('legacy runtime integrity check failed');
+  if (await runtimeTreeSha256(releaseRoot) !== pinned.treeSha256) {
+    throw new Error(`legacy runtime integrity check failed: ${releaseId} does not match its reviewed digest`);
   }
+}
+
+/**
+ * Verify a retained release and return the digest a rollback transaction must bind. A pinned release
+ * is checked against its reviewed digest whatever its layout; an unpinned one must pass the strict
+ * native verifier, so an unpinned pre-native tree can never be admitted.
+ */
+async function verifyRetainedRuntimeRelease(stateDir: string, releaseId: string, trusted: TrustedRuntimeReleases,
+  expectedTreeSha256?: string): Promise<string> {
+  const root = path.resolve(stateDir, 'runtime', 'releases', releaseId);
+  const pinned = pinnedRelease(releaseId, trusted);
+  if (pinned?.layout === 'legacy') {
+    await verifyTrustedLegacyRuntimeRelease({ stateDir, releaseId, expectedTreeSha256, trustedReleases: trusted });
+    return pinned.treeSha256;
+  }
+  if (!await pathExists(root)) throw new Error('runtime release is incomplete: previous release directory is missing');
+  if (!pinned && !await pathExists(path.join(root, 'dist/src/node/compat-runtime'))) {
+    throw new Error(`legacy runtime release ${releaseId} is not pinned in reviewed source; reproduce it and pin its digest before it can be a recovery target`);
+  }
+  await verifyRuntimeRelease(root);
+  const digest = await runtimeTreeSha256(root);
+  if (pinned && digest !== pinned.treeSha256) throw new Error(`previous runtime ${releaseId} does not match its reviewed digest`);
+  if (expectedTreeSha256 !== undefined && digest !== expectedTreeSha256) throw new Error('previous runtime integrity check failed');
+  return digest;
 }
 
 /** Capture the exact active LaunchAgents and generated worker config before activation mutates them. */
@@ -294,6 +358,7 @@ export async function prepareRuntimeRollbackSnapshot(input: {
   candidatePlists: Record<string, string>;
   workerConfigPath: string;
   candidateWorkerConfig: string;
+  trustedReleases?: TrustedRuntimeReleases;
 }): Promise<string | null> {
   const candidateId = safeReleaseId(input.candidateReleaseId);
   const labels = input.services.map(service => service.label).sort();
@@ -324,16 +389,8 @@ export async function prepareRuntimeRollbackSnapshot(input: {
   if (previousReleaseId === candidateId) throw new Error('candidate and previous runtime release ids are identical');
   const previousRoot = path.resolve(input.stateDir, 'runtime', 'releases', previousReleaseId);
   for (const service of previous) releaseIdFromPlist(service.bytes.toString('utf8'), service.label, previousRoot);
-  if (!await pathExists(previousRoot)) throw new Error('runtime release is incomplete: previous release directory is missing');
-  let previousReleaseSha256: string;
-  if (await pathExists(path.join(previousRoot, 'dist/src/node/compat-runtime'))) {
-    await verifyRuntimeRelease(previousRoot);
-    previousReleaseSha256 = await runtimeTreeSha256(previousRoot);
-  } else {
-    const recorded = await recordedCandidateDigest(input.stateDir, previousReleaseId);
-    await verifyTrustedLegacyRuntimeRelease({ stateDir: input.stateDir, releaseId: previousReleaseId, expectedTreeSha256: recorded });
-    previousReleaseSha256 = recorded;
-  }
+  const previousReleaseSha256 = await verifyRetainedRuntimeRelease(input.stateDir, previousReleaseId,
+    input.trustedReleases ?? TRUSTED_RUNTIME_RELEASES);
 
   const configPath = await checkedWorkerConfigPath(input.workerConfigPath, input.stateDir);
   const candidateConfig = Buffer.from(input.candidateWorkerConfig);
@@ -401,29 +458,6 @@ function validateSnapshot(value: unknown): RuntimeRollbackSnapshot {
   return snapshot;
 }
 
-async function recordedCandidateDigest(stateDir: string, releaseId: string): Promise<string> {
-  const snapshotDirectory = path.resolve(stateDir, 'runtime', 'rollback', releaseId);
-  await assertRealDirectory(path.resolve(stateDir, 'runtime'), 'trusted legacy runtime state path is not a real directory');
-  await assertRealDirectory(path.resolve(stateDir, 'runtime', 'rollback'), 'trusted legacy runtime provenance parent is not a real directory');
-  const snapshotPath = path.join(snapshotDirectory, 'snapshot.json');
-  let directoryStat: Awaited<ReturnType<typeof fs.lstat>>;
-  let snapshotStat: Awaited<ReturnType<typeof fs.lstat>>;
-  try {
-    [directoryStat, snapshotStat] = await Promise.all([fs.lstat(snapshotDirectory), fs.lstat(snapshotPath)]);
-  } catch { throw new Error('trusted legacy runtime provenance is missing'); }
-  const ownerUid = process.getuid?.();
-  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink() || (directoryStat.mode & 0o777) !== 0o700 ||
-      (ownerUid !== undefined && directoryStat.uid !== ownerUid) || !snapshotStat.isFile() || snapshotStat.isSymbolicLink() ||
-      (snapshotStat.mode & 0o777) !== 0o600 || (ownerUid !== undefined && snapshotStat.uid !== ownerUid)) {
-    throw new Error('trusted legacy runtime provenance is not owner-private');
-  }
-  let snapshot: RuntimeRollbackSnapshot;
-  try { snapshot = validateSnapshot(JSON.parse(await fs.readFile(snapshotPath, 'utf8')) as unknown); }
-  catch { throw new Error('trusted legacy runtime provenance is invalid'); }
-  if (snapshot.candidateReleaseId !== releaseId) throw new Error('trusted legacy runtime identity mismatch');
-  return snapshot.candidateReleaseSha256;
-}
-
 export type RestoreRuntimeRollbackInput = {
   snapshotPath: string;
   stateDir: string;
@@ -431,6 +465,7 @@ export type RestoreRuntimeRollbackInput = {
   workerConfigPath: string;
   services: RuntimeRollbackService[];
   candidateReleaseId?: string;
+  trustedReleases?: TrustedRuntimeReleases;
 };
 
 type RestorePlan = {
@@ -449,16 +484,8 @@ async function preflightRestore(input: RestoreRuntimeRollbackInput): Promise<Res
   const labels = input.services.map(service => service.label).sort();
   if (labels.join('\n') !== REQUIRED_LABELS.join('\n')) throw new Error('rollback requires the exact five DEX LaunchAgents');
   const previousRoot = path.resolve(input.stateDir, 'runtime', 'releases', snapshot.previousReleaseId);
-  if (await pathExists(path.join(previousRoot, 'dist/src/node/compat-runtime'))) {
-    await verifyRuntimeRelease(previousRoot);
-    if (await runtimeTreeSha256(previousRoot) !== snapshot.previousReleaseSha256) throw new Error('previous runtime integrity check failed');
-  } else {
-    await verifyTrustedLegacyRuntimeRelease({
-      stateDir: input.stateDir,
-      releaseId: snapshot.previousReleaseId,
-      expectedTreeSha256: snapshot.previousReleaseSha256
-    });
-  }
+  await verifyRetainedRuntimeRelease(input.stateDir, snapshot.previousReleaseId,
+    input.trustedReleases ?? TRUSTED_RUNTIME_RELEASES, snapshot.previousReleaseSha256);
   for (const { label, file } of snapshot.services) releaseIdFromPlist(Buffer.from(file.previousBase64, 'base64').toString('utf8'), label, previousRoot);
 
   const savedByLabel = new Map(snapshot.services.map(item => [item.label, item.file]));
