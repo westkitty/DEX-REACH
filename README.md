@@ -443,11 +443,14 @@ A build that succeeds proves nothing about whether anyone else can reproduce it.
 ```bash
 npm run verify:clean-build     # rebuild this commit from git archive and compare, file by file
 npm run release:provenance     # full manifest: checks, checksums, SBOM, platform claims
+npm run release:reproduce -- --source <sha> --release-id <id> [--compare <installed tree>]
 ```
 
 The comparison exports the commit with `git archive`, installs from `package-lock.json` alone, and builds in a directory with a different absolute path and no pre-existing output. That catches four things a green build hides: an untracked file the build reads, a stale artifact left over from a module that no longer exists, a globally installed package the workflow never installs, and an absolute path or timestamp baked into the output. A difference names the file and its likely cause. It runs as its own CI job, so a failure there is not mistaken for a test or audit failure.
 
 `release:provenance` writes `release/manifest.json`, `release/checksums.txt` and a CycloneDX `release/sbom.cdx.json`. The manifest records the exact commit, whether the working tree was clean, the toolchain, every check with its result, a SHA-256 for each artifact, and a hash of the SBOM normalized so two builds of one dependency tree hash alike.
+
+`release:reproduce` rebuilds an immutable runtime release from its source commit in a throwaway directory, with that commit's own builder and `npm ci` against its lockfile. It prints the complete-tree digest as an unsigned receipt, comparing it with the reviewed pin and, optionally, an installed tree. It refuses to start with less than 1 GiB above the 2 GiB free-space reserve. Retained releases are admitted for rollback only by their pin in `TRUSTED_RUNTIME_RELEASES`, never by a digest recorded on the host ([details](docs/releases/C15_RUNTIME_PROVENANCE.md)).
 
 **It states what it did not do.** A check that could not run is recorded with its reason rather than omitted, because a missing line reads as "fine" to everyone who was not there. `live deployment` is always UNVERIFIED: nothing in a build exercises a deployed gateway, an installed service or a real MCP client session. macOS, Android and second-machine claims read `UNVERIFIED — HARDWARE NOT AVAILABLE` unless the checks genuinely ran there. And reproducibility does not mean correctness: a compromised upstream package produces a perfectly reproducible build of compromised code.
 
