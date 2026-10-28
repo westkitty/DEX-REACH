@@ -148,7 +148,8 @@ export async function collectDoctorReport(options: DoctorOptions = {}): Promise<
           experimental: true,
           count: secrets.count,
           aliases: options.share ? undefined : secrets.aliases,
-          error: secrets.error
+          // The raw message names local paths; a shared report keeps only the fact of the failure.
+          error: options.share && secrets.error !== null ? 'unreadable_or_invalid' : secrets.error
         }
       : null,
     assertions: { count: assertions.length },
@@ -170,7 +171,8 @@ export async function collectDoctorReport(options: DoctorOptions = {}): Promise<
         scopes: ['mcp:tools', 'offline_access'],
         tokenEndpointAuthMethods: ['none']
       },
-      state: oauthState,
+      // A parse or permission error message can quote oauth.json (token material) or its path.
+      state: { ...oauthState, error: oauthState.error === null ? null : 'unreadable_or_invalid' },
       tokenEndpoint: oauthHealth ? doctorOAuthHealth(oauthHealth) : null,
       canary: oauthCanary ? doctorOAuthCanary(oauthCanary, options.share === true) : null,
       note: 'counts and status classes only; no client ids, token values, hashes, owner credentials, or redirect URIs are exposed'

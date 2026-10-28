@@ -8,7 +8,8 @@ import express from 'express';
 import { MemoryStore } from 'express-rate-limit';
 import type { AddressInfo } from 'node:net';
 import { MAX_DYNAMIC_CLIENTS, ReachOAuthProvider, OFFLINE_ACCESS_SCOPE, REQUIRED_RESOURCE_SCOPE } from '../src/gateway/auth.js';
-import { createOAuthRouter, oauthRateLimit, OAUTH_RATE_LIMITS, type OAuthRateLimitedRoute } from '../src/gateway/oauth-server.js';
+import { BoundedWindowStore, createConsentRouter, createOAuthRouter, OAUTH_RATE_LIMITS, type OAuthRateLimitedRoute } from '../src/gateway/oauth-server.js';
+import { OAuthHealthRecorder, readOAuthRuntimeHealth } from '../src/shared/oauth-diagnostics.js';
 
 /** A real MemoryStore that also remembers every distinct key it was asked to count. */
 class CountingStore extends MemoryStore {
@@ -33,13 +34,16 @@ async function withGateway(run: (h: Harness) => Promise<void>, seed?: (dir: stri
   const resource = new URL('/mcp', base);
   const provider = new ReachOAuthProvider(dir, 'owner', '0123456789abcdef', resource, base, { accessTokenMs: 60_000, refreshTokenMs: 600_000 });
   await provider.initialize();
+  const health = new OAuthHealthRecorder(dir);
+  await health.initialize();
   const stores = new Map<string, CountingStore>();
   const rateLimitStore = (route: OAuthRateLimitedRoute, tier: 'client' | 'route') => {
     const store = new CountingStore();
     stores.set(`${route}:${tier}:${stores.size}`, store);
     return store;
   };
-  app.use(createOAuthRouter({ provider, issuerUrl: base, resourceUrl: resource, rateLimitStore }));
+  app.use(createConsentRouter(provider));
+  app.use(createOAuthRouter({ provider, issuerUrl: base, resourceUrl: resource, health, rateLimitStore }));
   try { await run({ base, resource, provider, dir, stores }); }
   finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
@@ -81,20 +85,46 @@ test('every public OAuth route admits its per-client budget and then answers 429
   }
 });
 
-test('the route-wide cap holds against many client addresses and bounds limiter keys', async () => {
+test('one flooding address cannot spend another client\'s budget on any route', async () => {
+  for (const route of ['discovery', 'register', 'authorize', 'token', 'revoke'] as const) {
+    await withGateway(async h => {
+      for (let i = 0; i < OAUTH_RATE_LIMITS[route].client * 10; i++) await hit(h, route, '198.51.100.66');
+      assert.notEqual((await hit(h, route, '198.51.100.67')).status, 429, `${route}: a flood from one address leaves others admitted`);
+    });
+  }
+});
+
+test('the shared registration ceiling holds against many addresses', async () => {
   await withGateway(async h => {
-    const cap = OAUTH_RATE_LIMITS.token.route;
-    const statuses: number[] = [];
-    for (let i = 0; i < cap + 200; i++) statuses.push((await hit(h, 'token', `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`)).status);
-    assert.equal(statuses.filter(status => status !== 429).length, cap, 'only the route budget is admitted');
-    assert.ok(keysFor(h, 'token', 'client') <= cap, 'per-client keys never exceed the route budget in a window');
-    assert.equal(keysFor(h, 'token', 'route'), 1, 'the route tier uses one fixed key');
-  });
-  await withGateway(async h => {
-    const cap = OAUTH_RATE_LIMITS.register.route;
+    const cap = OAUTH_RATE_LIMITS.register.route!;
     let created = 0;
     for (let i = 0; i < cap + 30; i++) if ((await hit(h, 'register', `192.0.2.${i}`)).status === 201) created += 1;
-    assert.equal(created, cap, 'distributed registration cannot exceed the route cap');
+    assert.equal(created, cap, 'distributed registration cannot exceed the route ceiling');
+  });
+});
+
+test('the per-client store holds at most its key ceiling and refuses unseen keys past it', async () => {
+  const store = new BoundedWindowStore(3);
+  store.init({ windowMs: 80 });
+  for (const key of ['a', 'b', 'c']) assert.equal((await store.increment(key)).totalHits, 1);
+  assert.equal((await store.increment('d')).totalHits, Number.MAX_SAFE_INTEGER, 'an unseen key past the ceiling is over limit');
+  assert.equal(await store.get('d'), undefined, 'and is never stored');
+  assert.equal((await store.increment('a')).totalHits, 2, 'counted clients keep working');
+  assert.equal(store.size, 3);
+  for (let i = 0; i < 1000; i++) await store.increment(`burst-${i}`);
+  assert.equal(store.size, 3, 'a high-cardinality burst cannot grow it');
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal((await store.increment('d')).totalHits, 1, 'the window reset admits new clients again');
+  assert.equal(store.size, 1);
+});
+
+test('throttled token requests are visible in token-endpoint health', async () => {
+  await withGateway(async h => {
+    for (let i = 0; i <= OAUTH_RATE_LIMITS.token.client; i++) await hit(h, 'token', '198.51.100.70');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const health = await readOAuthRuntimeHealth(h.dir);
+    assert.equal(health?.lastFailureCode, 'temporarily_unavailable');
+    assert.ok((health?.token4xx ?? 0) > OAUTH_RATE_LIMITS.token.client - 1, 'every refusal and handler failure is counted');
   });
 });
 
@@ -155,21 +185,47 @@ test('dynamic registration fails closed at its persistent capacity without pruni
   }, seedClients);
 });
 
-test('the consent route limiter refuses repeated owner-password attempts', async () => {
-  const app = express();
-  app.set('trust proxy', 'loopback');
-  let attempts = 0;
-  app.post('/dex/approve', ...oauthRateLimit('approve'), (_req, res) => { attempts += 1; res.status(401).send('Authorization denied.'); });
-  const server = app.listen(0, '127.0.0.1');
-  await new Promise<void>(resolve => server.once('listening', resolve));
-  try {
-    const url = new URL(`http://127.0.0.1:${(server.address() as AddressInfo).port}/dex/approve`);
+async function consentTicket(h: Harness): Promise<string> {
+  const register = await hit(h, 'register', '127.0.0.1');
+  const clientId = String((await register.json() as { client_id: string }).client_id);
+  const url = new URL('/authorize', h.base);
+  for (const [key, value] of Object.entries({
+    response_type: 'code', client_id: clientId, redirect_uri: 'http://127.0.0.1:49152/callback', code_challenge: 'x'.repeat(43),
+    code_challenge_method: 'S256', scope: REQUIRED_RESOURCE_SCOPE, resource: h.resource.href
+  })) url.searchParams.set(key, value);
+  const ticket = (await (await fetch(url)).text()).match(/name="ticket" value="([^"]+)"/)?.[1];
+  assert.ok(ticket);
+  return ticket;
+}
+
+function approve(h: Harness, ticket: string, password: string, ip: string): Promise<Response> {
+  return fetch(new URL('/dex/approve', h.base), {
+    method: 'POST', redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-forwarded-for': ip },
+    body: new URLSearchParams({ ticket, username: 'owner', password })
+  });
+}
+
+test('the production consent route stops owner-password guessing per client and in aggregate', async () => {
+  await withGateway(async h => {
+    const ticket = await consentTicket(h);
     const budget = OAUTH_RATE_LIMITS.approve.client;
-    for (let i = 0; i < budget + 5; i++) await fetch(url, { method: 'POST', headers: { 'x-forwarded-for': '198.51.100.40' } });
-    assert.equal(attempts, budget, 'password checks stop at the per-client budget');
-  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+    for (let i = 0; i < budget; i++) assert.equal((await approve(h, ticket, `guess-${i}`, '198.51.100.40')).status, 401);
+    assert.equal((await approve(h, ticket, '0123456789abcdef', '198.51.100.40')).status, 429, 'even the right password is refused once over budget');
+    const granted = await approve(h, ticket, '0123456789abcdef', '198.51.100.41');
+    assert.equal(granted.status, 302, 'another client is unaffected and the ticket was never burned by guesses');
+    assert.match(granted.headers.get('location') ?? '', /[?&]code=/);
+  });
+  await withGateway(async h => {
+    const ticket = await consentTicket(h);
+    const ceiling = OAUTH_RATE_LIMITS.approve.route!;
+    let checked = 0;
+    for (let i = 0; i < ceiling + 20; i++) if ((await approve(h, ticket, `guess-${i}`, `203.0.113.${i}`)).status === 401) checked += 1;
+    assert.equal(checked, ceiling, 'distributed guessing stops at the aggregate ceiling');
+  });
   const gateway = await fs.readFile('src/gateway/main.ts', 'utf8');
-  assert.match(gateway, /app\.post\('\/dex\/approve', \.\.\.oauthRateLimit\('approve'\), async/);
+  assert.match(gateway, /app\.use\(createConsentRouter\(oauth\)\);/, 'the gateway mounts the tested consent router');
+  assert.doesNotMatch(gateway, /app\.post\('\/dex\/approve'/, 'and no unthrottled duplicate');
   assert.match(gateway, /app\.set\('trust proxy', 'loopback'\)/, 'client identity derivation matches the tested proxy trust');
 });
 

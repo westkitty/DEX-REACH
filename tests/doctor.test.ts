@@ -101,6 +101,7 @@ test('doctor OAuth diagnostics are allowlisted in normal, JSON and share modes',
       updatedAt: new Date(0).toISOString()
     }, dir);
     // A future writer adds token-bearing fields and a free-text failure; none may reach doctor output.
+    await fs.writeFile(path.join(dir, 'oauth.json'), '{"refresh":{"SECRET-STATE-TOKEN": oops');
     await fs.writeFile(path.join(dir, 'oauth-health.json'), JSON.stringify({
       version: 1, startedAt: new Date().toISOString(), tokenRequests: 1, token2xx: 0, token4xx: 1, token5xx: 0,
       lastSuccessAt: 'SECRET-IN-TIMESTAMP', lastFailureAt: new Date().toISOString(), lastFailureCode: 'invalid_grant refresh_token=SECRET-HEALTH',
@@ -129,6 +130,9 @@ test('doctor OAuth diagnostics are allowlisted in normal, JSON and share modes',
       'token2xx', 'token4xx', 'token5xx', 'tokenRequests', 'version'].sort());
     assert.equal(fullOAuth.tokenEndpoint.token4xx, 1);
     assert.equal(fullOAuth.tokenEndpoint.lastFailureCode, 'unclassified');
+    const fullState = (full.oauth as { state: { valid: boolean; error: string | null } }).state;
+    assert.equal(fullState.valid, false);
+    assert.equal(fullState.error, 'unreadable_or_invalid', 'a parse error that could quote oauth.json is classified');
     assert.equal(fullOAuth.tokenEndpoint.lastSuccessAt, null, 'a non-timestamp value is dropped');
     assert.match(String(fullOAuth.tokenEndpoint.lastFailureAt), /^\d{4}-\d{2}-\d{2}T/);
   } finally {
