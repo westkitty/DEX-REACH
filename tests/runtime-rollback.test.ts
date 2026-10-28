@@ -9,11 +9,13 @@ import {
   restoreRuntimeRollbackSnapshot,
   runtimeTreeSha256,
   validateRuntimeRollbackSnapshot,
+  verifyTrustedLegacyRuntimeRelease,
   verifiedOnlineNodeCount,
   type RuntimeRollbackService
 } from '../scripts/lib/runtime-rollback.js';
 import { reloadLaunchdService } from '../scripts/lib/service-reloader.js';
 import type { LaunchctlRunner } from '../scripts/lib/launchctl.js';
+import { verifyRuntimeRelease } from '../scripts/lib/runtime-release.js';
 
 const labels = ['coordinator', 'worker', 'gateway', 'node', 'oauth-canary']
   .map(name => `com.stinkyweasel.dex-reach.${name}`);
@@ -67,6 +69,46 @@ async function release(root: string): Promise<void> {
     hashes[file] = crypto.createHash('sha256').update(value).digest('hex');
   }
   await write(path.join(packageRoot, 'source-hashes.json'), JSON.stringify(hashes));
+}
+
+async function markAsLegacyAndTrust(f: Awaited<ReturnType<typeof fixture>>): Promise<string> {
+  await fs.rm(path.join(f.previousRoot, 'dist/src/node/compat-runtime'), { recursive: true, force: true });
+  await write(path.join(f.previousRoot, 'package.json'), JSON.stringify({ name: 'dex-reach', version: '0.3.2' }));
+  await write(path.join(f.previousRoot, 'package-lock.json'), JSON.stringify({
+    name: 'dex-reach', version: '0.3.2', lockfileVersion: 3,
+    packages: { '': { name: 'dex-reach', version: '0.3.2' } }
+  }));
+  const digest = await runtimeTreeSha256(f.previousRoot);
+  const olderId = '0.3.2-older-retained';
+  const snapshot = {
+    schemaVersion: 1,
+    candidateReleaseId: f.previousId,
+    candidateReleaseSha256: digest,
+    previousReleaseId: olderId,
+    preparedAt: new Date(0).toISOString(),
+    previousReleaseSha256: 'a'.repeat(64),
+    services: f.services.map(service => {
+      const oldText = plist(service.label, olderId, path.join(f.stateDir, 'runtime', 'releases', olderId));
+      return { label: service.label, file: {
+        path: service.target,
+        previousBase64: Buffer.from(oldText).toString('base64'),
+        previousSha256: crypto.createHash('sha256').update(oldText).digest('hex'),
+        candidateSha256: 'b'.repeat(64)
+      } };
+    }),
+    workerConfig: {
+      path: f.workerConfigPath,
+      previousBase64: Buffer.from(f.previousConfig).toString('base64'),
+      previousSha256: crypto.createHash('sha256').update(f.previousConfig).digest('hex'),
+      candidateSha256: 'c'.repeat(64)
+    }
+  };
+  const directory = path.join(f.stateDir, 'runtime', 'rollback', f.previousId);
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  await fs.chmod(directory, 0o700);
+  await fs.writeFile(path.join(directory, 'snapshot.json'), `${JSON.stringify(snapshot)}\n`, { mode: 0o600 });
+  await fs.chmod(path.join(directory, 'snapshot.json'), 0o600);
+  return digest;
 }
 
 async function fixture(workerLocation: 'inside' | 'sibling' = 'inside'): Promise<{
@@ -251,6 +293,22 @@ test('partial failed activation can be restored while unrelated persistent state
   } finally { await fs.rm(f.base, { recursive: true, force: true }); }
 });
 
+test('rollback remains available when the installed candidate tree is damaged', async () => {
+  const f = await fixture();
+  try {
+    const snapshotPath = await f.snapshot();
+    for (const service of f.services) await write(service.target, f.candidatePlists[service.label]!);
+    await write(f.workerConfigPath, f.candidateConfig);
+    await write(path.join(f.candidateRoot, 'dist/src/gateway/main.js'), 'damaged after install');
+    const input = { snapshotPath, stateDir: f.stateDir, agentsDir: f.agentsDir,
+      workerConfigPath: f.workerConfigPath, services: f.services };
+    assert.equal(await validateRuntimeRollbackSnapshot(input), f.previousId);
+    assert.equal(await restoreRuntimeRollbackSnapshot(input), f.previousId);
+    assert.deepEqual(await Promise.all(f.services.map(service => fs.readFile(service.target, 'utf8'))),
+      f.services.map(service => f.previousPlists.get(service.label)));
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
 test('ambiguous service activation after restore is recoverable by repeating rollback and reload', async () => {
   const f = await fixture();
   try {
@@ -372,5 +430,129 @@ test('modified prior runtime fails its integrity check before restoration', asyn
     }), /previous runtime integrity check failed/);
     const first = f.services[0]!;
     assert.equal(await fs.readFile(first.target, 'utf8'), f.candidatePlists[first.label]);
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
+test('authenticated pre-native legacy release passes recovery verification while strict candidate verification rejects it', async () => {
+  const f = await fixture();
+  try {
+    const digest = await markAsLegacyAndTrust(f);
+    await assert.rejects(verifyRuntimeRelease(f.previousRoot), /missing dist\/src\/node\/compat-runtime\/package\.json/);
+    await verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest });
+    assert.equal(await runtimeTreeSha256(f.previousRoot), digest);
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
+test('legacy previous release participates in snapshot preparation and read-only restore preflight', async () => {
+  const f = await fixture();
+  try {
+    const digest = await markAsLegacyAndTrust(f);
+    const snapshotPath = await f.snapshot();
+    const snapshot = JSON.parse(await fs.readFile(snapshotPath, 'utf8')) as { previousReleaseId: string; previousReleaseSha256: string };
+    assert.equal(snapshot.previousReleaseId, f.previousId);
+    assert.equal(snapshot.previousReleaseSha256, digest);
+    for (const service of f.services) await write(service.target, f.candidatePlists[service.label]!);
+    await write(f.workerConfigPath, f.candidateConfig);
+    assert.equal(await validateRuntimeRollbackSnapshot({ snapshotPath, stateDir: f.stateDir, agentsDir: f.agentsDir,
+      workerConfigPath: f.workerConfigPath, services: f.services }), f.previousId);
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
+test('legacy recovery refuses unknown identity, missing or public provenance, and mismatched expected digest', async () => {
+  const f = await fixture();
+  try {
+    const digest = await markAsLegacyAndTrust(f);
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: '0.3.2-fabricated', expectedTreeSha256: digest }), /provenance is missing/);
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: 'd'.repeat(64) }), /identity or digest mismatch/);
+    const snapshotPath = path.join(f.stateDir, 'runtime/rollback', f.previousId, 'snapshot.json');
+    await fs.chmod(snapshotPath, 0o644);
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /provenance is not owner-private/);
+    await fs.rm(snapshotPath);
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /provenance is missing/);
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
+test('legacy recovery rejects tampered files, changed modes, missing runtime entry points, and escaping links', async () => {
+  const f = await fixture();
+  try {
+    const digest = await markAsLegacyAndTrust(f);
+    const main = path.join(f.previousRoot, 'dist/src/node/main.js');
+    await write(main, 'changed');
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /integrity check failed/);
+    await write(main, 'fixture:dist/src/node/main.js');
+    await fs.chmod(main, 0o600);
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /integrity check failed/);
+    await fs.chmod(main, 0o644);
+    await fs.rm(path.join(f.previousRoot, 'dist/src/gateway/main.js'));
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /missing dist\/src\/gateway\/main\.js/);
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+
+  const linked = await fixture();
+  try {
+    const digest = await markAsLegacyAndTrust(linked);
+    const external = path.join(linked.base, 'external.txt');
+    await write(external, 'outside');
+    await fs.symlink(external, path.join(linked.previousRoot, 'escape'));
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: linked.stateDir, releaseId: linked.previousId, expectedTreeSha256: digest }), /link escapes its release/);
+  } finally { await fs.rm(linked.base, { recursive: true, force: true }); }
+});
+
+test('partial native packaging cannot use the legacy recovery path', async () => {
+  const f = await fixture();
+  try {
+    const digest = await markAsLegacyAndTrust(f);
+    const packageRoot = path.join(f.previousRoot, 'dist/src/node/compat-runtime');
+    await write(path.join(packageRoot, 'runtime/index.js'), 'partial');
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /partial native compatibility package/);
+    await fs.rm(packageRoot, { recursive: true, force: true });
+    await write(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@dex-reach/native-backend' }));
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /partial native compatibility package/);
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
+test('legacy package lock must match a supported historical format', async () => {
+  const f = await fixture();
+  try {
+    const digest = await markAsLegacyAndTrust(f);
+    await write(path.join(f.previousRoot, 'package-lock.json'), JSON.stringify({
+      name: 'dex-reach', version: '0.3.2', lockfileVersion: 4
+    }));
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest }), /package identity does not match/);
+  } finally { await fs.rm(f.base, { recursive: true, force: true }); }
+});
+
+test('malformed provenance and a snapshot bound to the wrong previous release fail before restoration writes', async () => {
+  const malformed = await fixture();
+  try {
+    const digest = await markAsLegacyAndTrust(malformed);
+    const anchor = path.join(malformed.stateDir, 'runtime/rollback', malformed.previousId, 'snapshot.json');
+    await fs.writeFile(anchor, '{broken');
+    await assert.rejects(verifyTrustedLegacyRuntimeRelease({ stateDir: malformed.stateDir, releaseId: malformed.previousId, expectedTreeSha256: digest }), /provenance is invalid/);
+  } finally { await fs.rm(malformed.base, { recursive: true, force: true }); }
+
+  const wrong = await fixture();
+  try {
+    const snapshotPath = await wrong.snapshot();
+    const raw = JSON.parse(await fs.readFile(snapshotPath, 'utf8')) as { previousReleaseId: string };
+    raw.previousReleaseId = '0.3.2-other-release';
+    await fs.writeFile(snapshotPath, `${JSON.stringify(raw)}\n`);
+    const before = await Promise.all(wrong.services.map(service => fs.readFile(service.target, 'utf8')));
+    await assert.rejects(validateRuntimeRollbackSnapshot({ snapshotPath, stateDir: wrong.stateDir, agentsDir: wrong.agentsDir,
+      workerConfigPath: wrong.workerConfigPath, services: wrong.services }), /saved LaunchAgent integrity mismatch/);
+    assert.deepEqual(await Promise.all(wrong.services.map(service => fs.readFile(service.target, 'utf8'))), before);
+  } finally { await fs.rm(wrong.base, { recursive: true, force: true }); }
+});
+
+test('repeated legacy verification is deterministic and does not mutate the release or owner files', async () => {
+  const f = await fixture();
+  try {
+    const digest = await markAsLegacyAndTrust(f);
+    const before = await runtimeTreeSha256(f.previousRoot);
+    const agentsBefore = await Promise.all(f.services.map(service => fs.readFile(service.target)));
+    const configBefore = await fs.readFile(f.workerConfigPath);
+    for (let i = 0; i < 3; i++) await verifyTrustedLegacyRuntimeRelease({ stateDir: f.stateDir, releaseId: f.previousId, expectedTreeSha256: digest });
+    assert.equal(await runtimeTreeSha256(f.previousRoot), before);
+    assert.deepEqual(await Promise.all(f.services.map(service => fs.readFile(service.target))), agentsBefore);
+    assert.deepEqual(await fs.readFile(f.workerConfigPath), configBefore);
   } finally { await fs.rm(f.base, { recursive: true, force: true }); }
 });

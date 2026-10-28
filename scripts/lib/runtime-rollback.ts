@@ -39,6 +39,19 @@ const REQUIRED_LABELS = [
   'com.stinkyweasel.dex-reach.oauth-canary'
 ].sort();
 
+const REQUIRED_LEGACY_RUNTIME_ENTRIES = [
+  'package.json',
+  'package-lock.json',
+  'dist/src/coordinator/main.js',
+  'dist/src/worker/main.js',
+  'dist/src/gateway/main.js',
+  'dist/src/node/main.js',
+  'dist/scripts/oauth-canary.js',
+  'dist/scripts/reload-launchagents.js',
+  'node_modules/@modelcontextprotocol/client/package.json'
+] as const;
+const LEGACY_PACKAGE_LOCK_FORMATS: Record<string, number> = { '0.3.2': 3, '0.4.0': 3 };
+
 function safeReleaseId(value: string): string {
   if (!/^[a-z0-9][a-z0-9._-]{0,119}$/.test(value)) throw new Error('invalid runtime release id');
   return value;
@@ -179,6 +192,98 @@ async function readOptional(file: string): Promise<Buffer | null> {
   }
 }
 
+async function pathExists(file: string): Promise<boolean> {
+  try { await fs.lstat(file); return true; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+}
+
+async function assertRealDirectory(file: string, message: string): Promise<void> {
+  let stat: Awaited<ReturnType<typeof fs.lstat>>;
+  try { stat = await fs.lstat(file); }
+  catch { throw new Error(message); }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(message);
+}
+
+/**
+ * Recover only a legacy release whose identity and complete-tree digest were recorded when it
+ * was installed. The release's own version-1 rollback snapshot is the independent local anchor;
+ * the digest is never learned from the tree being checked. New candidates must use the strict
+ * verifier in runtime-release.ts and cannot enter through this function.
+ */
+export async function verifyTrustedLegacyRuntimeRelease(input: {
+  stateDir: string;
+  releaseId: string;
+  expectedTreeSha256: string;
+}): Promise<void> {
+  const releaseId = safeReleaseId(input.releaseId);
+  if (!/^[a-f0-9]{64}$/.test(input.expectedTreeSha256)) throw new Error('invalid trusted legacy runtime digest');
+  const releaseRoot = path.resolve(input.stateDir, 'runtime', 'releases', releaseId);
+  const runtimeRoot = path.resolve(input.stateDir, 'runtime');
+  const releasesRoot = path.join(runtimeRoot, 'releases');
+  if (path.basename(releaseRoot) !== releaseId || path.dirname(releaseRoot) !== releasesRoot) {
+    throw new Error('legacy runtime path does not match its release identity');
+  }
+  await assertRealDirectory(runtimeRoot, 'legacy runtime state path is not a real directory');
+  await assertRealDirectory(releasesRoot, 'legacy runtime release parent is not a real directory');
+
+  const recordedDigest = await recordedCandidateDigest(input.stateDir, releaseId);
+  if (recordedDigest !== input.expectedTreeSha256) throw new Error('trusted legacy runtime identity or digest mismatch');
+
+  let rootStat: Awaited<ReturnType<typeof fs.lstat>>;
+  try { rootStat = await fs.lstat(releaseRoot); }
+  catch { throw new Error('legacy runtime release directory is missing'); }
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('legacy runtime release path is not a real directory');
+
+  for (const entry of REQUIRED_LEGACY_RUNTIME_ENTRIES) {
+    const parts = entry.split('/');
+    let current = releaseRoot;
+    for (const [index, part] of parts.entries()) {
+      current = path.join(current, part);
+      let stat: Awaited<ReturnType<typeof fs.lstat>>;
+      try { stat = await fs.lstat(current); }
+      catch { throw new Error(`legacy runtime release is incomplete: missing ${entry}`); }
+      if (stat.isSymbolicLink()) throw new Error(`legacy runtime required path contains a link: ${entry}`);
+      if (index === parts.length - 1 ? !stat.isFile() : !stat.isDirectory()) {
+        throw new Error(`legacy runtime release has an invalid required path: ${entry}`);
+      }
+    }
+  }
+
+  const packageJson = JSON.parse(await fs.readFile(path.join(releaseRoot, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown };
+  const packageLock = JSON.parse(await fs.readFile(path.join(releaseRoot, 'package-lock.json'), 'utf8')) as { name?: unknown; version?: unknown; lockfileVersion?: unknown };
+  const legacyVersion = releaseId.split('-', 1)[0] ?? '';
+  if (packageJson.name !== 'dex-reach' || packageJson.version !== legacyVersion ||
+      packageLock.name !== 'dex-reach' || packageLock.version !== legacyVersion ||
+      LEGACY_PACKAGE_LOCK_FORMATS[legacyVersion] !== packageLock.lockfileVersion) {
+    throw new Error('legacy runtime package identity does not match its release id');
+  }
+  if (await pathExists(path.join(releaseRoot, 'dist/src/node/compat-runtime'))) {
+    throw new Error('legacy runtime has a partial native compatibility package; strict verification required');
+  }
+
+  const [realRoot, realReleasesDirectory] = await Promise.all([
+    fs.realpath(releaseRoot), fs.realpath(path.dirname(releaseRoot))
+  ]);
+  if (realRoot !== path.join(realReleasesDirectory, releaseId)) throw new Error('legacy runtime release path resolves outside its recorded identity');
+  const verifyLinks = async (directory: string): Promise<void> => {
+    for (const name of await fs.readdir(directory)) {
+      const file = path.join(directory, name);
+      const stat = await fs.lstat(file);
+      if (stat.isSymbolicLink()) {
+        const target = await fs.realpath(file).catch(() => { throw new Error(`legacy runtime contains a dangling link: ${path.relative(releaseRoot, file)}`); });
+        if (target !== realRoot && !target.startsWith(realRoot + path.sep)) {
+          throw new Error(`legacy runtime link escapes its release: ${path.relative(releaseRoot, file)}`);
+        }
+      } else if (stat.isDirectory()) await verifyLinks(file);
+    }
+  };
+  await verifyLinks(releaseRoot);
+
+  if (await runtimeTreeSha256(releaseRoot) !== input.expectedTreeSha256) {
+    throw new Error('legacy runtime integrity check failed');
+  }
+}
+
 /** Capture the exact active LaunchAgents and generated worker config before activation mutates them. */
 export async function prepareRuntimeRollbackSnapshot(input: {
   stateDir: string;
@@ -219,8 +324,16 @@ export async function prepareRuntimeRollbackSnapshot(input: {
   if (previousReleaseId === candidateId) throw new Error('candidate and previous runtime release ids are identical');
   const previousRoot = path.resolve(input.stateDir, 'runtime', 'releases', previousReleaseId);
   for (const service of previous) releaseIdFromPlist(service.bytes.toString('utf8'), service.label, previousRoot);
-  await verifyRuntimeRelease(previousRoot);
-  const previousReleaseSha256 = await runtimeTreeSha256(previousRoot);
+  if (!await pathExists(previousRoot)) throw new Error('runtime release is incomplete: previous release directory is missing');
+  let previousReleaseSha256: string;
+  if (await pathExists(path.join(previousRoot, 'dist/src/node/compat-runtime'))) {
+    await verifyRuntimeRelease(previousRoot);
+    previousReleaseSha256 = await runtimeTreeSha256(previousRoot);
+  } else {
+    const recorded = await recordedCandidateDigest(input.stateDir, previousReleaseId);
+    await verifyTrustedLegacyRuntimeRelease({ stateDir: input.stateDir, releaseId: previousReleaseId, expectedTreeSha256: recorded });
+    previousReleaseSha256 = recorded;
+  }
 
   const configPath = await checkedWorkerConfigPath(input.workerConfigPath, input.stateDir);
   const candidateConfig = Buffer.from(input.candidateWorkerConfig);
@@ -288,6 +401,29 @@ function validateSnapshot(value: unknown): RuntimeRollbackSnapshot {
   return snapshot;
 }
 
+async function recordedCandidateDigest(stateDir: string, releaseId: string): Promise<string> {
+  const snapshotDirectory = path.resolve(stateDir, 'runtime', 'rollback', releaseId);
+  await assertRealDirectory(path.resolve(stateDir, 'runtime'), 'trusted legacy runtime state path is not a real directory');
+  await assertRealDirectory(path.resolve(stateDir, 'runtime', 'rollback'), 'trusted legacy runtime provenance parent is not a real directory');
+  const snapshotPath = path.join(snapshotDirectory, 'snapshot.json');
+  let directoryStat: Awaited<ReturnType<typeof fs.lstat>>;
+  let snapshotStat: Awaited<ReturnType<typeof fs.lstat>>;
+  try {
+    [directoryStat, snapshotStat] = await Promise.all([fs.lstat(snapshotDirectory), fs.lstat(snapshotPath)]);
+  } catch { throw new Error('trusted legacy runtime provenance is missing'); }
+  const ownerUid = process.getuid?.();
+  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink() || (directoryStat.mode & 0o777) !== 0o700 ||
+      (ownerUid !== undefined && directoryStat.uid !== ownerUid) || !snapshotStat.isFile() || snapshotStat.isSymbolicLink() ||
+      (snapshotStat.mode & 0o777) !== 0o600 || (ownerUid !== undefined && snapshotStat.uid !== ownerUid)) {
+    throw new Error('trusted legacy runtime provenance is not owner-private');
+  }
+  let snapshot: RuntimeRollbackSnapshot;
+  try { snapshot = validateSnapshot(JSON.parse(await fs.readFile(snapshotPath, 'utf8')) as unknown); }
+  catch { throw new Error('trusted legacy runtime provenance is invalid'); }
+  if (snapshot.candidateReleaseId !== releaseId) throw new Error('trusted legacy runtime identity mismatch');
+  return snapshot.candidateReleaseSha256;
+}
+
 export type RestoreRuntimeRollbackInput = {
   snapshotPath: string;
   stateDir: string;
@@ -313,8 +449,16 @@ async function preflightRestore(input: RestoreRuntimeRollbackInput): Promise<Res
   const labels = input.services.map(service => service.label).sort();
   if (labels.join('\n') !== REQUIRED_LABELS.join('\n')) throw new Error('rollback requires the exact five DEX LaunchAgents');
   const previousRoot = path.resolve(input.stateDir, 'runtime', 'releases', snapshot.previousReleaseId);
-  await verifyRuntimeRelease(previousRoot);
-  if (await runtimeTreeSha256(previousRoot) !== snapshot.previousReleaseSha256) throw new Error('previous runtime integrity check failed');
+  if (await pathExists(path.join(previousRoot, 'dist/src/node/compat-runtime'))) {
+    await verifyRuntimeRelease(previousRoot);
+    if (await runtimeTreeSha256(previousRoot) !== snapshot.previousReleaseSha256) throw new Error('previous runtime integrity check failed');
+  } else {
+    await verifyTrustedLegacyRuntimeRelease({
+      stateDir: input.stateDir,
+      releaseId: snapshot.previousReleaseId,
+      expectedTreeSha256: snapshot.previousReleaseSha256
+    });
+  }
   for (const { label, file } of snapshot.services) releaseIdFromPlist(Buffer.from(file.previousBase64, 'base64').toString('utf8'), label, previousRoot);
 
   const savedByLabel = new Map(snapshot.services.map(item => [item.label, item.file]));

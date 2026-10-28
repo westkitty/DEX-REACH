@@ -68,6 +68,45 @@ test('immutable runtime release survives source dist and node_modules replacemen
   }
 });
 
+test('candidate reuse cannot treat a legacy-shaped immutable release as a valid new candidate', async () => {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-runtime-reuse-legacy-'));
+  const source = path.join(base, 'checkout');
+  const state = path.join(base, 'state');
+  try {
+    const entries: Record<string, string> = {
+      'dist/src/coordinator/main.js': 'coordinator',
+      'dist/src/worker/main.js': 'worker',
+      'dist/src/gateway/main.js': 'gateway',
+      'dist/src/node/main.js': 'node',
+      'dist/scripts/oauth-canary.js': 'canary',
+      'dist/scripts/reload-launchagents.js': 'reload',
+      'node_modules/@modelcontextprotocol/client/package.json': '{"name":"@modelcontextprotocol/client","version":"2.0.0"}',
+      'package.json': '{"name":"dex-reach","version":"0.4.0"}',
+      'package-lock.json': '{"name":"dex-reach","version":"0.4.0","lockfileVersion":3}'
+    };
+    for (const [file, text] of Object.entries(entries)) await write(path.join(source, file), text);
+    const nativeRoot = path.join(source, 'dist/src/node/compat-runtime');
+    const nativeFiles: Record<string, string> = {
+      'package.json': JSON.stringify({ name: '@dex-reach/native-backend', version: 'test' }),
+      'runtime-files.json': JSON.stringify(['index.js', 'server.js']),
+      'LICENSE': 'test license', 'NOTICE.md': 'test notice',
+      'runtime/index.js': 'test entry', 'runtime/server.js': 'test server'
+    };
+    const hashes: Record<string, string> = {};
+    for (const [file, text] of Object.entries(nativeFiles)) {
+      await write(path.join(nativeRoot, file), text);
+      hashes[file] = crypto.createHash('sha256').update(text).digest('hex');
+    }
+    await write(path.join(nativeRoot, 'source-hashes.json'), JSON.stringify(hashes));
+
+    const release = await stageRuntimeRelease(source, state, '0.4.0-legacy-shaped-candidate');
+    await fs.rm(path.join(release, 'dist/src/node/compat-runtime'), { recursive: true, force: true });
+    await assert.rejects(stageRuntimeRelease(source, state, '0.4.0-legacy-shaped-candidate'), /missing dist\/src\/node\/compat-runtime\/package\.json/);
+  } finally {
+    await fs.rm(base, { recursive: true, force: true });
+  }
+});
+
 test('runtime build stages an intact native backend and refuses damaged assets before activation', { timeout: 90000 }, async () => {
   const base = path.join(os.homedir(), `.dex-runtime-native-stage-${process.pid}-${crypto.randomUUID()}`);
   await fs.mkdir(base);
