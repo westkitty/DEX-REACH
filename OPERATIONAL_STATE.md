@@ -1,7 +1,7 @@
 # DEX//REACH Operational State
 
 <!-- operational-state:metadata
-{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":103,"last_updated":"2026-10-24T14:30:00.000Z","current_baseline":{"identity":"0.4.0 source repair 2a8632e4f62175b0c76fc49899a1784b3a79d9a6 merged via PR20 into main 22e6960cc531990db16fe9f67a7d3fc822adc9c8; exact PR and main push validation/reproducible-build/runtime-proof/CodeQL passed. Alert13 fixed; main SARIF retains only six unchanged historical findings. Focused98/full938 and local release gates passed. Documentation receipt publication is separate; installed acceptance remains unverified. Historical live-state test incident remains preserved.","state":"source-mainline-verified-runtime-unverified","last_verified":"2026-10-11T19:06:56.182164Z"},"scope_boundaries":["2026-10-11 continuation authorizes 0.4.0 source development, isolated validation, ordinary push/PR/mainline integration and maintenance handoff. Installation, backup capture, service changes, live chaos, credentials, policy, Big Mac and separate DEX remain unauthorized. One initial test isolation violation wrote a live activity row; untouched owner-state preservation cannot be claimed."],"linked_parent_state":null}
+{"schema_version":1,"project_id":"dex-reach","project_name":"DEX//REACH","project_root":".","artifact_path":"","state_revision":107,"last_updated":"2026-10-27T23:54:08.000Z","current_baseline":{"identity":"C15 source repair commit 063c2b784f3e in PR #24; local verification passed; exact PR head a0773572ba4f56f8226e0d663a2692a9526ed083 passed hosted checks; source PR remains open; installed runtime remains older and unverified against this source","state":"c15-pr-validated-runtime-unverified","last_verified":"2026-10-27T23:54:08.000Z"},"scope_boundaries":["2026-10-11 continuation authorizes 0.4.0 source development, isolated validation, ordinary push/PR/mainline integration and maintenance handoff. Installation, backup capture, service changes, live chaos, credentials, policy, Big Mac and separate DEX remain unauthorized. One initial test isolation violation wrote a live activity row; untouched owner-state preservation cannot be claimed.","C15 source repair is authorized for regression, local verification, and reviewed publication. OAuth recovery, maintenance window, backup capture/restore, installation, chaos, rollback/forward, service or credential changes remain separately gated by the consolidated owner authorization."],"linked_parent_state":null}
 -->
 
 ## 1. Project Identity and Scope
@@ -11,6 +11,15 @@ DEX//REACH is a secure AI-native remote-computing control plane. It provides use
 Canonical public repository: `https://github.com/westkitty/DEX-REACH`.
 
 ## 2. Current Baseline
+
+**2026-10-27 — C15 immutable runtime staging repair (PR #24 published and exact-head checks passed; runtime acceptance pending).**
+
+- The installer now packages the allowlisted native compatibility backend inside the immutable release after TypeScript compilation. Release verification checks required metadata, complete inventory, asset hashes, and package containment before activation.
+- A clean-source staging regression exercises the production builder, rejects missing or corrupted backend assets before adapter admission, starts the staged backend with the 22-tool surface, and reads a file from an isolated temporary root. Rollback fixtures now include a minimal integrity-verified backend package.
+- The focused staging regression passed 6/6 and rollback regressions passed 15/15. After updating rollback fixtures for the stricter package contract, `npm run verify` passed: typecheck, all 42 protected invariants, the complete regression suite, production dependency audit and native backend probe (22 tools). An earlier standalone PDF test transient was isolated and passed on retry.
+- `npm run verify:clean-build` passed on source commit `063c2b784f3e`: 324 artifacts rebuilt byte-for-byte from tracked source in a different directory with a fresh dependency install.
+- PR #24 is open for review. Its exact head `a0773572ba4f56f8226e0d663a2692a9526ed083` passed hosted `validate`, `runtime-proof`, `reproducible-build`, `analyze`, and `CodeQL`; local and remote `main` remain at base `a01c026a521f8442084383f7425b4103a66035df`. Six historical high-severity CodeQL alerts remain open in unchanged OAuth-server and CLI files; passing CodeQL does not close them. GitHub PR #24 is authoritative for the latest head and current check status.
+- No installed runtime, service, credential, owner task, backup, or policy was changed. At preflight the installed release was `0.4.0-274ba16e058e-2d5b454853af`; hosted proof, current backup/restore, OAuth recovery and human acceptance remain unverified for this candidate.
 
 **2026-10-10 — C14 source after service recovery (`81f3a50`, all five hosted checks PASS on exact head).**
 
