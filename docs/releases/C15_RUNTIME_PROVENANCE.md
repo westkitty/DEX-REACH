@@ -28,4 +28,8 @@ A release can be the previous release of a later candidate on two paths. If it i
 
 Residual risk, not closed by this change: unpinned *native-layout* previous releases still bind their digest from the install-time measurement in the snapshot, as on `main` before PR #26. Their per-asset native manifest is in-tree. Pinning each installed release closes this as releases age. Making the pin mandatory for every previous release is a deliberate future decision, because it would also govern historical C13 maintenance tooling.
 
+The pin governs the retained *tree*. Restored LaunchAgent bodies are checked only for self-consistency: the exact label, a working directory inside the pinned release, and the hash recorded in the snapshot. Someone with the owner's uid can already write LaunchAgents directly, so this grants nothing new. It does mean the pin authenticates the runtime bytes, not the whole rollback transaction.
+
+The tool refuses any commit that is not reachable from `origin/main`, before installing or building, because `npm ci` and the commit's builder execute that commit's code. Exit 0 means the build completed and no requested comparison failed. With an unpinned ID and no `--compare`, nothing was compared, and the receipt shows `pinned: null` and `compared: null`. Exit 1 means a comparison mismatched; exit 2 means the run was refused or failed.
+
 The receipt the tool prints is labelled unsigned (`"signature": null`). It is a reproducible measurement, not an attestation, and no signing key was created or committed.

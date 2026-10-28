@@ -46,8 +46,14 @@ async function main(): Promise<void> {
     throw new Error(`only ${(available / 1024 ** 3).toFixed(2)} GiB free; reproduction needs 1 GiB above the 2 GiB reserve`);
   }
 
+  // npm ci and the commit's own builder execute that commit's code, so only reviewed history may run.
   const onMainline = await run('git', ['merge-base', '--is-ancestor', sourceSha, 'origin/main'], repoRoot).then(() => true, () => false);
+  if (!onMainline) throw new Error(`${sourceSha} is not reachable from origin/main; fetch origin, or reproduce only reviewed commits`);
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-reproduce-'));
+  // An interrupted 1-2 GiB build must not linger and starve the next run's free-space check.
+  const abandon = () => { void fs.rm(work, { recursive: true, force: true }).finally(() => process.exit(130)); };
+  process.once('SIGINT', abandon);
+  process.once('SIGTERM', abandon);
   try {
     const source = path.join(work, 'source');
     await fs.mkdir(source);
@@ -97,8 +103,10 @@ async function main(): Promise<void> {
     const text = `${JSON.stringify(receipt, null, 2)}\n`;
     if (out) await fs.writeFile(out, text, { mode: 0o600 });
     process.stdout.write(text);
-    if (receipt.comparisons.pinned?.match === false || receipt.comparisons.compared?.match === false || !onMainline) process.exitCode = 1;
+    if (receipt.comparisons.pinned?.match === false || receipt.comparisons.compared?.match === false) process.exitCode = 1;
   } finally {
+    process.off('SIGINT', abandon);
+    process.off('SIGTERM', abandon);
     await fs.rm(work, { recursive: true, force: true });
   }
 }
