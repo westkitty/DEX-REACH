@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/server';
 import { createGatewayExpressApp } from './http-app.js';
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
-import { createOAuthRouter, oauthProtectedResourceMetadataUrl } from './oauth-server.js';
+import { createConsentRouter, createOAuthRouter, oauthProtectedResourceMetadataUrl } from './oauth-server.js';
 import { requireBearerAuth } from '@modelcontextprotocol/express';
 import { loadLocalSecrets } from '../shared/local-env.js';
 import { AuditLog } from '../shared/audit.js';
@@ -94,14 +94,7 @@ app.post('/node/enroll', express.json({ limit: '16kb' }), async (req, res) => {
   }
 });
 
-app.post('/dex/approve', async (req, res) => {
-  try {
-    const redirect = await oauth.approve(String(req.body.ticket || ''), String(req.body.username || ''), String(req.body.password || ''));
-    res.redirect(redirect);
-  } catch {
-    res.status(401).type('text').send('Authorization denied.');
-  }
-});
+app.use(createConsentRouter(oauth));
 
 app.use(createOAuthRouter({
   provider: oauth,

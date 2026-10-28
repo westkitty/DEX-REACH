@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import express, { type Request, type Response } from 'express';
+import { ipKeyGenerator, rateLimit, type Store } from 'express-rate-limit';
 import { OAuthError, OAuthErrorCode, type OAuthClientInformationFull } from '@modelcontextprotocol/server';
 import { ReachOAuthProvider, OFFLINE_ACCESS_SCOPE, REQUIRED_RESOURCE_SCOPE, SUPPORTED_SCOPES } from './auth.js';
 import { InvalidClientError, InvalidGrantError, InvalidRequestError, InvalidScopeError, UnsupportedGrantTypeError } from './oauth-types.js';
@@ -23,6 +24,7 @@ export type OAuthRouterOptions = {
   resourceUrl: URL;
   health?: OAuthHealthRecorder;
   fetchClientMetadata?: typeof fetch;
+  rateLimitStore?: (route: OAuthRateLimitedRoute, tier: 'client' | 'route') => Store;
 };
 
 function oauthJson(res: Response, status: number, error: OAuthError): void {
@@ -34,6 +36,7 @@ function oauthJson(res: Response, status: number, error: OAuthError): void {
 }
 
 function oauthStatus(error: OAuthError): number {
+  if (error.code === OAuthErrorCode.TemporarilyUnavailable) return 503;
   return error.code === OAuthErrorCode.InvalidClient ? 401 : 400;
 }
 
@@ -141,21 +144,118 @@ function authorizeError(res: Response, redirectUri: string | null, state: string
   res.redirect(redirect.toString());
 }
 
-function installRateLimit(router: express.Router): void {
-  const windows = new Map<string, { started: number; count: number }>();
-  router.use((req, res, next) => {
+export type OAuthRateLimitedRoute = 'discovery' | 'register' | 'authorize' | 'approve' | 'token' | 'revoke';
+
+/**
+ * Per-minute admission budgets for the public OAuth surface. `client` is checked first, so one address
+ * is stopped by its own budget and can never spend anyone else's. `route` is a shared ceiling, used
+ * only where the aggregate itself is the risk: owner-password guesses at the consent form and
+ * persisted registrations. Elsewhere a shared ceiling would let a few addresses lock out ChatGPT's
+ * refresh and the canary, so there is none. Observed traffic is a handful of /token calls per six-hour
+ * canary cycle plus occasional ChatGPT refreshes; client budgets leave an order of magnitude over that.
+ */
+export const OAUTH_RATE_LIMITS: Readonly<Record<OAuthRateLimitedRoute, Readonly<{ client: number; route: number | null }>>> = Object.freeze({
+  discovery: Object.freeze({ client: 120, route: null }),
+  register: Object.freeze({ client: 5, route: 20 }),
+  authorize: Object.freeze({ client: 30, route: null }),
+  approve: Object.freeze({ client: 10, route: 30 }),
+  token: Object.freeze({ client: 60, route: null }),
+  revoke: Object.freeze({ client: 30, route: null })
+});
+const OAUTH_RATE_WINDOW_MS = 60_000;
+/** Distinct client keys one route tracks per window; past this, unseen clients are refused until it resets. */
+export const OAUTH_CLIENT_KEYS_PER_WINDOW = 10_000;
+
+/**
+ * Fixed-window counter with a hard ceiling on distinct keys. express-rate-limit's MemoryStore expires
+ * keys by time but admits any number within a window, so a high-cardinality burst could still grow
+ * it. Here an unseen key past the ceiling is answered as over its limit and never stored; keys already
+ * counted keep working.
+ */
+export class BoundedWindowStore implements Store {
+  readonly localKeys = true;
+  private windowMs = OAUTH_RATE_WINDOW_MS;
+  private hits = new Map<string, number>();
+  private resetAt = 0;
+
+  constructor(private readonly maxKeys = OAUTH_CLIENT_KEYS_PER_WINDOW) {}
+
+  init(options: { windowMs: number }): void { this.windowMs = options.windowMs; }
+
+  private roll(): Date {
     const now = Date.now();
-    const key = `${req.ip || 'unknown'}:${req.path}`;
-    const current = windows.get(key);
-    const entry = !current || now - current.started >= 60_000 ? { started: now, count: 0 } : current;
-    entry.count += 1;
-    windows.set(key, entry);
-    if (entry.count > 300) {
-      res.status(429).json({ error: 'temporarily_unavailable', error_description: 'OAuth endpoint rate limit exceeded' });
-      return;
+    if (now >= this.resetAt) { this.hits = new Map(); this.resetAt = now + this.windowMs; }
+    return new Date(this.resetAt);
+  }
+
+  get size(): number { this.roll(); return this.hits.size; }
+
+  async get(key: string): Promise<{ totalHits: number; resetTime: Date } | undefined> {
+    const resetTime = this.roll();
+    const totalHits = this.hits.get(key);
+    return totalHits === undefined ? undefined : { totalHits, resetTime };
+  }
+
+  async increment(key: string): Promise<{ totalHits: number; resetTime: Date }> {
+    const resetTime = this.roll();
+    const current = this.hits.get(key);
+    if (current === undefined && this.hits.size >= this.maxKeys) return { totalHits: Number.MAX_SAFE_INTEGER, resetTime };
+    const totalHits = (current ?? 0) + 1;
+    this.hits.set(key, totalHits);
+    return { totalHits, resetTime };
+  }
+
+  async decrement(key: string): Promise<void> {
+    const current = this.hits.get(key);
+    if (current) this.hits.set(key, current - 1);
+  }
+
+  async resetKey(key: string): Promise<void> { this.hits.delete(key); }
+  async resetAll(): Promise<void> { this.hits = new Map(); }
+}
+
+/**
+ * Per-client then (where configured) route-wide admission for one OAuth route. The client key is
+ * Express's `req.ip`, which with `trust proxy: 'loopback'` is the address the Funnel hop appended;
+ * anything a caller puts further left in X-Forwarded-For is ignored. IPv6 is grouped by /56 so one
+ * allocation cannot mint unlimited keys. `onRefuse` lets a route record throttling in its own health.
+ * `store` exists for tests that count keys; production uses the bounded store above.
+ */
+export function oauthRateLimit(route: OAuthRateLimitedRoute, options: {
+  store?: (tier: 'client' | 'route') => Store;
+  onRefuse?: () => void;
+} = {}): express.RequestHandler[] {
+  const budget = OAUTH_RATE_LIMITS[route];
+  const refuse = (_req: Request, res: Response) => {
+    options.onRefuse?.();
+    res.status(429).json({ error: OAuthErrorCode.TemporarilyUnavailable, error_description: 'OAuth endpoint rate limit exceeded; retry later' });
+  };
+  const common = { windowMs: OAUTH_RATE_WINDOW_MS, standardHeaders: 'draft-8', legacyHeaders: false, handler: refuse } as const;
+  const limiters = [rateLimit({
+    ...common,
+    limit: budget.client,
+    keyGenerator: req => ipKeyGenerator(req.ip ?? 'unknown', 56),
+    store: options.store?.('client') ?? new BoundedWindowStore()
+  })];
+  if (budget.route !== null) {
+    limiters.push(rateLimit({ ...common, limit: budget.route, keyGenerator: () => `oauth-${route}`, ...(options.store ? { store: options.store('route') } : {}) }));
+  }
+  return limiters;
+}
+
+/** The owner consent form. Its password check is the only credential the OAuth surface accepts. */
+export function createConsentRouter(provider: ReachOAuthProvider, store?: (tier: 'client' | 'route') => Store): express.Router {
+  const router = express.Router();
+  // A failed attempt leaves its ticket usable, so admission is the brake on guessing.
+  router.post('/dex/approve', ...oauthRateLimit('approve', { store }), express.urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
+    try {
+      const redirect = await provider.approve(String(req.body?.ticket || ''), String(req.body?.username || ''), String(req.body?.password || ''));
+      res.redirect(redirect);
+    } catch {
+      res.status(401).type('text').send('Authorization denied.');
     }
-    next();
   });
+  return router;
 }
 
 export function oauthProtectedResourceMetadataUrl(resourceUrl: URL): string {
@@ -166,7 +266,19 @@ export function oauthProtectedResourceMetadataUrl(resourceUrl: URL): string {
 export function createOAuthRouter(options: OAuthRouterOptions): express.Router {
   const { provider, issuerUrl, resourceUrl } = options;
   const router = express.Router();
-  installRateLimit(router);
+  // Throttled token requests never reach the handler, so record them here or health would show none.
+  // At most once per window: a write per refusal would turn a flood into an unbounded disk-write queue.
+  let throttleRecordedAt = 0;
+  const recordThrottle = () => {
+    const now = Date.now();
+    if (now - throttleRecordedAt < OAUTH_RATE_WINDOW_MS) return;
+    throttleRecordedAt = now;
+    void options.health?.record(429, OAuthErrorCode.TemporarilyUnavailable).catch(() => undefined);
+  };
+  const admit = (route: OAuthRateLimitedRoute) => oauthRateLimit(route, {
+    store: options.rateLimitStore && (tier => options.rateLimitStore!(route, tier)),
+    onRefuse: route === 'token' ? recordThrottle : undefined
+  });
 
   const metadata = {
     issuer: issuerUrl.href,
@@ -190,14 +302,14 @@ export function createOAuthRouter(options: OAuthRouterOptions): express.Router {
     resource_name: 'DEX//REACH'
   };
 
-  router.get('/.well-known/oauth-authorization-server', (_req, res) => res.json(metadata));
+  router.get('/.well-known/oauth-authorization-server', ...admit('discovery'), (_req, res) => res.json(metadata));
   const prmPath = new URL(oauthProtectedResourceMetadataUrl(resourceUrl)).pathname;
-  router.get(prmPath, (_req, res) => res.json(protectedResource));
+  router.get(prmPath, ...admit('discovery'), (_req, res) => res.json(protectedResource));
   if (prmPath !== '/.well-known/oauth-protected-resource') {
-    router.get('/.well-known/oauth-protected-resource', (_req, res) => res.json(protectedResource));
+    router.get('/.well-known/oauth-protected-resource', ...admit('discovery'), (_req, res) => res.json(protectedResource));
   }
 
-  router.post('/register', express.json({ limit: '16kb' }), async (req, res) => {
+  router.post('/register', ...admit('register'), express.json({ limit: '16kb' }), async (req, res) => {
     try {
       const client = await provider.clientsStore.registerClient(registrationMetadata(req.body ?? {}));
       res.status(201).json(client);
@@ -208,7 +320,7 @@ export function createOAuthRouter(options: OAuthRouterOptions): express.Router {
     }
   });
 
-  router.get('/authorize', async (req, res) => {
+  router.get('/authorize', ...admit('authorize'), async (req, res) => {
     const redirectUri = typeof req.query.redirect_uri === 'string' ? req.query.redirect_uri : null;
     const state = typeof req.query.state === 'string' ? req.query.state : undefined;
     try {
@@ -238,7 +350,7 @@ export function createOAuthRouter(options: OAuthRouterOptions): express.Router {
     }
   });
 
-  router.post('/token', express.urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
+  router.post('/token', ...admit('token'), express.urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
     let status = 500;
     let errorCode: string | null = OAuthErrorCode.ServerError;
     let payload: unknown = { error: OAuthErrorCode.ServerError, error_description: 'token exchange failed' };
@@ -283,7 +395,7 @@ export function createOAuthRouter(options: OAuthRouterOptions): express.Router {
     res.status(status).json(payload);
   });
 
-  router.post('/revoke', express.urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
+  router.post('/revoke', ...admit('revoke'), express.urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
     try {
       const clientId = String(req.body?.client_id || '');
       if (!clientId) throw new InvalidClientError('client_id is required');

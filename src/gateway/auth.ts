@@ -46,6 +46,14 @@ function randomToken(bytes = 32): string {
 function htmlEscape(value: string): string {
   return value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 }
+/**
+ * Dynamic registration is unauthenticated and every client is persisted, so admission is capped.
+ * ChatGPT connects through its metadata document (CIMD) and the canary reuses one registration; at
+ * 2026-10-28 the live store held 49 dynamic clients. New registrations beyond the cap fail closed
+ * with 503; existing clients are never pruned, so no working connection is cut off.
+ */
+export const MAX_DYNAMIC_CLIENTS = 256;
+
 class PersistentClientsStore {
   constructor(private readonly owner: ReachOAuthProvider) {}
 
@@ -54,6 +62,9 @@ class PersistentClientsStore {
   }
 
   async registerClient(client: Omit<OAuthClientInformationFull, 'client_id' | 'client_id_issued_at'>): Promise<OAuthClientInformationFull> {
+    if (this.owner.dynamicClientCount() >= MAX_DYNAMIC_CLIENTS) {
+      throw new OAuthError(OAuthErrorCode.TemporarilyUnavailable, 'dynamic client registration capacity reached');
+    }
     const incoming = client as OAuthClientInformationFull;
     const now = Math.floor(Date.now() / 1000);
     // Dynamic registration identifiers are server authority. Do not honor extra runtime fields that
@@ -111,6 +122,11 @@ export class ReachOAuthProvider {
 
   getClient(clientId: string): OAuthClientInformationFull | undefined {
     return this.state.clients[clientId];
+  }
+
+  /** Clients created through /register; CIMD clients are keyed by their https metadata URL instead. */
+  dynamicClientCount(): number {
+    return Object.keys(this.state.clients).filter(id => !id.startsWith('https://')).length;
   }
 
   async saveClient(client: OAuthClientInformationFull): Promise<void> {
