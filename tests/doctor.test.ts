@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { saveAccessState, type AccessState } from '../src/shared/access.js';
-import { collectDoctorReport } from '../src/shared/doctor.js';
+import { collectDoctorReport, formatDoctorReport } from '../src/shared/doctor.js';
 import { hashValue } from '../src/shared/hash.js';
 import { loadAccessState } from '../src/shared/access.js';
 
@@ -84,6 +84,53 @@ test('doctor is read-only and --share omits local repository paths', async () =>
     assert.equal(canary.publicBaseUrl, undefined);
     const sharedJson = JSON.stringify(share);
     assert.doesNotMatch(sharedJson, /sensitive-client-id|sensitive-access-hash|sensitive-refresh-hash|sensitive-tailnet-name/);
+  } finally {
+    if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR;
+    else process.env.DEX_REACH_STATE_DIR = previous;
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('doctor OAuth diagnostics are allowlisted in normal, JSON and share modes', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dex-reach-doctor-allowlist-'));
+  const previous = process.env.DEX_REACH_STATE_DIR;
+  try {
+    process.env.DEX_REACH_STATE_DIR = dir;
+    await saveAccessState('n', {
+      version: 3, revision: 0, mode: 'off', until: null, revertTo: null, clients: {}, grantRequired: {}, grants: [],
+      updatedAt: new Date(0).toISOString()
+    }, dir);
+    // A future writer adds token-bearing fields and a free-text failure; none may reach doctor output.
+    await fs.writeFile(path.join(dir, 'oauth-health.json'), JSON.stringify({
+      version: 1, startedAt: new Date().toISOString(), tokenRequests: 1, token2xx: 0, token4xx: 1, token5xx: 0,
+      lastSuccessAt: 'SECRET-IN-TIMESTAMP', lastFailureAt: new Date().toISOString(), lastFailureCode: 'invalid_grant refresh_token=SECRET-HEALTH',
+      clientSecret: 'SECRET-CLIENT', lastRefreshToken: 'SECRET-RT-HEALTH'
+    }));
+    await fs.writeFile(path.join(dir, 'oauth-canary-status.json'), JSON.stringify({
+      version: 1, checkedAt: new Date().toISOString(), ok: false, publicBaseUrl: 'https://node.example.ts.net',
+      nodeOnline: true, refreshCredentialPresent: true, failureClass: 'Bearer SECRET-AT-IN-FAILURE',
+      access_token: 'SECRET-AT', refresh_token: 'SECRET-RT', authorizationCode: 'SECRET-CODE', nested: { token: 'SECRET-NESTED' }
+    }));
+    const full = await collectDoctorReport({ repoRoot: process.cwd(), nodeId: 'n', dir, json: true });
+    const share = await collectDoctorReport({ repoRoot: process.cwd(), nodeId: 'n', dir, share: true });
+    for (const [mode, text] of [['json', JSON.stringify(full)], ['share', JSON.stringify(share)], ['human', formatDoctorReport(full).join('\n')]] as const) {
+      assert.doesNotMatch(text, /SECRET-/, `${mode} output carries no injected secret`);
+    }
+    const canaryKeys = ['version', 'checkedAt', 'ok', 'nodeOnline', 'refreshCredentialPresent', 'refreshRecoveryVerified',
+      'postRefreshMcpVerified', 'accessTokenChanged', 'failureClass'];
+    const fullOAuth = full.oauth as { canary: Record<string, unknown>; tokenEndpoint: Record<string, unknown> };
+    const shareOAuth = share.oauth as { canary: Record<string, unknown> };
+    assert.deepEqual(Object.keys(fullOAuth.canary).sort(), [...canaryKeys, 'publicBaseUrl'].sort());
+    assert.deepEqual(Object.keys(shareOAuth.canary).sort(), [...canaryKeys].sort());
+    assert.equal(fullOAuth.canary.publicBaseUrl, 'https://node.example.ts.net', 'local repair keeps the endpoint');
+    assert.equal(fullOAuth.canary.failureClass, 'unclassified');
+    assert.equal(fullOAuth.canary.ok, false, 'a genuine failure is still reported');
+    assert.deepEqual(Object.keys(fullOAuth.tokenEndpoint).sort(), ['lastFailureAt', 'lastFailureCode', 'lastSuccessAt', 'startedAt',
+      'token2xx', 'token4xx', 'token5xx', 'tokenRequests', 'version'].sort());
+    assert.equal(fullOAuth.tokenEndpoint.token4xx, 1);
+    assert.equal(fullOAuth.tokenEndpoint.lastFailureCode, 'unclassified');
+    assert.equal(fullOAuth.tokenEndpoint.lastSuccessAt, null, 'a non-timestamp value is dropped');
+    assert.match(String(fullOAuth.tokenEndpoint.lastFailureAt), /^\d{4}-\d{2}-\d{2}T/);
   } finally {
     if (previous === undefined) delete process.env.DEX_REACH_STATE_DIR;
     else process.env.DEX_REACH_STATE_DIR = previous;

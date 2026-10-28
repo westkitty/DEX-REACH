@@ -12,7 +12,7 @@ import { invariantManifest } from './invariants.js';
 import { redactWorkStatusForShare, workStatus } from './work-coordinator.js';
 import { listSecretAliases } from './secrets.js';
 import { stateDir } from './local-env.js';
-import { inspectOAuthState, readOAuthCanaryStatus, readOAuthRuntimeHealth } from './oauth-diagnostics.js';
+import { inspectOAuthState, readOAuthCanaryStatus, readOAuthRuntimeHealth, type OAuthCanaryStatus, type OAuthRuntimeHealth } from './oauth-diagnostics.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -44,6 +44,47 @@ async function launchdState(label: string): Promise<'loaded' | 'missing' | 'unkn
     return 'unknown';
   }
 }
+
+/**
+ * OAuth diagnostics reach the terminal only through these allowlists. The status files are parsed
+ * JSON cast to a type, so any field a future writer adds would otherwise be printed unseen. Each
+ * value is rebuilt from a known field with its expected type; anything else is dropped.
+ */
+const timestamp = (value: unknown): string | null => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value) ? value : null;
+const count = (value: unknown): number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+const failureClass = (value: unknown): string | null =>
+  typeof value === 'string' ? (/^[A-Za-z0-9_.:-]{1,80}$/.test(value) ? value : 'unclassified') : null;
+
+export function doctorOAuthHealth(health: OAuthRuntimeHealth): Record<string, unknown> {
+  return {
+    version: health.version === 1 ? 1 : null,
+    startedAt: timestamp(health.startedAt),
+    tokenRequests: count(health.tokenRequests),
+    token2xx: count(health.token2xx),
+    token4xx: count(health.token4xx),
+    token5xx: count(health.token5xx),
+    lastSuccessAt: timestamp(health.lastSuccessAt),
+    lastFailureAt: timestamp(health.lastFailureAt),
+    lastFailureCode: failureClass(health.lastFailureCode)
+  };
+}
+
+export function doctorOAuthCanary(canary: OAuthCanaryStatus, share: boolean): Record<string, unknown> {
+  return {
+    version: canary.version === 1 ? 1 : null,
+    checkedAt: timestamp(canary.checkedAt),
+    ok: canary.ok === true,
+    nodeOnline: canary.nodeOnline === true,
+    refreshCredentialPresent: canary.refreshCredentialPresent === true,
+    refreshRecoveryVerified: canary.refreshRecoveryVerified === true,
+    postRefreshMcpVerified: canary.postRefreshMcpVerified === true,
+    accessTokenChanged: canary.accessTokenChanged === true,
+    failureClass: failureClass(canary.failureClass),
+    // The public endpoint is useful for local repair but describes infrastructure, so it stays out of shared reports.
+    ...(share ? {} : { publicBaseUrl: typeof canary.publicBaseUrl === 'string' && /^https:\/\/[A-Za-z0-9.-]+(?::\d+)?\/?$/.test(canary.publicBaseUrl) ? canary.publicBaseUrl : null })
+  };
+}
+
 
 export async function collectDoctorReport(options: DoctorOptions = {}): Promise<Record<string, unknown>> {
   const repoRoot = options.repoRoot ?? process.cwd();
@@ -130,22 +171,8 @@ export async function collectDoctorReport(options: DoctorOptions = {}): Promise<
         tokenEndpointAuthMethods: ['none']
       },
       state: oauthState,
-      tokenEndpoint: oauthHealth,
-      canary: oauthCanary
-        ? options.share
-          ? {
-              version: oauthCanary.version,
-              checkedAt: oauthCanary.checkedAt,
-              ok: oauthCanary.ok,
-              nodeOnline: oauthCanary.nodeOnline,
-              refreshCredentialPresent: oauthCanary.refreshCredentialPresent,
-              refreshRecoveryVerified: oauthCanary.refreshRecoveryVerified ?? false,
-              postRefreshMcpVerified: oauthCanary.postRefreshMcpVerified ?? false,
-              accessTokenChanged: oauthCanary.accessTokenChanged ?? false,
-              failureClass: oauthCanary.failureClass
-            }
-          : oauthCanary
-        : null,
+      tokenEndpoint: oauthHealth ? doctorOAuthHealth(oauthHealth) : null,
+      canary: oauthCanary ? doctorOAuthCanary(oauthCanary, options.share === true) : null,
       note: 'counts and status classes only; no client ids, token values, hashes, owner credentials, or redirect URIs are exposed'
     },
     mcp: {
