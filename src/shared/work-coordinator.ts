@@ -6,8 +6,11 @@ import { machineStateDir } from './local-env.js';
 import { atomicWriteFile, withFileLock } from './state-io.js';
 import {
   type AccessClass,
+  type HostProbe,
+  type LeaseIdentity,
   type MachineCapacity,
   type ObservedWorkloads,
+  type ProcessRow,
   type WorkloadClass,
   classifyCpuPressure,
   classifyObservedWorkloads,
@@ -515,6 +518,20 @@ export type CapacitySnapshot = {
 };
 
 /**
+ * Classify a process table against the CPU pressure of the same probe that admission evaluates. An
+ * unreadable table is 'unknown', never an idle host.
+ */
+export function classifyForSnapshot(
+  rows: readonly ProcessRow[] | null,
+  probe: Pick<HostProbe, 'loadAverage1m' | 'logicalCpuCount'>,
+  leases: readonly LeaseIdentity[],
+  observedAt: number
+): ObservedWorkloads {
+  if (!rows) return { uncoordinatedHeavy: 0, dexServices: 0, uncoordinatedDetails: [], dexServiceDetails: [], processObservation: 'unknown' };
+  return classifyObservedWorkloads(rows, { leases, observedAt, hostCpu: classifyCpuPressure(probe.loadAverage1m, probe.logicalCpuCount) });
+}
+
+/**
  * Measure the host outside the coordinator lock. The state lock and the workload lease are not the
  * same thing: the lock is held only long enough to reserve capacity.
  */
@@ -524,7 +541,7 @@ export async function snapshotCapacity(): Promise<CapacitySnapshot> {
   const [probe, rows] = await Promise.all([probeHost(), observeProcessRows()]);
   // Lease exclusion is identity-checked against process start time; an unreadable table is 'unknown'.
   const leases = state.leases.flatMap(lease => typeof lease.pid === 'number' && typeof lease.createdAt === 'string' ? [{ pid: lease.pid, createdAt: lease.createdAt }] : []);
-  const observed = rows ? classifyObservedWorkloads(rows, { leases, observedAt: Date.now() }) : { uncoordinatedHeavy: 0, dexServices: 0, uncoordinatedDetails: [], dexServiceDetails: [], processObservation: 'unknown' as const };
+  const observed = classifyForSnapshot(rows, probe, leases, Date.now());
   const health = await recordCapacityHealth({
     memory: observed.processObservation === 'unknown' ? 'unknown' : probe.memory,
     cpu: classifyCpuPressure(probe.loadAverage1m, probe.logicalCpuCount),
