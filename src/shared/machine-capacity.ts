@@ -372,7 +372,8 @@ export async function probeHost(): Promise<HostProbe> {
 // Uncoordinated workload observation.
 // ---------------------------------------------------------------------------
 
-export type ProcessRow = { pid: number; ppid: number; cpu: number; mem: number; command: string; elapsedSeconds?: number };
+/** `pgid` is present only when the table carried a PGID column; absence is unknown, never 'separate'. */
+export type ProcessRow = { pid: number; ppid: number; pgid?: number; cpu: number; mem: number; command: string; elapsedSeconds?: number };
 
 /** `ps` elapsed time `[[dd-]hh:]mm:ss` to seconds; undefined when it cannot be read exactly. */
 export function parseElapsed(raw: string): number | undefined {
@@ -383,19 +384,27 @@ export function parseElapsed(raw: string): number | undefined {
   return ((Number(days ?? 0) * 24 + Number(hours ?? 0)) * 60 + Number(minutes)) * 60 + Number(seconds);
 }
 
-/** Parse `ps -axo pid,ppid,%cpu,%mem,etime,command` (or the Linux `args` equivalent). */
+/**
+ * Parse `ps -axo pid,ppid[,pgid],%cpu,%mem,etime,command` (or the Linux `args` equivalent). The PGID
+ * column is read only when the header names it, so older six-column tables keep parsing unchanged.
+ */
 export function parseProcessTable(raw: string): ProcessRow[] {
   const rows: ProcessRow[] = [];
-  for (const line of raw.split('\n').slice(1)) {
-    const match = /^\s*(\d+)\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+(\S+)\s+(.*)$/.exec(line);
+  const [header = '', ...lines] = raw.split('\n');
+  const withPgid = /(?:^|\s)PGID(?:\s|$)/.test(header);
+  for (const line of lines) {
+    const match = withPgid
+      ? /^\s*(\d+)\s+(\d+)\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+(\S+)\s+(.*)$/.exec(line)
+      : /^\s*(\d+)\s+(\d+)\s+()([\d.]+)\s+([\d.]+)\s+(\S+)\s+(.*)$/.exec(line);
     if (!match) continue;
     rows.push({
       pid: Number.parseInt(match[1]!, 10),
       ppid: Number.parseInt(match[2]!, 10),
-      cpu: Number.parseFloat(match[3]!),
-      mem: Number.parseFloat(match[4]!),
-      command: match[6]!,
-      ...(parseElapsed(match[5]!) !== undefined ? { elapsedSeconds: parseElapsed(match[5]!) } : {})
+      ...(withPgid ? { pgid: Number.parseInt(match[3]!, 10) } : {}),
+      cpu: Number.parseFloat(match[4]!),
+      mem: Number.parseFloat(match[5]!),
+      command: match[7]!,
+      ...(parseElapsed(match[6]!) !== undefined ? { elapsedSeconds: parseElapsed(match[6]!) } : {})
     });
   }
   return rows;
@@ -499,10 +508,13 @@ function desktopBundle(command: string): string | null {
   return /^(\/[^\0]*?\.app)\/Contents\//.exec(command.trim())?.[1] ?? null;
 }
 
+/** About one fully occupied logical CPU in `ps` units: unidentified work at this level is job-sized. */
+const UNIDENTIFIED_JOB_CPU = 80;
+
 export function looksHeavy(row: ProcessRow): boolean {
   if (isDexServiceCommand(row.command)) return false;
   // Anonymous high CPU and active desktop work cannot hide behind helper flags.
-  if (row.cpu >= 80) return true;
+  if (row.cpu >= UNIDENTIFIED_JOB_CPU) return true;
   if (desktopBundle(row.command)) return row.cpu >= 10;
   const identity = processWorkloadIdentity(row.command);
   if (!identity) return row.cpu >= 10;
@@ -520,6 +532,8 @@ export function looksHeavy(row: ProcessRow): boolean {
  */
 export type LeaseIdentity = { pid: number; createdAt: string };
 export type ExclusionOptions = { leasedPids?: readonly number[]; selfPid?: number; leases?: readonly LeaseIdentity[]; observedAt?: number };
+/** Host CPU pressure from the same snapshot. Omitted or not 'healthy' keeps every hot process competing. */
+export type ClassificationOptions = ExclusionOptions & { hostCpu?: CpuPressure };
 /**
  * A lease covers a PID only when that process provably existed when the lease was created: a
  * process that started later reused the PID and is an unrelated job. Unknown start time is not proof.
@@ -580,32 +594,127 @@ export function collectExcludedPids(
  */
 export function classifyObservedWorkloads(
   rows: readonly ProcessRow[],
-  options: ExclusionOptions = {}
+  options: ClassificationOptions = {}
 ): ObservedWorkloads {
   const excluded = collectExcludedPids(rows, options);
   const byPid = new Map(rows.map(row => [row.pid, row]));
-  const heavy = rows.filter(row => !excluded.has(row.pid) && !isDexServiceCommand(row.command) && looksHeavy(row));
+  const candidate = (row: ProcessRow | undefined) => !!row && !excluded.has(row.pid) && !isDexServiceCommand(row.command);
+  // Owner-visible detail reports the group's summed CPU, the quantity admission compares; memory stays the
+  // largest single member because summed resident percentages double-count shared pages.
+  const detail = (pid: number, group: readonly ProcessRow[]): ObservedProcess => {
+    const root = byPid.get(pid) ?? group[0]!;
+    const cpu = Math.round(group.reduce((sum, row) => sum + row.cpu, 0) * 10) / 10;
+    const mem = Math.max(0, ...group.map(row => row.mem));
+    return { pid, pids: group.map(row => row.pid).sort((a, b) => a - b), cpu, mem, processLabel: processWorkloadIdentity(root.command)?.name ?? safeProcessLabel(root.command), matchedBy: cpu >= 10 ? 'cpu' : 'memory' };
+  };
+  const heavy = rows.filter(row => candidate(row) && looksHeavy(row));
   // One workload per session: busy tools under one agent (or one build) share that ancestor's slot,
   // whether or not the ancestor itself is busy. Independent sessions remain separate workloads.
   const heavyPids = new Set(heavy.map(row => row.pid));
   const workloadAncestor = (row: ProcessRow | undefined) => !!row && !excluded.has(row.pid) && !isDexServiceCommand(row.command) && (heavyPids.has(row.pid) || processWorkloadIdentity(row.command) !== null);
   const rootFor = (row: ProcessRow): number => {
     let root = row;
+    // A recognized agent or tool owns its whole subprocess tree, through busy intermediaries of any process
+    // group. A busy unrecognized ancestor is crossed but never becomes the owner of recognized work, so a
+    // hot generic shell cannot merge an independent compiler and build into one workload.
+    let owner = processWorkloadIdentity(row.command) !== null ? row : undefined;
     // A desktop helper is one app workload, not one independent coding session per renderer.
     const bundle = desktopBundle(row.command);
     let parent = byPid.get(root.ppid);
     let guard = 0;
-    while (parent && parent.pid !== root.pid && (workloadAncestor(parent) || (bundle !== null && desktopBundle(parent.command) === bundle)) && guard++ < 64) { root = parent; parent = byPid.get(root.ppid); }
-    return root.pid;
+    // PID 1 is the system supervisor, never a session: a momentarily hot launchd must not merge every job.
+    while (parent && parent.pid > 1 && parent.pid !== root.pid && (workloadAncestor(parent) || (bundle !== null && desktopBundle(parent.command) === bundle)) && guard++ < 64) {
+      root = parent;
+      if (processWorkloadIdentity(root.command) !== null) owner = root;
+      parent = byPid.get(root.ppid);
+    }
+    return (owner ?? root).pid;
   };
   const groups = new Map<number, ProcessRow[]>();
   for (const row of heavy) groups.set(rootFor(row), [...(groups.get(rootFor(row)) ?? []), row]);
-  const uncoordinatedDetails = [...groups.entries()].map(([pid, group]): ObservedProcess => {
-    const root = byPid.get(pid) ?? group[0]!;
-    const cpu = Math.max(...group.map(row => row.cpu));
-    const mem = Math.max(...group.map(row => row.mem));
-    return { pid, pids: group.map(row => row.pid).sort((a, b) => a - b), cpu, mem, processLabel: processWorkloadIdentity(root.command)?.name ?? safeProcessLabel(root.command), matchedBy: cpu >= 10 ? 'cpu' : 'memory' };
-  }).sort((a, b) => a.pid - b.pid);
+  // A recognized agent or build/test tree is one workload whenever any member is active, as before. It
+  // claims its whole subtree so the family accounting below never counts that session a second time.
+  const identifiedGroups = [...groups.entries()].filter(([pid, group]) =>
+    [byPid.get(pid), ...group].some(row => !!row && processWorkloadIdentity(row.command) !== null));
+  const childrenOf = new Map<number, ProcessRow[]>();
+  for (const row of rows) if (row.ppid !== row.pid) { const siblings = childrenOf.get(row.ppid); if (siblings) siblings.push(row); else childrenOf.set(row.ppid, [row]); }
+  const claimed = new Set<number>();
+  for (const queue = identifiedGroups.map(([pid]) => pid); queue.length;) {
+    const pid = queue.pop()!;
+    if (claimed.has(pid)) continue;
+    claimed.add(pid);
+    for (const child of childrenOf.get(pid) ?? []) queue.push(child.pid);
+  }
+  const identifiedDetails = identifiedGroups.map(([pid, group]) => detail(pid, group));
+
+  // Every other process is accounted by family, including sub-10% workers. A process joins its parent's
+  // family only when the parent is a candidate (never PID 1, the caller's chain, a lease, a DEX service or
+  // a recognized tree) and the two share an app bundle or a process group. Missing PGID evidence merges
+  // conservatively; a different PGID is a separate job (shell job control, launchd/systemd sessions).
+  // Bottom-up, any node (or whole app bundle) whose remaining subtree CPU reaches a job-sized core is one
+  // workload and its CPU is spent, so independent job-sized children under an idle shell stay separate
+  // while idle intermediaries and many small workers still add up. When host CPU is not measured healthy,
+  // a family root that still holds a hot process also competes, as every hot process did before.
+  const members = rows.filter(row => candidate(row) && !claimed.has(row.pid));
+  const memberPids = new Set(members.map(row => row.pid));
+  const up = new Map<number, number>();
+  const pending = new Map<number, number>();
+  for (const row of members) {
+    const parent = byPid.get(row.ppid);
+    if (!parent || parent.pid <= 1 || parent.pid === row.pid || !memberPids.has(parent.pid)) continue;
+    const bundle = desktopBundle(row.command);
+    const sameJob = (bundle !== null && desktopBundle(parent.command) === bundle) ||
+      row.pgid === undefined || parent.pgid === undefined || row.pgid === parent.pgid;
+    if (!sameJob) continue;
+    up.set(row.pid, parent.pid);
+    pending.set(parent.pid, (pending.get(parent.pid) ?? 0) + 1);
+  }
+  type Family = { cpu: number; rows: ProcessRow[]; hot: boolean };
+  const state = new Map<number, Family>(members.map(row => [row.pid, { cpu: row.cpu, rows: [row], hot: looksHeavy(row) }]));
+  const fold = (into: Family, from: Family): void => {
+    into.cpu += from.cpu; into.hot ||= from.hot;
+    if (into.rows.length < from.rows.length) [into.rows, from.rows] = [from.rows, into.rows];
+    for (const row of from.rows) into.rows.push(row);
+  };
+  const familyDetails: ObservedProcess[] = [];
+  const spend = (pid: number, family: Family) => { familyDetails.push(detail(pid, family.rows)); family.cpu = 0; family.rows = []; family.hot = false; };
+  // A helper inside an app bundle defers to its bundle's top process: one app is one workload.
+  const bundleInterior = (row: ProcessRow) => { const parent = up.get(row.pid); const bundle = desktopBundle(row.command); return parent !== undefined && bundle !== null && desktopBundle(byPid.get(parent)!.command) === bundle; };
+  const settleRoot = (pid: number, family: Family) => { if (family.cpu >= UNIDENTIFIED_JOB_CPU || (family.hot && options.hostCpu !== 'healthy')) spend(pid, family); };
+  const ready = members.filter(row => !pending.get(row.pid)).map(row => row.pid);
+  const done = new Set<number>();
+  while (ready.length) {
+    const pid = ready.pop()!;
+    done.add(pid);
+    const family = state.get(pid)!;
+    const parent = up.get(pid);
+    if (parent === undefined) { settleRoot(pid, family); continue; }
+    if (!bundleInterior(byPid.get(pid)!) && family.cpu >= UNIDENTIFIED_JOB_CPU) spend(pid, family);
+    fold(state.get(parent)!, family);
+    const left = pending.get(parent)! - 1;
+    pending.set(parent, left);
+    if (!left) ready.push(parent);
+  }
+  // Malformed ancestry (a PPID cycle) never completes above. Fold each unfinished connected set into one
+  // family rooted at its lowest PID and settle it, rather than dropping its processes.
+  const union = new Map(members.filter(row => !done.has(row.pid)).map(row => [row.pid, row.pid]));
+  const find = (pid: number): number => { let root = pid; while (union.get(root) !== root) root = union.get(root)!; union.set(pid, root); return root; };
+  for (const pid of union.keys()) {
+    const parent = up.get(pid);
+    if (parent === undefined || !union.has(parent)) continue;
+    const a = find(pid), b = find(parent);
+    if (a !== b) union.set(Math.max(a, b), Math.min(a, b));
+  }
+  const cycles = new Map<number, Family>();
+  for (const pid of union.keys()) {
+    const key = find(pid);
+    const merged = cycles.get(key) ?? { cpu: 0, rows: [], hot: false };
+    fold(merged, state.get(pid)!);
+    cycles.set(key, merged);
+  }
+  for (const [pid, family] of cycles) settleRoot(pid, family);
+
+  const uncoordinatedDetails = [...identifiedDetails, ...familyDetails].sort((a, b) => a.pid - b.pid);
   const dexServiceDetails = rows.filter(row => isDexServiceCommand(row.command)).map((row): ObservedProcess => ({
     pid: row.pid, pids: [row.pid], cpu: row.cpu, mem: row.mem,
     processLabel: dexServiceLabel(row.command), matchedBy: row.cpu >= 10 ? 'cpu' : 'memory'
@@ -615,13 +724,13 @@ export function classifyObservedWorkloads(
 
 /** null when the process table could not be read: callers must not treat it as an idle host. */
 export async function observeProcessRows(): Promise<ProcessRow[] | null> {
-  const args = process.platform === 'darwin' ? ['-axo', 'pid,ppid,%cpu,%mem,etime,command'] : ['-eo', 'pid,ppid,%cpu,%mem,etime,args'];
+  const args = process.platform === 'darwin' ? ['-axo', 'pid,ppid,pgid,%cpu,%mem,etime,command'] : ['-eo', 'pid,ppid,pgid,%cpu,%mem,etime,args'];
   const stdout = await runProbe('ps', args);
   if (!stdout) return null;
   const rows = parseProcessTable(stdout);
   return rows.length ? rows : null;
 }
-export async function observeWorkloadsResult(options: ExclusionOptions & { rows?: readonly ProcessRow[] | null } = {}): Promise<ObservedWorkloads> {
+export async function observeWorkloadsResult(options: ClassificationOptions & { rows?: readonly ProcessRow[] | null } = {}): Promise<ObservedWorkloads> {
   const rows = options.rows === undefined ? await observeProcessRows() : options.rows;
   if (!rows) return { uncoordinatedHeavy: 0, dexServices: 0, uncoordinatedDetails: [], dexServiceDetails: [], processObservation: 'unknown' };
   return classifyObservedWorkloads(rows, options);
