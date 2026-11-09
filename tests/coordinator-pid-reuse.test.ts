@@ -183,16 +183,19 @@ test('a reused-PID ticket expires on the next pass with a recorded reason, and n
     const live = ticket({ id: 'ticket-live', pid: process.pid, enqueuedAt: new Date().toISOString(), heartbeatAt: new Date().toISOString() });
     for (const entry of [legacy, tokened, live]) await fs.writeFile(path.join(queueDir(), `${entry.id}.json`), JSON.stringify(entry));
 
+    // A legacy claim (no recorded token) is provably reused only where the platform reports process
+    // age (macOS etime). Elsewhere its owner is UNVERIFIABLE and the claim is conservatively kept.
+    const ageObservable = observeProcessStartSync(process.pid)?.elapsedSeconds !== undefined;
     const status = await workStatus({ snapshot: HOST });
-    assert.deepEqual(status.tickets.map(t => t.id), ['ticket-live']);
+    assert.deepEqual(status.tickets.map(t => t.id).sort(), ageObservable ? ['ticket-live'] : ['ticket-legacy', 'ticket-live']);
     assert.equal(status.degraded, false);
     const expired = (await readWorkEvents(0, 100)).events.filter(event => event.event === 'ticket-expired');
     assert.deepEqual(expired.map(event => [event.id, event.reason, event.taskId]).sort(), [
-      ['ticket-legacy', 'heartbeat expired and owner pid reused', TASK],
+      ...(ageObservable ? [['ticket-legacy', 'heartbeat expired and owner pid reused', TASK]] : []),
       ['ticket-tokened', 'heartbeat expired and owner pid reused', TASK]
     ]);
     // Expiry drops a coordination claim only; it never records or implies a task outcome or signal.
-    assert.equal((await readCoordinatorState()).tickets.length, 1);
+    assert.equal((await readCoordinatorState()).tickets.length, ageObservable ? 1 : 2);
   });
 });
 
