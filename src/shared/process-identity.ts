@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
-import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 /**
@@ -70,6 +71,77 @@ export async function readStartToken(pid: number, platform: string = process.pla
       const { stdout } = await execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], { env: { ...process.env, LC_ALL: 'C' }, timeout: 5000 });
       const value = stdout.trim();
       return value ? `lstart:${value}` : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A start observation: the same start token readStartToken produces, plus (macOS only) the process
+ * age from `ps etime`. Age lets a caller compare the process birth against a recorded claim time
+ * without parsing a local-time `lstart` string, which is ambiguous across DST and time zones.
+ */
+export type ProcessStartObservation = { startToken: string; elapsedSeconds?: number };
+
+/** `ps` elapsed time `[[dd-]hh:]mm:ss` to seconds; undefined when it cannot be read exactly. */
+function parseEtime(raw: string): number | undefined {
+  const match = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(raw);
+  if (!match) return undefined;
+  const [, days, hours, minutes, seconds] = match;
+  if (Number(minutes) > 59 || Number(seconds) > 59 || (hours !== undefined && Number(hours) > 23)) return undefined;
+  return ((Number(days ?? 0) * 24 + Number(hours ?? 0)) * 60 + Number(minutes)) * 60 + Number(seconds);
+}
+
+/** Parses `ps -o etime=,lstart= -p <pid>` output. The token is byte-identical to readStartToken's. */
+export function parseDarwinStartObservation(stdout: string): ProcessStartObservation | null {
+  const match = /^\s*(\S+)\s+(\S.*?)\s*$/.exec(stdout.replace(/\n+$/, ''));
+  if (!match || match[0].includes('\n')) return null;
+  const startToken = `lstart:${match[2]}`;
+  if (!START_TOKEN_PATTERN.test(startToken)) return null;
+  const elapsedSeconds = parseEtime(match[1]!);
+  return elapsedSeconds === undefined ? { startToken } : { startToken, elapsedSeconds };
+}
+
+function linuxStartToken(stat: string, bootIdRaw: string): string | null {
+  const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+  const starttime = fields[19];
+  const bootId = bootIdRaw.trim();
+  if (!starttime || !/^\d+$/.test(starttime) || !bootId) return null;
+  const token = `${bootId}:${starttime}`;
+  return START_TOKEN_PATTERN.test(token) ? token : null;
+}
+
+/** Synchronous start observation for lock-held coordination checks. Null when it cannot be read. */
+export function observeProcessStartSync(pid: number, platform: string = process.platform): ProcessStartObservation | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    if (platform === 'linux') {
+      const token = linuxStartToken(readFileSync(`/proc/${pid}/stat`, 'utf8'), readFileSync('/proc/sys/kernel/random/boot_id', 'utf8'));
+      return token ? { startToken: token } : null;
+    }
+    if (platform === 'darwin') {
+      const stdout = execFileSync('ps', ['-o', 'etime=,lstart=', '-p', String(pid)], { env: { ...process.env, LC_ALL: 'C' }, timeout: 5000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      return parseDarwinStartObservation(stdout);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Asynchronous start observation, used outside coordination locks. Null when it cannot be read. */
+export async function observeProcessStart(pid: number, platform: string = process.platform): Promise<ProcessStartObservation | null> {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    if (platform === 'linux') {
+      const token = linuxStartToken(await fs.readFile(`/proc/${pid}/stat`, 'utf8'), await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8'));
+      return token ? { startToken: token } : null;
+    }
+    if (platform === 'darwin') {
+      const { stdout } = await execFileAsync('ps', ['-o', 'etime=,lstart=', '-p', String(pid)], { env: { ...process.env, LC_ALL: 'C' }, timeout: 5000 });
+      return parseDarwinStartObservation(stdout);
     }
     return null;
   } catch {

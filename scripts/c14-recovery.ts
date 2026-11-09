@@ -104,7 +104,11 @@ async function livePreflight() {
   const finalRemote = (await run('/usr/bin/git', ['ls-remote', 'origin', `refs/heads/${RELEASE_LINE}`])).split(/\s/)[0];
   facts.dirty = dirty || !!await run('/usr/bin/git', ['status', '--porcelain']) || finalHead !== head;
   facts.remoteHead = finalRemote ?? '';
-  return { ...evaluatePreflight(facts), head, installedTreeVerified: installedIntact, freeBytes, spaceEstimate: window.spaceMeasured ? 'MEASURED_FROM_CERTIFIED_CAPTURE' : 'PLANNING_ONLY_REQUIRES_OWNER_BUDGET', windowBlockers: window.blockers, quarantined: window.quarantined, tasks: publicTaskReport(rows), releaseLine: RELEASE_LINE, hostedCheckRows: ciRows.length };
+  // Diagnostic only: each live-boundary component as independently re-verified. Gates still pass only
+  // when the whole boundary is minted with no window blocker, so a true component here is not a PASS.
+  const { scope: _scope, version: _version, ...boundaryComponents } = window.boundary;
+  const liveBoundary = { minted: window.blockers.length === 0, componentResults: boundaryComponents, gatesRequireMintedBoundary: true };
+  return { ...evaluatePreflight(facts), head, installedTreeVerified: installedIntact, freeBytes, liveBoundary, spaceEstimate: window.spaceMeasured ? 'MEASURED_FROM_CERTIFIED_CAPTURE' : 'PLANNING_ONLY_REQUIRES_OWNER_BUDGET', windowBlockers: window.blockers, quarantined: window.quarantined, tasks: publicTaskReport(rows), releaseLine: RELEASE_LINE, hostedCheckRows: ciRows.length };
 }
 /**
  * Owner-run offline capture of the STOPPED installation. Flags are the owner's approval of one exact

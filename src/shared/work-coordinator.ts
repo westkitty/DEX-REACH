@@ -21,6 +21,7 @@ import {
 } from './machine-capacity.js';
 import { recordCapacityHealth, type CapacityProfile } from './capacity-profile.js';
 import { bundleBudget, isWorkBundle, legacyWorkBundle, normalizeWorkBundle, type WorkBundle } from './work-bundle.js';
+import { observeProcessStart, observeProcessStartSync, pidExists, type ProcessStartObservation } from './process-identity.js';
 
 export const WORK_EXECUTORS = ['claude-code', 'chatgpt', 'codex', 'grok', 'human', 'other'] as const;
 export type WorkExecutor = (typeof WORK_EXECUTORS)[number];
@@ -36,6 +37,19 @@ export const TICKET_STALE_MS = 5 * HEARTBEAT_INTERVAL_MS;
 /** Bounded history so coordination state cannot grow without limit. */
 export const HISTORY_LIMIT = 200;
 export const EVENT_PAGE_LIMIT = 100;
+/**
+ * Lifecycle (audit) events and high-rate telemetry share HISTORY_LIMIT but are bounded separately.
+ * Observation telemetry is written about twice a second while anything polls, so a single shared
+ * window evicted a ticket cancellation or lease reclaim within roughly a minute and a half.
+ */
+export const LIFECYCLE_HISTORY_LIMIT = HISTORY_LIMIT / 2;
+export const TELEMETRY_HISTORY_LIMIT = HISTORY_LIMIT - LIFECYCLE_HISTORY_LIMIT;
+/**
+ * Legacy claims carry no recorded start token. Their owner PID counts as reused only when the
+ * process now holding it provably started this long after the claim was written; anything closer
+ * (clock adjustment, `ps` rounding) stays conservatively live.
+ */
+export const LEGACY_PID_REUSE_TOLERANCE_MS = 60_000;
 
 export const WORK_EVENT_KINDS = [
   'ticket-enqueued', 'lease-acquired', 'lease-released', 'lease-reclaimed',
@@ -43,6 +57,11 @@ export const WORK_EVENT_KINDS = [
   'cache-hit', 'cache-miss', 'classifier-result', 'request-rejected'
 ] as const;
 export type WorkEventKind = (typeof WORK_EVENT_KINDS)[number];
+/** Coordination-claim lifecycle: the audit trail of who held, queued, released or lost a claim. */
+export const LIFECYCLE_EVENT_KINDS: readonly WorkEventKind[] = [
+  'ticket-enqueued', 'lease-acquired', 'lease-released', 'lease-reclaimed', 'ticket-expired', 'ticket-cancelled', 'request-rejected'
+];
+export function isLifecycleEvent(kind: WorkEventKind): boolean { return LIFECYCLE_EVENT_KINDS.includes(kind); }
 
 export type WorkEvent = {
   cursor: number;
@@ -94,6 +113,8 @@ export type WorkLease = {
   taskId?: string;
   attempt?: number;
   pid: number;
+  /** Platform start token of `pid` when the claim was written; distinguishes the owner from a PID reuse. */
+  ownerStart?: string;
   parentPid?: number;
   /** Digest of the process-held release proof; grants no execution authority. */
   callerProofHash?: string;
@@ -114,6 +135,8 @@ export type WorkQueueTicket = {
   taskId?: string;
   attempt?: number;
   pid: number;
+  /** Platform start token of `pid` when the ticket was written; distinguishes the owner from a PID reuse. */
+  ownerStart?: string;
   pidIsWorkload?: boolean;
   executor: WorkExecutor;
   repositoryRoot?: string;
@@ -127,10 +150,10 @@ export type WorkQueueTicket = {
 
 /** Exact persisted key sets. Anything else is dropped on write and ignored on read. */
 export const LEASE_FIELDS: readonly (keyof WorkLease)[] = [
-  'id', 'taskId', 'attempt', 'pid', 'parentPid', 'callerProofHash', 'pidIsWorkload', 'executor', 'repositoryRoot', 'branch', 'access', 'workload', 'bundle', 'phase', 'createdAt', 'heartbeatAt'
+  'id', 'taskId', 'attempt', 'pid', 'ownerStart', 'parentPid', 'callerProofHash', 'pidIsWorkload', 'executor', 'repositoryRoot', 'branch', 'access', 'workload', 'bundle', 'phase', 'createdAt', 'heartbeatAt'
 ];
 export const TICKET_FIELDS: readonly (keyof WorkQueueTicket)[] = [
-  'id', 'taskId', 'attempt', 'pid', 'pidIsWorkload', 'executor', 'repositoryRoot', 'access', 'workload', 'bundle', 'phase', 'enqueuedAt', 'heartbeatAt'
+  'id', 'taskId', 'attempt', 'pid', 'ownerStart', 'pidIsWorkload', 'executor', 'repositoryRoot', 'access', 'workload', 'bundle', 'phase', 'enqueuedAt', 'heartbeatAt'
 ];
 
 export type WorkRequest = {
@@ -268,6 +291,11 @@ function pick<T extends object>(source: Record<string, unknown>, fields: readonl
   return out as T;
 }
 
+/** Absent is a legacy claim; present must be a bounded printable token, never free text. */
+function validOwnerStartToken(value: unknown): boolean {
+  return value === undefined || (typeof value === 'string' && /^[\x20-\x7e]{1,200}$/.test(value));
+}
+
 function validLease(raw: unknown): WorkLease | null {
   if (!raw || typeof raw !== 'object') return null;
   const record = raw as Record<string, unknown>;
@@ -279,6 +307,7 @@ function validLease(raw: unknown): WorkLease | null {
   if (!WORK_WORKLOAD_CLASSES.includes(record.workload as WorkloadClass)) return null;
   if (record.callerProofHash !== undefined && (typeof record.callerProofHash !== 'string' || !/^[0-9a-f]{64}$/.test(record.callerProofHash))) return null;
   if (record.bundle !== undefined && !isWorkBundle(record.bundle)) return null;
+  if (!validOwnerStartToken(record.ownerStart)) return null;
   try { validateTaskBinding(record.taskId, record.attempt); } catch { return null; }
   return pick<WorkLease>(record, LEASE_FIELDS);
 }
@@ -293,6 +322,7 @@ function validTicket(raw: unknown): WorkQueueTicket | null {
   if (!WORK_ACCESS_CLASSES.includes(record.access as AccessClass)) return null;
   if (!WORK_WORKLOAD_CLASSES.includes(record.workload as WorkloadClass)) return null;
   if (record.bundle !== undefined && !isWorkBundle(record.bundle)) return null;
+  if (!validOwnerStartToken(record.ownerStart)) return null;
   try { validateTaskBinding(record.taskId, record.attempt); } catch { return null; }
   return pick<WorkQueueTicket>(record, TICKET_FIELDS);
 }
@@ -338,32 +368,78 @@ export async function readCoordinatorState(): Promise<CoordinatorState> {
   return { leases, tickets, degraded: degradedReasons.length > 0, degradedReasons };
 }
 
+/** PID existence only. Not proof of ownership: a PID can be reused. Use coordinationOwnerState for claims. */
 export function processAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // EPERM means the process exists but belongs to another user.
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
+  return pidExists(pid);
+}
+
+/** How a coordination claim's liveness is observed. Injectable so the decision is testable. */
+export type CoordinationOwnerProbe = {
+  exists(pid: number): boolean;
+  observe(pid: number): ProcessStartObservation | null;
+};
+export const systemOwnerProbe: CoordinationOwnerProbe = { exists: pidExists, observe: pid => observeProcessStartSync(pid) };
+
+/**
+ * What a claim's recorded PID says about its owner now.
+ *   SAME          the PID exists and its start token matches the token recorded with the claim.
+ *   GONE          no process holds the PID.
+ *   REUSED        a different process holds the PID: its start token differs from the recorded one,
+ *                 or (legacy claim, no token) it provably started after the claim was written.
+ *   UNVERIFIABLE  the PID exists but ownership cannot be proven either way; treated as live.
+ * Only GONE and REUSED let an expired claim be dropped. Neither says anything about whether the
+ * owner's work finished: a claim is coordination metadata, never task state.
+ */
+export type CoordinationOwnerState = 'SAME' | 'GONE' | 'REUSED' | 'UNVERIFIABLE';
+
+export function coordinationOwnerState(
+  claim: { pid: number; ownerStart?: string },
+  claimedAt: string,
+  now = Date.now(),
+  probe: CoordinationOwnerProbe = systemOwnerProbe
+): CoordinationOwnerState {
+  if (!probe.exists(claim.pid)) return 'GONE';
+  const observed = probe.observe(claim.pid);
+  if (!observed) return 'UNVERIFIABLE';
+  if (claim.ownerStart !== undefined) return observed.startToken === claim.ownerStart ? 'SAME' : 'REUSED';
+  const claimed = Date.parse(claimedAt);
+  if (observed.elapsedSeconds === undefined || !Number.isFinite(claimed)) return 'UNVERIFIABLE';
+  // etime is truncated to whole seconds, so the true start is no later than this estimate.
+  const startedAtLatest = now - observed.elapsedSeconds * 1000;
+  return startedAtLatest - 1000 > claimed + LEGACY_PID_REUSE_TOLERANCE_MS ? 'REUSED' : 'UNVERIFIABLE';
+}
+
+const ownerAbsent = (state: CoordinationOwnerState) => state === 'GONE' || state === 'REUSED';
+
+/**
+ * A lease is reclaimable only when its heartbeat is well past due AND its recorded owner process is
+ * gone or its PID now belongs to a different process. Unknown ownership is never treated as gone.
+ * Reclaiming means the coordination claim expired; it never means terminate that workload
+ * (DEX-INV-025), and nothing is ever signalled.
+ */
+export function leaseIsReclaimable(lease: WorkLease, now = Date.now(), probe: CoordinationOwnerProbe = systemOwnerProbe): boolean {
+  const age = now - Date.parse(lease.heartbeatAt);
+  if (!Number.isFinite(age) || age <= LEASE_STALE_MS) return false;
+  return ownerAbsent(coordinationOwnerState(lease, lease.createdAt, now, probe));
+}
+
+export function ticketIsStale(ticket: WorkQueueTicket, now = Date.now(), probe: CoordinationOwnerProbe = systemOwnerProbe): boolean {
+  const age = now - Date.parse(ticket.heartbeatAt);
+  if (!Number.isFinite(age)) return true;
+  return age > TICKET_STALE_MS && ownerAbsent(coordinationOwnerState(ticket, ticket.enqueuedAt, now, probe));
 }
 
 /**
- * A lease is reclaimable only when its heartbeat is well past due AND its recorded process is gone.
- * Reclaiming means the coordination claim expired; it never means terminate that workload
- * (DEX-INV-025).
+ * Start token to bind to a new claim. Omitted when the owner cannot be observed, or when the process
+ * holding the PID started after this request arrived (the requester already exited and the PID was
+ * reused); the claim then falls back to the conservative legacy rule.
  */
-export function leaseIsReclaimable(lease: WorkLease, now = Date.now()): boolean {
-  const age = now - Date.parse(lease.heartbeatAt);
-  if (!Number.isFinite(age) || age <= LEASE_STALE_MS) return false;
-  return !processAlive(lease.pid);
-}
-
-function ticketIsStale(ticket: WorkQueueTicket, now = Date.now()): boolean {
-  const age = now - Date.parse(ticket.heartbeatAt);
-  if (!Number.isFinite(age)) return true;
-  return age > TICKET_STALE_MS && !processAlive(ticket.pid);
+async function captureOwnerStartToken(pid: number, receivedAtMs: number): Promise<string | undefined> {
+  if (!pidExists(pid)) return undefined;
+  const observed = await observeProcessStart(pid);
+  if (!observed) return undefined;
+  if (observed.elapsedSeconds !== undefined && Date.now() - observed.elapsedSeconds * 1000 - 1000 > receivedAtMs) return undefined;
+  return observed.startToken;
 }
 
 function safeEventId(value: unknown): string | undefined {
@@ -438,6 +514,13 @@ async function storedWorkEvents(): Promise<WorkEvent[]> {
   }
 }
 
+/** Newest LIFECYCLE_HISTORY_LIMIT lifecycle events plus newest TELEMETRY_HISTORY_LIMIT others, cursor order. */
+export function retainBoundedHistory(events: readonly WorkEvent[]): WorkEvent[] {
+  const lifecycle = events.filter(event => isLifecycleEvent(event.event)).slice(-LIFECYCLE_HISTORY_LIMIT);
+  const telemetry = events.filter(event => !isLifecycleEvent(event.event)).slice(-TELEMETRY_HISTORY_LIMIT);
+  return [...lifecycle, ...telemetry].sort((a, b) => a.cursor - b.cursor);
+}
+
 export async function recordWorkEvent(input: Omit<Partial<WorkEvent>, 'cursor' | 'at'> & { event: WorkEventKind }): Promise<WorkEvent> {
   await ensureLayout();
   return withFileLock(historyLockFile(), async () => {
@@ -445,7 +528,7 @@ export async function recordWorkEvent(input: Omit<Partial<WorkEvent>, 'cursor' |
     const cursor = (current[current.length - 1]?.cursor ?? 0) + 1;
     const candidate = validWorkEvent({ ...input, cursor, at: new Date().toISOString() });
     if (!candidate) throw new Error('work event failed safe-field validation');
-    const next = [...current, candidate].slice(-HISTORY_LIMIT);
+    const next = retainBoundedHistory([...current, candidate]);
     await atomicWriteFile(historyFile(), next.map(event => JSON.stringify(event)).join('\n') + '\n');
     return candidate;
   }, { timeoutMs: 5_000 });
@@ -466,6 +549,14 @@ export async function readWorkEvents(afterCursor = 0, limit = EVENT_PAGE_LIMIT):
   };
 }
 
+/** The newest page of retained events. Status reports what just happened, not the oldest retained page. */
+export async function readLatestWorkEvents(limit = EVENT_PAGE_LIMIT): Promise<WorkEventWindow> {
+  const safeLimit = Number.isInteger(limit) ? Math.max(1, Math.min(limit, EVENT_PAGE_LIMIT)) : EVENT_PAGE_LIMIT;
+  const stored = await storedWorkEvents();
+  const latest = stored[stored.length - 1]?.cursor ?? 0;
+  return { cursor: latest, startCursor: stored[0]?.cursor ?? latest, events: stored.slice(-safeLimit), hasMore: false };
+}
+
 async function writeLease(lease: WorkLease): Promise<void> {
   await atomicWriteFile(path.join(leasesDir(), `${lease.id}.json`), JSON.stringify(pick<WorkLease>(lease as unknown as Record<string, unknown>, LEASE_FIELDS), null, 2) + '\n');
 }
@@ -481,7 +572,7 @@ async function pruneExpired(state: CoordinatorState, now = Date.now()): Promise<
   for (const lease of state.leases) {
     if (leaseIsReclaimable(lease, now)) {
       await removeLeaseFile(lease.id);
-      await recordWorkEvent({ event: 'lease-reclaimed', id: lease.id, taskId: lease.taskId, attempt: lease.attempt, executor: lease.executor, reason: 'heartbeat expired and process absent' });
+      await recordWorkEvent({ event: 'lease-reclaimed', id: lease.id, taskId: lease.taskId, attempt: lease.attempt, executor: lease.executor, reason: `heartbeat expired and owner ${coordinationOwnerState(lease, lease.createdAt, now) === 'REUSED' ? 'pid reused' : 'process absent'}` });
     } else {
       leases.push(lease);
     }
@@ -490,7 +581,8 @@ async function pruneExpired(state: CoordinatorState, now = Date.now()): Promise<
   for (const ticket of state.tickets) {
     if (ticketIsStale(ticket, now)) {
       await removeTicketFile(ticket.id);
-      await recordWorkEvent({ event: 'ticket-expired', id: ticket.id, taskId: ticket.taskId, attempt: ticket.attempt, executor: ticket.executor, phase: ticket.phase ?? null });
+      const reason = Number.isFinite(Date.parse(ticket.heartbeatAt)) ? `heartbeat expired and owner ${coordinationOwnerState(ticket, ticket.enqueuedAt, now) === 'REUSED' ? 'pid reused' : 'process absent'}` : 'heartbeat unreadable';
+      await recordWorkEvent({ event: 'ticket-expired', id: ticket.id, taskId: ticket.taskId, attempt: ticket.attempt, executor: ticket.executor, phase: ticket.phase ?? null, reason });
     } else {
       tickets.push(ticket);
     }
@@ -655,6 +747,8 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
   }
 
   await ensureLayout();
+  const receivedAtMs = Date.now();
+  const ownerStart = await captureOwnerStartToken(pid, receivedAtMs);
   const snapshot = request.snapshot ?? (await snapshotCapacity());
 
   return withFileLock(coordinatorLockFile(), async () => {
@@ -668,6 +762,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
         ...(request.taskId ? { taskId: request.taskId } : {}),
         ...(request.attempt !== undefined ? { attempt: request.attempt } : {}),
         pid,
+        ...(ownerStart ? { ownerStart } : {}),
         ...(request.callerProofHash ? { callerProofHash: request.callerProofHash } : {}),
         ...(Number.isInteger(parentPid) && parentPid > 0 ? { parentPid } : {}),
         pidIsWorkload: request.pidIsWorkload ?? request.pid !== undefined,
@@ -695,6 +790,7 @@ export async function acquireWork(request: WorkRequest): Promise<AdmissionResult
           ...(request.taskId ? { taskId: request.taskId } : {}),
           ...(request.attempt !== undefined ? { attempt: request.attempt } : {}),
           pid,
+          ...(ownerStart ? { ownerStart } : {}),
           pidIsWorkload: request.pidIsWorkload ?? request.pid !== undefined,
           executor,
           ...(repositoryRoot ? { repositoryRoot } : {}),
@@ -807,7 +903,7 @@ export async function workStatus(options: { snapshot?: CapacitySnapshot } = {}):
     observed: snapshot.observed,
     degraded: state.degraded,
     degradedReasons: state.degradedReasons,
-    eventWindow: await readWorkEvents(0, HISTORY_LIMIT)
+    eventWindow: await readLatestWorkEvents(EVENT_PAGE_LIMIT)
   };
 }
 
