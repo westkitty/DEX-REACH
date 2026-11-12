@@ -154,14 +154,14 @@ test('READ-ONLY admits exactly what it admitted before the catalog', () => {
   const actor = { kind: 'claude' as const, clientId: 'c1', clientName: 'Claude' };
 
   for (const operation of ALL_OPERATIONS) {
-    const expected = PREVIOUS_READ_OPERATIONS.has(operation) || operation === 'dex.process.run' || operation === 'dc.call';
+    const expected = (PREVIOUS_READ_OPERATIONS.has(operation) || operation === 'dex.diagnostic.inspect') || operation === 'dex.process.run' || operation === 'dc.call';
     const decision = authorizeOperation(state, actor, operation, 'full-local');
     assert.equal(decision.allowed, expected, `READ-ONLY admission drifted for "${operation}"`);
     if (decision.allowed) assert.equal(decision.effectiveProfile, 'read-only');
   }
 
   // The derived sets are the two branches of that behavior, and they do not overlap.
-  assert.deepEqual([...readOnlyInspectOperations()].sort(), [...PREVIOUS_READ_OPERATIONS].sort());
+  assert.deepEqual([...readOnlyInspectOperations()].sort(), [...PREVIOUS_READ_OPERATIONS, 'dex.diagnostic.inspect'].sort());
   assert.deepEqual(readOnlyDelegatedOperations().sort(), ['dc.call', 'dex.process.run']);
   assert.equal(readOnlyInspectOperations().some(operation => readOnlyDelegatedOperations().includes(operation)), false);
 });
@@ -199,11 +199,11 @@ test('the public MCP action surface preserves the 16 existing tools and adds one
   const registered = [...source.matchAll(/server\.registerTool\('([a-z_]+)'/g)].map(match => match[1]!);
   assert.deepEqual(registered, [
     'reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_trust_report',
-    'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write',
+    'reach_repo_info', 'reach_diagnostic_inspect', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write',
     'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'
     , 'reach_task'
   ]);
-  assert.equal(registered.length, 17);
+  assert.equal(registered.length, 18);
 });
 
 test('the compatibility surface is still 26 local tools with exactly 4 withheld remotely', () => {

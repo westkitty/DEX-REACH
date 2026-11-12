@@ -1,5 +1,6 @@
 import { inspectRepository } from './repo-inspection.js';
 import fs from 'node:fs/promises';
+import { inspectMacDiagnostic } from './diagnostics.js';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -275,6 +276,8 @@ export async function nativeCall(nodeId: string, operation: string, args: Record
       if (args.inspection === undefined) return repoInfo(cwd);
       return inspectRepository(nodeId, cwd, roots, args.inspection, (directory, signal) => repoInfo(directory, signal, 8192), text => redactKnownEnvironmentSecrets(redactSensitiveText(text)));
     }
+    case 'dex.diagnostic.inspect':
+      return inspectMacDiagnostic(args);
     case 'dex.adbDevices':
       return adbDevices();
     case 'dex.checkpoint': {

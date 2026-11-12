@@ -15,7 +15,7 @@ export const SAFETY_CLASSES = [
 export type SafetyClass = (typeof SAFETY_CLASSES)[number];
 
 export function classifyOperationSafety(operation: string): SafetyClass {
-  if (['dex.fingerprint', 'dex.trustReport', 'dex.repoInfo', 'dex.adbDevices', 'dex.file.read', 'dex.result.read', 'dex.receipts.list'].includes(operation)) return 'PURE_READ_IDEMPOTENT';
+  if (['dex.fingerprint', 'dex.trustReport', 'dex.repoInfo', 'dex.adbDevices', 'dex.diagnostic.inspect', 'dex.file.read', 'dex.result.read', 'dex.receipts.list'].includes(operation)) return 'PURE_READ_IDEMPOTENT';
   if (operation === 'dex.commitPlan') return 'PLAN_COMMIT';
   if (operation === 'dex.process.run' || operation === 'dc.call') return 'PROCESS_UNKNOWN_EFFECT';
   if (operation === 'dex.file.write' || operation === 'dex.checkpoint') return 'SIDE_EFFECTING_IDEMPOTENT';

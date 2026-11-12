@@ -158,6 +158,13 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
     annotations: READ
   }, async ({ node_id, cwd, inspection }) => routed(node_id, 'dex.repoInfo', { ...(cwd ? { cwd } : {}), ...(inspection ? { inspection } : {}) }));
 
+  server.registerTool('reach_diagnostic_inspect', {
+    title: 'Inspect Mac Services',
+    description: 'Run one fixed, short and read-only macOS diagnostic. No arbitrary commands, paths, credentials, or mutations.',
+    inputSchema: { node_id: z.string().min(1).describe(NODE_ID_HINT), kind: z.enum(['icloud-settings', 'icloud-paths', 'file-providers', 'spotlight-status', 'process-snapshot']) },
+    annotations: READ
+  }, async ({ node_id, kind }) => routed(node_id, 'dex.diagnostic.inspect', { kind }));
+
   server.registerTool('reach_adb_devices', {
     title: 'List Android ADB Devices',
     description: 'List Android devices visible to the selected node over ADB (USB or network discovery). Read-only.',
