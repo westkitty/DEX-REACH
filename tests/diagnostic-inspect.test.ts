@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyOperationSafety } from '../src/shared/durable-execution.js';
 import { describeOperation } from '../src/shared/operations.js';
+import { evaluateCapacity } from '../src/shared/machine-capacity.js';
 import { nativeCall } from '../src/node/native.js';
 import { parseCloudServiceFlags } from '../src/node/diagnostics.js';
 
@@ -27,4 +28,23 @@ test('diagnostics reject unknown kinds and arbitrary shell arguments before exec
   await assert.rejects(call({ kind: 'icloud-settings', command: 'touch /tmp/x' }), /exactly one kind/);
   await assert.rejects(call({ kind: 'spotlight-status', path: '/etc/passwd' }), /exactly one kind/);
   await assert.rejects(call({}), /exactly one kind/);
+});
+
+test('read-only diagnostic keeps admission under high load with unrelated heavy jobs', () => {
+  const capacity = evaluateCapacity(
+    { physicalMemoryBytes: 8 * (1024 ** 3), logicalCpuCount: 8,
+      loadAverage1m: 16, memory: 'warning', thermal: 'unknown' },
+    { activeSubstantive: 0, activeHeavy: 0, observedUncoordinatedHeavy: 7 },
+    { workload: 'light', access: 'read' }
+  );
+  assert.equal(capacity.canAdmit, true);
+  assert.equal(capacity.substantiveSlots, 1);
+  assert.equal(capacity.livePressure.cpu, 'saturated');
+  const shell = evaluateCapacity(
+    { physicalMemoryBytes: 8 * (1024 ** 3), logicalCpuCount: 8,
+      loadAverage1m: 16, memory: 'warning', thermal: 'unknown' },
+    { activeSubstantive: 0, activeHeavy: 0, observedUncoordinatedHeavy: 7 },
+    { workload: 'medium', access: 'mutate' }
+  );
+  assert.equal(shell.canAdmit, false);
 });
