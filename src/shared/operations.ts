@@ -78,6 +78,7 @@ export const DEX_OPERATIONS: readonly OperationDescriptor[] = [
   { operation: 'dex.fingerprint', capability: 'inspect', risk: 'inspect', mutation: false, supportsPlan: false, readOnlyAllowed: true, workspaceSafeAllowed: true, checkpointStrategy: 'none' },
   { operation: 'dex.trustReport', capability: 'inspect', risk: 'inspect', mutation: false, supportsPlan: false, readOnlyAllowed: true, workspaceSafeAllowed: true, checkpointStrategy: 'none' },
   { operation: 'dex.repoInfo', capability: 'inspect', risk: 'inspect', mutation: false, supportsPlan: false, readOnlyAllowed: true, workspaceSafeAllowed: true, checkpointStrategy: 'none' },
+  { operation: 'dex.diagnostic.inspect', capability: 'inspect', risk: 'inspect', mutation: false, supportsPlan: false, readOnlyAllowed: true, workspaceSafeAllowed: true, checkpointStrategy: 'none' },
   { operation: 'dex.adbDevices', capability: 'inspect', risk: 'inspect', mutation: false, supportsPlan: false, readOnlyAllowed: true, workspaceSafeAllowed: true, checkpointStrategy: 'none' },
   { operation: 'dex.file.read', capability: 'file.read', risk: 'inspect', mutation: false, supportsPlan: false, readOnlyAllowed: true, workspaceSafeAllowed: true, checkpointStrategy: 'none' },
   { operation: 'dex.result.read', capability: 'file.read', risk: 'inspect', mutation: false, supportsPlan: false, readOnlyAllowed: true, workspaceSafeAllowed: true, checkpointStrategy: 'none' },
