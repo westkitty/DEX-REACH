@@ -34,7 +34,7 @@ async function connectedClient(nodes: Record<string, unknown>[] = []): Promise<{
 
 const EXPECTED_TOOLS = [
   'reach_list_nodes', 'reach_list_tools', 'reach_call', 'reach_fingerprint', 'reach_trust_report',
-  'reach_repo_info', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write',
+  'reach_repo_info', 'reach_diagnostic_inspect', 'reach_adb_devices', 'reach_checkpoint', 'reach_file_read', 'reach_file_write',
   'reach_process_run', 'reach_plan', 'reach_commit_plan', 'reach_receipts', 'reach_result_read', 'reach_revoke_node'
   , 'reach_task'
 ];
@@ -57,7 +57,7 @@ test('the served MCP surface preserves the 16 existing actions and adds one dura
   try {
     const first = await client.listTools();
     assert.deepEqual(first.tools.map(tool => tool.name), EXPECTED_TOOLS);
-    assert.equal(first.tools.length, 17);
+    assert.equal(first.tools.length, 18);
 
     // A second server instance must advertise the same surface in the same order: registration is
     // deterministic and free of order-dependent side effects.
@@ -92,7 +92,7 @@ test('mutating actions are annotated as mutating and inspections as read-only', 
   const { client, close } = await connectedClient();
   try {
     const byName = new Map((await client.listTools()).tools.map(tool => [tool.name, tool]));
-    for (const name of ['reach_fingerprint', 'reach_trust_report', 'reach_repo_info', 'reach_adb_devices', 'reach_file_read', 'reach_receipts', 'reach_result_read', 'reach_list_nodes', 'reach_list_tools']) {
+    for (const name of ['reach_fingerprint', 'reach_trust_report', 'reach_repo_info', 'reach_diagnostic_inspect', 'reach_adb_devices', 'reach_file_read', 'reach_receipts', 'reach_result_read', 'reach_list_nodes', 'reach_list_tools']) {
       assert.equal(byName.get(name)?.annotations?.readOnlyHint, true, `${name} should be annotated read-only`);
     }
     for (const name of ['reach_file_write', 'reach_process_run', 'reach_checkpoint', 'reach_commit_plan', 'reach_revoke_node']) {
