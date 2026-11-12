@@ -653,8 +653,9 @@ export function classifyObservedWorkloads(
   // conservatively; a different PGID is a separate job (shell job control, launchd/systemd sessions).
   // Bottom-up, any node (or whole app bundle) whose remaining subtree CPU reaches a job-sized core is one
   // workload and its CPU is spent, so independent job-sized children under an idle shell stay separate
-  // while idle intermediaries and many small workers still add up. When host CPU is not measured healthy,
-  // a family root that still holds a hot process also competes, as every hot process did before.
+  // while idle intermediaries and many small workers still add up. Mere busy host pressure does not
+  // turn a sub-core desktop process into a job-sized workload: heavy requests already queue when
+  // CPU is busy. Unknown or saturated pressure stays fail-closed for hot process families.
   const members = rows.filter(row => candidate(row) && !claimed.has(row.pid));
   const memberPids = new Set(members.map(row => row.pid));
   const up = new Map<number, number>();
@@ -680,7 +681,7 @@ export function classifyObservedWorkloads(
   const spend = (pid: number, family: Family) => { familyDetails.push(detail(pid, family.rows)); family.cpu = 0; family.rows = []; family.hot = false; };
   // A helper inside an app bundle defers to its bundle's top process: one app is one workload.
   const bundleInterior = (row: ProcessRow) => { const parent = up.get(row.pid); const bundle = desktopBundle(row.command); return parent !== undefined && bundle !== null && desktopBundle(byPid.get(parent)!.command) === bundle; };
-  const settleRoot = (pid: number, family: Family) => { if (family.cpu >= UNIDENTIFIED_JOB_CPU || (family.hot && options.hostCpu !== 'healthy')) spend(pid, family); };
+  const settleRoot = (pid: number, family: Family) => { if (family.cpu >= UNIDENTIFIED_JOB_CPU || (family.hot && options.hostCpu !== 'healthy' && options.hostCpu !== 'busy')) spend(pid, family); };
   const ready = members.filter(row => !pending.get(row.pid)).map(row => row.pid);
   const done = new Set<number>();
   while (ready.length) {
