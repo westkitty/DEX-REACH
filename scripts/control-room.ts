@@ -15,6 +15,7 @@ import { coordinatedStatus } from '../src/coordinator/client.js';
 import { localNodeIds } from './lib/node-files.js';
 import { DEX_REACH_VERSION } from '../src/shared/version.js';
 import { REACH_PROTOCOL_VERSION } from '../src/shared/protocol.js';
+import { formatControlRoomShareReport } from '../src/shared/control-room-share.js';
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -95,6 +96,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
   if (url.pathname.startsWith('/api/')) {
     try {
       if (url.pathname === '/api/overview') return json(res, 200, await overview());
+      if (url.pathname === '/api/share-report') {
+        const report = formatControlRoomShareReport(await overview());
+        res.writeHead(200, {
+          'content-type': 'text/plain; charset=utf-8',
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+          'referrer-policy': 'no-referrer'
+        });
+        return res.end(req.method === 'HEAD' ? undefined : report);
+      }
       if (url.pathname === '/api/tasks') {
         const parsedLimit = Number(url.searchParams.get('limit') || 20);
         const parsedOffset = Number(url.searchParams.get('offset') || 0);

@@ -10,6 +10,7 @@
     "gateway": "tsx src/gateway/main.ts",
     "recovery:c14": "tsx scripts/c14-recovery.ts",
     "control:room": "tsx scripts/control-room.ts",
+    "install:control-room:macos": "bash scripts/install-control-room-macos.sh",
     "coordinator": "tsx src/coordinator/main.ts",
     "worker": "tsx src/worker/main.ts",
     "node": "tsx src/node/main.ts",

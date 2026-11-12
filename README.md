@@ -48,6 +48,23 @@ DEX//REACH includes an independent, read-only local operations console. It runs 
 Sites, Spaces, or plugin-management pages and reads the existing owner-local task, event, activity,
 trace, node-runtime, access-policy, coordinator, and source-revision services.
 
+For persistent MacBook login startup, use `npm run install:control-room:macos` from a verified
+MacBook `westkitty/DEX-REACH` checkout containing installed dependencies. The MacBook-only,
+idempotent installer creates `~/Library/LaunchAgents/com.stinkyweasel.dex-control-room.plist`
+with `RunAtLoad` and `KeepAlive`, validates the existing port and source identity, and checks
+that the local page responds before reporting PASS. It starts in the user's macOS GUI session;
+macOS does not guarantee zero startup latency before that session exists. A real next-login
+check is still required for lifecycle proof. This is a separate observer, never a DEX gateway,
+node, coordinator, or AI authority service. Use `bash scripts/install-control-room-macos.sh
+--refresh` after updating the dashboard source; only its own launch agent may be restarted.
+
+The toolbar's **View / Copy AI report** opens a selectable, share-safe plain-text snapshot.
+The report includes source timestamps, local-node/service status, bounded durable-task
+states and explicit unknowns, while excluding commands, private paths, credentials, raw
+payloads, PIDs and result bodies. `GET /api/share-report` is same-origin loopback-only,
+read-only, bounded and non-cacheable. Browser clipboard failure still leaves selectable
+text for Command+C. Review the report before sharing it externally.
+
 From this checkout, run `npm run control:room` and open <http://127.0.0.1:4177>. The server binds
 only to IPv4 loopback, accepts same-origin loopback requests, serves no cross-origin API, and only
 implements `GET`/`HEAD` routes. `DEX_CONTROL_PORT` can select another local port. The browser never

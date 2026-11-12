@@ -13,7 +13,7 @@
   <a class="skip" href="#main">Skip to control room</a>
   <header class="topbar">
     <a class="brand" href="#overview" aria-label="Stinky Weasel Control overview"><span class="mark" aria-hidden="true">SW</span><span><b>STINKY WEASEL</b><small>PRODUCTIONS / DEX//REACH</small></span></a>
-    <div class="top-status"><span class="live-dot" aria-hidden="true"></span><span id="connection">Checking local backend</span><button id="refresh" class="icon-button" type="button" aria-label="Refresh now">↻</button></div>
+    <div class="top-status"><span class="live-dot" aria-hidden="true"></span><span id="connection">Checking local backend</span><button id="share-report" class="button share-action" type="button" aria-haspopup="dialog">View / Copy AI report</button><button id="refresh" class="icon-button" type="button" aria-label="Refresh now">↻</button></div>
   </header>
   <div class="layout">
     <nav class="nav" aria-label="Main navigation">
@@ -29,5 +29,16 @@
     </main>
   </div>
   <footer><span>DEX//REACH · OWNER AUTHORITY REMAINS LOCAL</span><span id="updated">Last update —</span></footer>
+  <dialog id="share-dialog" class="share-dialog" aria-labelledby="share-heading" aria-describedby="share-description">
+    <h2 id="share-heading">Share-safe diagnostic report</h2>
+    <p id="share-description">This read-only report is generated from allowlisted state, never raw commands, private paths, secrets or task payloads. Review its contents before sharing.</p>
+    <label for="share-text">Report text (select and copy manually if browser clipboard access is denied)</label>
+    <textarea id="share-text" rows="18" readonly spellcheck="false" aria-label="Share-safe diagnostic report text"></textarea>
+    <p id="share-status" role="status" aria-live="polite">Open the report to load current data.</p>
+    <div class="share-actions">
+      <button id="share-copy" type="button" class="button" disabled>Copy report</button>
+      <button id="share-close" type="button" class="button">Close</button>
+    </div>
+  </dialog>
 </body>
 </html>

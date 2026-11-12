@@ -19,6 +19,58 @@ let pollDelay = 5000;
 let logOffset = 0;
 let logFilter = '';
 let logRefreshTimer = null;
+const shareDialog = document.querySelector('#share-dialog');
+const shareText = document.querySelector('#share-text');
+const shareStatus = document.querySelector('#share-status');
+const shareCopy = document.querySelector('#share-copy');
+let shareRequestToken = 0;
+
+async function openShareReport() {
+  const token = ++shareRequestToken;
+  shareText.value = '';
+  shareCopy.disabled = true;
+  shareStatus.textContent = 'Reading a fresh owner-local, share-safe snapshot…';
+  if (!shareDialog.open) shareDialog.showModal();
+  try {
+    const response = await fetch('/api/share-report', {
+      headers: { accept: 'text/plain' }, cache: 'no-store'
+    });
+    if (!response.ok) throw new Error('Report endpoint unavailable');
+    const report = await response.text();
+    if (!report.startsWith('STINKY WEASEL CONTROL — SHARE-SAFE DIAGNOSTIC REPORT') || report.length > 16000) {
+      throw new Error('Report did not pass its format and size checks');
+    }
+    if (token !== shareRequestToken || !shareDialog.open) return;
+    shareText.value = report;
+    shareCopy.disabled = false;
+    shareStatus.textContent = 'Fresh report ready. Review the text, then choose Copy report.';
+    shareText.focus();
+  } catch {
+    if (token !== shareRequestToken || !shareDialog.open) return;
+    shareStatus.textContent = 'Report could not be generated. Nothing was copied; try again after the local API recovers.';
+  }
+}
+
+async function copyShareReport() {
+  if (shareCopy.disabled || !shareText.value) return;
+  const report = shareText.value;
+  shareStatus.textContent = 'Copying the verified share-safe report…';
+  let succeeded = false;
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(report);
+      succeeded = true;
+    }
+  } catch { /* Fallback to a user-initiated selection, never silent success. */ }
+  if (!succeeded) {
+    shareText.focus();
+    shareText.select();
+    try { succeeded = document.execCommand('copy') === true; } catch { succeeded = false; }
+  }
+  shareStatus.textContent = succeeded
+    ? 'Report copied. Review it before pasting into an AI.'
+    : 'Clipboard permission unavailable. The complete report is selected; use Command+C to copy it manually.';
+}
 
 function el(tag, cls, value) { const node = document.createElement(tag); if (cls) node.className = cls; if (value !== undefined) node.textContent = String(value); return node; }
 function add(parent, child) { parent.append(child); return child; }
@@ -53,4 +105,8 @@ function showError(title,message){let box=app.querySelector('[data-error-banner]
 async function renderRoute(){nav.forEach(a=>a.classList.toggle('active',a.dataset.route===route));try{if(route==='tasks'&&selectedTask)return await renderTaskDetail(selectedTask);if(route==='tasks')return await loadTasks();if(route==='log')return await renderLog();const data=await refreshOverview(currentController?.signal);if(route==='machine')renderMachine(data);else renderOverview(data);}catch(e){if(e.name!=='AbortError')showError('Local backend unavailable',e.message);}}
 function onHash(){const parts=location.hash.slice(1).split('/');route=['overview','tasks','log','machine'].includes(parts[0])?parts[0]:'overview';selectedTask=route==='tasks'&&parts[1]?decodeURIComponent(parts[1]):null;void renderRoute();}
 function schedulePoll(){clearTimeout(pollTimer);if(document.hidden)return;pollTimer=setTimeout(async()=>{if(!inFlight){inFlight=true;currentController?.abort();currentController=new AbortController();try{const data=await refreshOverview(currentController.signal);pollDelay=5000;if(route==='overview')renderOverview(data);else if(route==='machine')renderMachine(data);}catch(e){if(e.name!=='AbortError'){pollDelay=Math.min(30000,pollDelay*2);showError('Refresh failed',e.message);}}finally{inFlight=false;}}schedulePoll();},pollDelay);}
+document.querySelector('#share-report').addEventListener('click',()=>{void openShareReport();});
+shareCopy.addEventListener('click',()=>{void copyShareReport();});
+document.querySelector('#share-close').addEventListener('click',()=>shareDialog.close());
+shareDialog.addEventListener('close',()=>{shareRequestToken++; shareCopy.disabled=true;});
 document.querySelector('#refresh').addEventListener('click',()=>{currentController?.abort();currentController=new AbortController();void renderRoute();});window.addEventListener('hashchange',onHash);document.addEventListener('visibilitychange',()=>{clearTimeout(pollTimer);if(!document.hidden){void renderRoute();schedulePoll();}});window.addEventListener('pagehide',()=>{clearTimeout(pollTimer);currentController?.abort();},{once:true});onHash();schedulePoll();
