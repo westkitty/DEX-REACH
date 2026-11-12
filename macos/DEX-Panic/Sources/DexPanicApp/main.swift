@@ -17,11 +17,15 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var refreshInFlight = false
     private var actionInFlight = false
     private var lastCheck: Date?
+    private var lastConfirmedRunning: [String: Date] = [:]
+    private var lastProbeCycleMilliseconds: Int?
     private var logFull = false
     private let deckModel = RecoveryDeckModel()
     private var deckWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Single operator surface: Big Mac is an information-only source, not a second menu app.
+        guard HostProfile.current == .macBook else { NSApp.terminate(nil); return }
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = makeStatusIcon(for: .unknown)
@@ -34,6 +38,10 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         deckModel.onCapacity = { [weak self] in self?.showWorkStatus() }
         deckModel.onAuthority = { [weak self] in self?.showOwnerStatus() }
         deckModel.onOpenLog = { [weak self] in self?.revealLog() }
+        deckModel.onCopyDiagnostics = { [weak self] in self?.copyDiagnostics() }
+        deckModel.onInspectCompetingWork = { [weak self] in self?.inspectCompetingWork() }
+        deckModel.onInspectClassification = { [weak self] in self?.inspectClassification() }
+        deckModel.onInspectTasks = { [weak self] in self?.inspectTaskAutopsy() }
         rebuildMenu()
         refresh()
         timer = Timer.scheduledTimer(timeInterval: 20, target: self,
@@ -43,7 +51,8 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) { timer?.invalidate() }
 
     func menuWillOpen(_ menu: NSMenu) {
-        refresh()
+        // Avoid duplicate expensive process probes immediately after the background tick.
+        if RefreshPolicy.needsMenuProbe(lastChecked: lastCheck) { refresh() }
     }
 
     @objc private func tick() { refresh() }
@@ -54,12 +63,16 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateDeck()
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
-            let fresh = ServiceRegistry.reach.map { self.launchd.probe($0) }
+            let started = ProcessInfo.processInfo.systemUptime
+            let fresh = HostProfile.macBook.services.map { self.launchd.probe($0) }
+            let elapsedMs = max(0, Int((ProcessInfo.processInfo.systemUptime - started) * 1000))
             DispatchQueue.main.async {
                 self.refreshInFlight = false
                 self.probes = fresh
                 self.lastCheck = Date()
+                self.lastProbeCycleMilliseconds = elapsedMs
                 for probe in fresh {
+                    if probe.state == .running { self.lastConfirmedRunning[probe.service.id] = self.lastCheck }
                     if let previous = self.priorStates[probe.service.id], previous != probe.state {
                         self.log(action: "state-change", target: probe.service.id,
                                  outcome: "\(previous.rawValue)-to-\(probe.state.rawValue)")
@@ -79,6 +92,8 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         deckModel.refreshInFlight = refreshInFlight
         deckModel.logFull = logFull
         deckModel.incidents = ledger.recent(limit: 12)
+        deckModel.lastConfirmedRunning = lastConfirmedRunning
+        deckModel.probeCycleMs = lastProbeCycleMilliseconds
     }
 
     private func log(action: String, target: String, outcome: String) {
@@ -150,9 +165,13 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if logFull { menu.addItem(item("Incident log unavailable or at size limit", enabled: false)) }
         menu.addItem(.separator())
         menu.addItem(item("Open Recovery Deck...", action: #selector(openRecoveryDeck)))
+        menu.addItem(item("Copy share-safe diagnostic report", action: #selector(copyDiagnostics)))
         menu.addItem(item("Refresh local health", action: #selector(manualRefresh), enabled: !refreshInFlight))
         menu.addItem(item("Show owner access status", action: #selector(showOwnerStatus), enabled: !actionInFlight))
         menu.addItem(item("Inspect coordinator capacity (read-only)", action: #selector(showWorkStatus), enabled: !actionInFlight))
+        menu.addItem(item("Inspect competing work (MacBook + Big Mac, read-only)", action: #selector(inspectCompetingWork), enabled: !deckModel.inspectingWork))
+        menu.addItem(item("Inspect coordinator classifications (read-only)", action: #selector(inspectClassification), enabled: !deckModel.inspectingClassification))
+        menu.addItem(item("Inspect durable task states (read-only)", action: #selector(inspectTaskAutopsy), enabled: !deckModel.inspectingTasks))
         menu.addItem(.separator())
         menu.addItem(item("STOP NEW REMOTE AI EXECUTION", action: #selector(disableRemoteAI), enabled: !actionInFlight))
         menu.addItem(item("Does not terminate already-running tasks", enabled: false))
@@ -195,11 +214,95 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .degraded:
             statusItem.button?.toolTip = "DEX//PANIC: a required service is stopped or missing"
         case .unknown:
-            statusItem.button?.toolTip = "DEX//PANIC: required service health unknown"
+            statusItem.button?.toolTip = "DEX//PANIC: local launchctl checks unverified; open Recovery Deck for guidance"
+        }
+    }
+
+    /// Owner-initiated, read-only process inspection. No DEX task mutation, no process kill.
+    @objc private func inspectCompetingWork() {
+        guard !deckModel.inspectingWork else { return }
+        openRecoveryDeck()
+        deckModel.inspectingWork = true
+        deckModel.selectedWorkHost = .macBook
+        deckModel.workSnapshots = [:]
+        rebuildMenu()
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            let inspector = CompetingWorkInspector(runner: self.runner)
+            let local = inspector.inspectMacBook()
+            DispatchQueue.main.async { [weak self] in
+                self?.deckModel.workSnapshots[.macBook] = local
+            }
+            let remote = inspector.inspectBigMac()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.deckModel.workSnapshots[.bigMac] = remote
+                self.deckModel.inspectingWork = false
+                self.rebuildMenu()
+            }
+        }
+    }
+
+    /// Owner-triggered coordinator evidence, no process or task mutation.
+    @objc private func inspectClassification() {
+        guard !deckModel.inspectingClassification else { return }
+        openRecoveryDeck()
+        let target = deckModel.selectedWorkHost
+        deckModel.inspectingClassification = true
+        rebuildMenu()
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            let sample = OwnerEvidenceInspector(runner: self.runner, profile: .macBook).attribution(host: target)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.deckModel.classifiedWork[target] = sample
+                self.deckModel.inspectingClassification = false
+                self.rebuildMenu()
+            }
+        }
+    }
+
+    /// Task autopsy can only observe current durable metadata; it NEVER resumes or retries.
+    @objc private func inspectTaskAutopsy() {
+        guard !deckModel.inspectingTasks else { return }
+        openRecoveryDeck()
+        let target = deckModel.selectedWorkHost
+        deckModel.inspectingTasks = true
+        rebuildMenu()
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            let sample = OwnerEvidenceInspector(runner: self.runner, profile: .macBook).autopsy(host: target)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.deckModel.taskAutopsies[target] = sample
+                self.deckModel.inspectingTasks = false
+                self.rebuildMenu()
+            }
         }
     }
 
     @objc private func manualRefresh() { refresh() }
+
+    /// Clipboard is the ONLY output destination. Never include raw owner CLI output or files.
+    @objc private func copyDiagnostics() {
+        let report = DiagnosticReport.render(DiagnosticSnapshot(
+            probes: probes, services: HostProfile.macBook.services,
+            lastConfirmedRunning: lastConfirmedRunning,
+            cycleDurationMilliseconds: lastProbeCycleMilliseconds,
+            lastChecked: lastCheck, refreshInFlight: refreshInFlight,
+            admissionNote: deckModel.capacityNote, admissionChecked: deckModel.capacityChecked,
+            workEvidence: deckModel.capacityEvidence, workSnapshots: deckModel.workSnapshots,
+            classifiedWork: deckModel.classifiedWork, taskAutopsies: deckModel.taskAutopsies,
+            authorityNote: deckModel.authorityNote, authorityChecked: deckModel.authorityChecked,
+            logFull: logFull, incidents: ledger.recent(limit: 24)))
+        let clipboard = NSPasteboard.general
+        clipboard.clearContents()
+        if clipboard.setString(report, forType: .string) {
+            deckModel.copyFeedback = "Diagnostic report copied. Paste it into ChatGPT; review before sharing."
+        } else {
+            deckModel.copyFeedback = "Clipboard unavailable. No report was shared."
+        }
+    }
 
     private func alert(title: String, text: String, warning: Bool = false) {
         let panel = NSAlert()
@@ -237,6 +340,7 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // A returned exit 0 is not proof that the intended service or policy is healthy.
                 if name == "Disable remote execution" {
                     self.deckModel.authorityNote = outcome.succeeded ? "OFF VERIFIED" : "OFF NOT VERIFIED"
+                    self.deckModel.authorityChecked = Date()
                 }
                 let suffix: String
                 if name == "Disable remote execution" && outcome.succeeded {
@@ -276,15 +380,25 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async {
                 self.actionInFlight = false
                 self.log(action: "read-owner-status", target: "node-local-policy", outcome: result.outcomeLabel)
-                switch OwnerStatusParser.accessMode(result) {
-                case .off: self.deckModel.authorityNote = "OFF VERIFIED"
-                case .readOnly: self.deckModel.authorityNote = "READ-ONLY"
-                case .on: self.deckModel.authorityNote = "ON"
-                case .unknown: self.deckModel.authorityNote = "NOT VERIFIED"
+                self.deckModel.authorityChecked = Date()
+                let access = OwnerStatusParser.accessMode(result)
+                let explanation: String
+                switch access {
+                case .off:
+                    self.deckModel.authorityNote = "OFF VERIFIED"
+                    explanation = "New remote AI execution is blocked by the owner-local policy. Tasks already running are not necessarily stopped."
+                case .readOnly:
+                    self.deckModel.authorityNote = "READ-ONLY"
+                    explanation = "Owner-local policy permits read-only inspection, not new mutations. This is a policy choice, not a service fault."
+                case .on:
+                    self.deckModel.authorityNote = "ON"
+                    explanation = "Owner-local policy permits remote AI work within the configured profile and remaining safety limits. This does not guarantee task admission."
+                case .unknown:
+                    self.deckModel.authorityNote = "NOT VERIFIED"
+                    explanation = "The owner CLI did not return a verifiable policy mode. No policy change is inferred. Try inspection again later or copy the diagnostic report."
                 }
-                let localText = result.succeeded ? String(result.output.prefix(5000)) : result.outcomeLabel
-                self.alert(title: "DEX//REACH owner status", text: localText.isEmpty ? "No status text returned" : localText,
-                           warning: !result.succeeded)
+                self.alert(title: "DEX//REACH owner policy", text: explanation,
+                           warning: access == .unknown)
                 self.rebuildMenu()
             }
         }
@@ -301,16 +415,31 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async {
                 self.actionInFlight = false
                 self.log(action: "read-work-status", target: "coordinator-capacity", outcome: result.outcomeLabel)
-                switch WorkStatusParser.admission(result) {
-                case .available: self.deckModel.capacityNote = "AVAILABLE AT CHECK"
-                case .queued: self.deckModel.capacityNote = "QUEUED AT CHECK"
-                case .unknown: self.deckModel.capacityNote = "NOT VERIFIED"
+                self.deckModel.capacityChecked = Date()
+                let evidence = WorkEvidenceParser.parse(result)
+                self.deckModel.capacityEvidence = evidence
+                let admission = WorkStatusParser.admission(result)
+                let explanation: String
+                switch admission {
+                case .available:
+                    self.deckModel.capacityNote = "AVAILABLE AT CHECK"
+                    explanation = "The coordinator had capacity for a new medium job when inspected. This is not permission, and capacity can change."
+                case .queued:
+                    self.deckModel.capacityNote = "QUEUED AT CHECK"
+                    explanation = "The coordinator would queue new work at the last inspection. This usually means competing work or resource pressure, not a confirmed daemon crash. Wait for work to settle before checking again."
+                case .unknown:
+                    self.deckModel.capacityNote = "NOT VERIFIED"
+                    explanation = "The capacity inspection could not be verified. No capacity or outage claim is made."
                 }
-                let localText = result.succeeded ? String(result.output.prefix(5000)) : result.outcomeLabel
-                self.alert(title: "DEX//REACH coordinator admission",
-                           text: (localText.isEmpty ? "No status returned" : localText) +
-                                 "\n\nService liveness and admission capacity are separate. A saturated coordinator can refuse work even while all daemons are running.",
-                           warning: !result.succeeded)
+                let evidenceText: String
+                if let evidence {
+                    evidenceText = "\n\nObserved memory: \(evidence.memory); CPU: \(evidence.cpu); uncoordinated heavy jobs: \(evidence.uncoordinatedHeavy.map(String.init) ?? "not reported")."
+                } else {
+                    evidenceText = "\n\nResource pressure details were not available."
+                }
+                self.alert(title: "DEX//REACH work admission", text: explanation + evidenceText +
+                           "\n\nA running process is not proof a task finished. Use Copy diagnostic report to share these sanitized observations.",
+                           warning: admission == .unknown)
                 self.rebuildMenu()
             }
         }

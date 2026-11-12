@@ -3,11 +3,16 @@
 # Never overrides an existing installation; never contacts the DEX gateway.
 set -euo pipefail
 
+if [[ "$(/bin/hostname -s)" != "MacBook-Air" || "$(/usr/bin/id -un)" != "andrew" ]]; then
+  /bin/echo "Only the verified MacBook installs the DEX//PANIC menu-bar app." >&2
+  exit 2
+fi
+
 TARGET="$HOME/Applications/DEX Panic.app"
-ZIP="$HOME/Downloads/DEX-Panic-v0.2.1-icon-fix-macos-arm64.app.zip"
-REMOTE="westcat:/Users/bigmac/DEX-Panic-v0.2.1-icon-fix-macos-arm64.app.zip"
-EXPECTED_ZIP="1157ab28f4f6ce5792f1dbf652e2c6633d1d1a2edb874d415959234f87472cdd"
-EXPECTED_BIN="000ef0fc7554cde33a7a4a78381c2281d7ffbb8223ab902fca2d4beb48bc1050"
+ZIP="$HOME/Downloads/DEX-Panic-v0.3.0-macos-arm64.app.zip"
+REMOTE="westcat:/Users/bigmac/DEX-Panic-v0.3.0-macos-arm64.app.zip"
+EXPECTED_ZIP="cfded298a85907b809074121d0c76b081f7b8d4cdcbef947f9dbe1c9f48ebebc"
+EXPECTED_BIN="6ded1cf197b2759982186acd032e7352585555e3ec6edaf4e905df8b219b7137"
 
 VERIFY_ONLY=0
 if [[ $# -eq 1 && "$1" == "--verify-only" ]]; then
@@ -58,7 +63,7 @@ if [[ "$BUNDLE_ID" != "com.stinkyweasel.dex-panic" ]]; then
 fi
 BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$SOURCE/Contents/Info.plist")"
 LSUIELEMENT="$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$SOURCE/Contents/Info.plist")"
-if [[ "$BUNDLE_VERSION" != "0.2.1" || "$LSUIELEMENT" != "true" ]]; then
+if [[ "$BUNDLE_VERSION" != "0.3.0" || "$LSUIELEMENT" != "true" ]]; then
   echo "STOP: wrong app version or not a menu-bar application." >&2
   exit 8
 fi

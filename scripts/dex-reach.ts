@@ -25,6 +25,7 @@ import type { WorkExecutor } from '../src/shared/work-coordinator.js';
 import { CAPACITY_PROFILES, loadCapacityProfile, setCapacityProfile, type CapacityProfile } from '../src/shared/capacity-profile.js';
 import { runWithWorkLease } from '../src/shared/work-run.js';
 import { describeTrace, traceQueueDiagnostics, isValidTraceId, listTraces, otelExportEnabled, readTrace } from '../src/shared/trace.js';
+import { panicWorkProjection, panicTaskProjection } from '../src/shared/panic-projection.js';
 import {
   BUDGET_SCOPES,
   clearBudgetRule,
@@ -456,8 +457,22 @@ async function activityCommand(): Promise<void> {
   } while (true);
 }
 
+/** Only the verified owner-local machine may offer the PANIC projection. No guessed targets. */
+function panicLocalNodeId(): 'bigmac' | 'macbook-air.local' {
+  const host = os.hostname().toLowerCase().replace(/\.local$/, '');
+  const user = os.userInfo().username;
+  if (host === 'bigmac' && user === 'bigmac') return 'bigmac';
+  if (host === 'macbook-air' && user === 'andrew') return 'macbook-air.local';
+  throw new Error('DEX PANIC local identity not verified; no cross-node fallback');
+}
+
 async function workStatusCommand(): Promise<void> {
   const status = await workStatus();
+  if (flag('--panic', argv)) {
+    const nodeId = panicLocalNodeId();
+    console.log(JSON.stringify({ ...panicWorkProjection(status), nodeId }));
+    return;
+  }
   if (flag('--share', argv)) { console.log(JSON.stringify(redactWorkStatusForShare(status), null, 2)); return; }
   if (flag('--json', argv)) { console.log(JSON.stringify(status, null, 2)); return; }
   console.log(describeWorkStatus(status).join('\n'));
@@ -1039,7 +1054,13 @@ async function tasksCommand(): Promise<void> {
     ...(stateValue ? { state: stateValue as TaskState } : {}),
     ...(flag('--archived', argv) ? { includeArchived: true } : {})
   };
-  const tasks = (await store.list(query)).slice(0, Number.isFinite(limitValue) && limitValue > 0 ? Math.min(limitValue, 200) : 50);
+  const allTasks = await store.list(query);
+  if (flag('--panic', argv)) {
+    const nodeId = panicLocalNodeId();
+    console.log(JSON.stringify(panicTaskProjection(allTasks, nodeId)));
+    return;
+  }
+  const tasks = allTasks.slice(0, Number.isFinite(limitValue) && limitValue > 0 ? Math.min(limitValue, 200) : 50);
   if (flag('--json', argv)) { console.log(JSON.stringify(tasks, null, 2)); return; }
   if (!tasks.length) { console.log('No durable tasks recorded.'); return; }
   console.log(`Durable tasks (${tasks.length}):`);

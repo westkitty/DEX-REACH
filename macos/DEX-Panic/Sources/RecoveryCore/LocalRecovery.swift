@@ -15,11 +15,13 @@ public struct LaunchdSupervisor {
     }
 
     public func probe(_ service: ManagedService) -> ServiceProbe {
+        let started = ProcessInfo.processInfo.systemUptime
         let result = runner.run(CommandSpec(executable: "/bin/launchctl",
                                             arguments: ["print", "gui/\(userID)/\(service.launchdLabel)"],
                                             timeout: 4))
-        if result.timedOut { return .init(service: service, state: .unknown, detail: "Probe timed out") }
-        if result.startError != nil { return .init(service: service, state: .unknown, detail: "Cannot invoke launchctl") }
+        let elapsed = max(0, Int((ProcessInfo.processInfo.systemUptime - started) * 1000))
+        if result.timedOut { return .init(service: service, state: .unknown, detail: "Probe timed out", durationMilliseconds: elapsed) }
+        if result.startError != nil { return .init(service: service, state: .unknown, detail: "Cannot invoke launchctl", durationMilliseconds: elapsed) }
         let state = LaunchctlParser.parse(output: result.output, exitCode: result.exitCode)
         let detail: String
         switch state {
@@ -28,7 +30,7 @@ public struct LaunchdSupervisor {
         case .notInstalled: detail = "Not loaded"
         case .unknown: detail = "Unknown state; no automatic repair"
         }
-        return .init(service: service, state: state, detail: detail)
+        return .init(service: service, state: state, detail: detail, durationMilliseconds: elapsed)
     }
 
     private func isKnownService(_ service: ManagedService) -> Bool {
@@ -88,7 +90,19 @@ public struct OwnerCLI {
     public func workStatus() -> CommandResult { invoke("work-status") }
     public func disable() -> CommandResult { invoke("disable") }
 
+    /// Read-only inspector commands only. Other CLI verbs do not pass this gate.
+    public func readOnly(_ args: [String]) -> CommandResult {
+        guard args == ["work-status", "--json"] || args == ["tasks", "--limit", "8", "--json"] else {
+            return .init(exitCode: nil, timedOut: false, startError: "Read-only command outside allowlist")
+        }
+        return invoke(args: args, timeout: 18, maxOutputBytes: 64000)
+    }
+
     private func invoke(_ subcommand: String) -> CommandResult {
+        invoke(args: [subcommand], timeout: 12, maxOutputBytes: 8192)
+    }
+
+    private func invoke(args: [String], timeout: TimeInterval, maxOutputBytes: Int) -> CommandResult {
         let fm = FileManager.default
         guard fm.fileExists(atPath: repo.appendingPathComponent("package.json").path),
               fm.fileExists(atPath: repo.appendingPathComponent("scripts/dex-reach.ts").path) else {
@@ -104,8 +118,9 @@ public struct OwnerCLI {
         for entry in pathParts where !unique.contains(entry) { unique.append(entry) }
         env["PATH"] = unique.joined(separator: ":")
         return runner.run(CommandSpec(executable: npm.path,
-                                      arguments: ["run", "dex", "--", subcommand],
-                                      workingDirectory: repo, environment: env, timeout: 12))
+                                      arguments: ["run", "dex", "--"] + args,
+                                      workingDirectory: repo, environment: env,
+                                      timeout: timeout, maxOutputBytes: maxOutputBytes))
     }
 
     private func findNpm() -> URL? {

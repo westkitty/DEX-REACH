@@ -86,3 +86,50 @@ Final Apple Silicon release artifact: `/Users/bigmac/DEX-Panic-v0.2.0-final-maco
 ### Read-only installer test admission (not executed)
 
 On the MacBook, attempting to stage the new `--verify-only` installer via the normal DEX//REACH node was refused **before execution**: `COORDINATOR_WAIT_TIMEOUT`, 3 substantive competitors/1 slot (3 uncoordinated heavy workloads). No copy/install/launch occurred from that attempt. This is a capacity boundary, not evidence the installer works or is broken. Static `zsh -n`, executable-path existence, archive/Plist hashes and isolated source tests are the supported proof; live `--verify-only` remains UNVERIFIED. Do not bypass the coordinator through an alternate remote transport.
+
+## 2026-11-12 — v0.2.2 diagnostic guidance / copyable report candidate
+
+User observed all four service probes `UNKNOWN` with `Probe timed out`, while admission displayed `QUEUED AT CHECK`. Source confirmed `LaunchdSupervisor.probe` invokes `launchctl print` with 4-second timeout per service; observed unknown is a failed observation, not proof the daemon exited. The MacBook recently reported resource contention but causal attribution is unproven.
+
+An isolated Big Mac source copy `/Users/bigmac/DEX-Panic-Diagnostics-0.2.2-20261112` was derived from clean published source commit `0b24e58c16ed12c5124a789dcea720fd37a86ec9` without mutating the canonical repository or installed MacBook app. v0.2.2 adds a bounded, share-safe text diagnostic with per-service reasons and timestamps, a plain-English explanation/next-step pane, copy feedback, and sanitized on-demand owner/capacity UI. Work resource metrics are only displayed if separately inspected. Unit tests verify interpretation and no accidental secret/path copying.
+
+At initial implementation, the 25 macOS unit tests passed (8 additional tests), and SwiftUI AppKit code compiled. Final built archive, MacBook UI, clipboard, deployment and Git publication remain separate validation gates until observed. No live node policy or daemon was changed.
+
+### v0.2.2 Big Mac build proof (not MacBook acceptance)
+
+- macOS Swift 6.4: `swift test --jobs 4` 25/25 passed; `scripts/build-app.sh` compiled the standalone AppKit/SwiftUI arm64 app; `scripts/verify-app.sh` passed bundle identity/version and executable checks.
+- Current built app: `/Users/bigmac/DEX-Panic-Diagnostics-0.2.2-20261112/dist/DEX Panic.app`, CFBundleShortVersionString `0.2.2`, build `4`; executable SHA-256 `1c113a0ded8c8b9d3cb74deeab529585c0ddf15c2efc71186118e699837580df`.
+- Prebuilt archive on Big Mac: `/Users/bigmac/DEX-Panic-v0.2.2-macos-arm64.app.zip`, SHA-256 `6d642fafc3dd6e0aafbeef5f4c92772faafa97830d3b82d3327b91d3de008286`; archive integrity verified. Installer updated with both hashes and version 0.2.2.
+- Not verified: exact MacBook installation and visual clipboard interaction, real-world false-timeout behavior, network, code signing/notarization, or actual remote task reconciliation. The v0.2.1 installation and backups are preserved. No commit/push or node policy change in this bounded feature pass.
+
+### Final v0.2.2 binary supersession
+
+A final security regression established that interpretation must use canonical registry service titles rather than titles carried by potentially untrusted probe objects. The prior candidate executable (`1c113a0...`) and ZIP (`6d642faf...`) were **SUPERSEDED** and were NOT installed. The final revised source ran **26/26 macOS tests** with zero failures; `scripts/build-app.sh` and `scripts/verify-app.sh` completed on Big Mac. Final v0.2.2 executable SHA-256 `4beac3014d243083d03517e1aabb5348feb961906029236163bfdb47b26b56cb` and final archive `/Users/bigmac/DEX-Panic-v0.2.2-final-macos-arm64.app.zip` SHA-256 `43437ae614a238ab4d4be194847ac92d53eef60cfe4d9656e72ae498de143a23`. Upgrade and first-install scripts are checksum-locked to this exact final archive; upgrading is explicit and refuses unexpected v0.2.1 binaries. No installed MacBook app was replaced by this build, and no Git commit/push or DEX policy/service restart has been executed as part of the candidate production.
+
+## 2026-11-12 — v0.2.3 process inspector candidate / safety gate
+
+Scope: **DEX//PANIC standalone Mac App only**, isolated Big Mac source at `/Users/bigmac/DEX-Panic-Competing-Work-0.2.3-20261112` derived exactly from previous v0.2.2 source, without overwriting any prior source/installed app. Build 5.
+
+- New manually invoked two-host process inspector: MacBook native read-only ps CPU/RSS samples, Big Mac single bounded SSH read-only sampling through owner-authenticated `westcat` with fixed explicit target node ID `bigmac`, strict known-host checking, fixed expected remote hostname/account and no remote fallback. Only executable basename, CPU%, RSS MiB and cautious category explanations retained. No kill/restart/stop/disable/force-quit/automatic termination capability added. No background polling of Big Mac.
+- UI has MacBook and Big Mac separate machine tabs, timestamp/status including UNAVAILABLE, process explanation rows, and report export with sanitized process shortlist but no args, PIDs or paths. Coordinator heavy-work count remains a separate observation and is not attributed to individual rows.
+- **Verified Big Mac:** `swift test --jobs 4`: 36/36 PASS, including remote identity, fail closed, read-only command restrictions, parser and clipboard privacy; native macOS arm64 build and bundle verify PASS, bundle `0.2.3` build `5`. Executable SHA-256 `51502a7a20947d6d67d724710e71cab182a780259700eab56f6f2e58f01a31a5`; app ZIP SHA-256 `98ee33e9af48297831ac83c87da3cded1361d7a3e3ca25c908d598be8f62f4f5`.
+- **Unverified MacBook:** exact installed/GUI process-inspection flow, live remote SSH collector and per-host acceptance. DEX coordinator refused a read-only remote smoke during 2 uncoordinated heavy jobs / 1 substantive slot. Refusal respected; no route bypass or DEX service/policy mutation. v0.2.2 remains installed until explicit safe upgrade; rollback script is checksum-locked but MacBook execution still unverified.
+- Source has not been committed or pushed in this change. Google Drive archive not yet verified. Signed/notarized release not performed.
+
+## 2026-11-12 — v0.3.0 five-lane release candidate, Big Mac source only
+
+A clean isolated source checkout rooted at `/Users/bigmac/DEX-Panic-0.3.0-Release-20261112` was created from canonical `westkitty/DEX-REACH` main `0b24e58c16ed12c5124a789dcea720fd37a86ec9`. The prior v0.2.3 source was restored from its checksum-verified archive and only authorized DEX//PANIC and read-only owner CLI paths were changed. An unrelated dirty Big Mac checkout and the live MacBook DEX runtime were not modified.
+
+C01 release chain: app v0.3.0 build 6 (`6ded1cf197b2759982186acd032e7352585555e3ec6edaf4e905df8b219b7137` SHA-256) compiled on Big Mac. App archive at `/Users/bigmac/DEX-Panic-v0.3.0-macos-arm64.app.zip` SHA-256 `cfded298a85907b809074121d0c76b081f7b8d4cdcbef947f9dbe1c9f48ebebc`, integrity PASS. MacBook upgrade script requires exact v0.2.3 source binary and preserves rollback. Publication and actual installed runtime must be verified separately; initial coding state is source-tested, not MacBook-installed.
+
+C02 read-only coordinator classification: `src/shared/panic-projection.ts` and owner-only `work-status --panic` expose a versioned, bounded, allowlisted grouping projection with counts and thresholds. `OwnerEvidence.swift` accepts the projection for authenticated Big Mac through `westcat`, validates explicit node and groups, and accepts MacBook's existing local CLI JSON only after strict typed inspection. No process arguments, PIDs, lease details, project paths or tokens enter the share-safe projection.
+
+C03 shield causality: recorded per-daemon launchctl probe time in ms, last positive running timestamp and total probe-cycle duration. Unknown remains unknown; white/red conservative icon retained, no auto-restart.
+
+C04 reduced overhead: menu opened within eight seconds of the last successful cycle does not duplicate probes; explicit refresh works. CLI output readback bounded to at most 64 KB instead of loading whole temporary files. Release testing provides deterministic policy tests and observability, but there is NO matched installed-MacBook CPU/RSS benchmark proving a numerical gain.
+
+C05 read-only durable-task autopsy: `tasks --panic` returns at most eight typed, node-matched task rows (ID, operation, state, updated time and result-reference flag). UI interprets AMBIGUOUS, INPUT_REQUIRED and terminal states conservatively. No task retry/resume/cancel/reconcile controls.
+
+**Big Mac is information-only, no menu-bar app installed there.** Host identity checked before remote CLI/probe data accepted. A MacBook-only installer explicitly refuses Big Mac installation. Big Mac's live installed DEX node, gateway, coordinator, owner policy, credentials, permissions and services are unchanged.
+
+Validation: macOS Swift 46/46 PASS; root TypeScript typecheck PASS; focused suite 50/50 PASS; root build PASS; 42/42 invariants PASS; Big Mac direct read-only projection smoke PASS. Full suite, MacBook runtime installation, end-to-end SSH GUI and matched performance remain separate gates. Source commit/push expected only after exact Git diff and archive receipts pass; do not infer completion from this entry.

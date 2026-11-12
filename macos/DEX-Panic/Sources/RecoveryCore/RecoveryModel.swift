@@ -35,11 +35,15 @@ public struct ServiceProbe: Equatable {
     public let service: ManagedService
     public let state: ServiceState
     public let detail: String
+    /// Monotonic wall elapsed time of this inspection, measured before classification.
+    public let durationMilliseconds: Int?
 
-    public init(service: ManagedService, state: ServiceState, detail: String) {
+    public init(service: ManagedService, state: ServiceState, detail: String,
+                durationMilliseconds: Int? = nil) {
         self.service = service
         self.state = state
         self.detail = detail
+        self.durationMilliseconds = durationMilliseconds
     }
 }
 
@@ -100,10 +104,10 @@ public enum SystemHealth: Equatable {
 }
 
 public enum HealthClassifier {
-    public static func classify(_ probes: [ServiceProbe]) -> SystemHealth {
-        // A partial observation must never be shown as a complete healthy system.
-        // Use the canonical registry, not a caller-supplied subset of required flags.
-        let required = ServiceRegistry.reach.filter(\.required)
+    public static func classify(_ probes: [ServiceProbe],
+                                services: [ManagedService] = ServiceRegistry.reach) -> SystemHealth {
+        // Required services are explicit for each verified host; unknown hosts fail closed.
+        let required = services.filter(\.required)
         guard !required.isEmpty else { return .unknown }
         let observations = required.map { service in
             probes.filter { $0.service.id == service.id && $0.service.launchdLabel == service.launchdLabel }

@@ -8,8 +8,8 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "Build requires a Mac with Xcode command-line tools" >&2
   exit 2
 fi
-swift build -c release --product DexPanicApp
-BIN="$(swift build -c release --show-bin-path)/DexPanicApp"
+swift build -c release --jobs 4 --product DexPanicApp
+BIN="$(swift build -c release --jobs 4 --show-bin-path)/DexPanicApp"
 APP="$ROOT/dist/DEX Panic.app"
 if [[ -e "$APP" ]]; then
   echo "Refusing to overwrite existing bundle: $APP" >&2

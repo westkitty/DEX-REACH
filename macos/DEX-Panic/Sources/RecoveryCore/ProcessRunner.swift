@@ -6,14 +6,17 @@ public struct CommandSpec {
     public let workingDirectory: URL?
     public let environment: [String: String]?
     public let timeout: TimeInterval
+    public let maxOutputBytes: Int
 
     public init(executable: String, arguments: [String], workingDirectory: URL? = nil,
-                environment: [String: String]? = nil, timeout: TimeInterval = 5) {
+                environment: [String: String]? = nil, timeout: TimeInterval = 5,
+                maxOutputBytes: Int = 8192) {
         self.executable = executable
         self.arguments = arguments
         self.workingDirectory = workingDirectory
         self.environment = environment
         self.timeout = timeout
+        self.maxOutputBytes = max(1024, min(64000, maxOutputBytes))
     }
 }
 
@@ -86,8 +89,10 @@ public struct SystemProcessRunner: CommandRunning {
         }
 
         capture.synchronizeFile()
-        let raw = (try? Data(contentsOf: outputURL)) ?? Data()
-        let limited = Data(raw.prefix(8192))
+        // Reading only the first bounded bytes avoids loading an unbounded CLI response.
+        let reader = try? FileHandle(forReadingFrom: outputURL)
+        let limited = (try? reader?.read(upToCount: spec.maxOutputBytes)) ?? Data()
+        try? reader?.close()
         return CommandResult(exitCode: process.terminationStatus, timedOut: false,
                              output: String(decoding: limited, as: UTF8.self))
     }

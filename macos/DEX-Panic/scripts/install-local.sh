@@ -1,6 +1,10 @@
 #!/bin/zsh
 # Install only if target does not exist. Never overwrite a prior app.
 set -euo pipefail
+if [[ "$(/bin/hostname -s)" != "MacBook-Air" || "$(/usr/bin/id -un)" != "andrew" ]]; then
+  /bin/echo "Only the verified MacBook installs the DEX//PANIC menu-bar app. Big Mac is information-only." >&2
+  exit 2
+fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/dist/DEX Panic.app"
 TARGET="$HOME/Applications/DEX Panic.app"
