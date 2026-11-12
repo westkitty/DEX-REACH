@@ -116,6 +116,16 @@ public enum HealthClassifier {
     }
 }
 
+/// Menu-bar white is evidence of daemon liveness only, not permission or task completion.
+public enum StatusIndicatorTone: Equatable {
+    case white
+    case red
+
+    public static func forHealth(_ health: SystemHealth) -> StatusIndicatorTone {
+        return health == .healthy ? .white : .red
+    }
+}
+
 public enum OwnerAccessMode: Equatable {
     case off
     case readOnly

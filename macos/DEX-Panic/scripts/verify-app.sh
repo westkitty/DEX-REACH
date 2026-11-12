@@ -9,7 +9,7 @@ UI="$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$APP/Contents/Info.plist"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 [[ "$BID" == "com.stinkyweasel.dex-panic" ]]
 [[ "$UI" == "true" ]]
-[[ "$VERSION" == "0.2.0" ]]
+[[ "$VERSION" == "0.2.1" ]]
 /usr/bin/file "$APP/Contents/MacOS/DexPanicApp"
 /usr/bin/shasum -a 256 "$APP/Contents/MacOS/DexPanicApp"
 echo "Bundle metadata and executable checked. Runtime, signing, and notarization are separate gates."

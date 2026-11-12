@@ -1,6 +1,12 @@
-# DEX//PANIC 0.2 — Stinky Weasel Recovery Control
+# DEX//PANIC 0.2.1 — Stinky Weasel Recovery Control
 
 A **native macOS menu-bar recovery utility** designed to remain responsive when the DEX//REACH gateway, coordinator, node, or ChatGPT connector is inaccessible. First milestone: DEX//REACH only. Hermes, Ollama and other local services are **not** controlled in this release.
+
+## 0.2.1 safety/visibility correction
+
+The status-bar glyph is a **non-template, high-contrast shield**: solid white only when all three required launchd daemons are positively observed running, solid red with an exclamation point when required-service liveness is degraded or unknown. This means **daemon liveness only**. The color does not claim that owner permissions, task outcome, coordinator admission or the network are healthy. See `TESTING.md` for the manual GUI acceptance checklist and controlled-recovery boundaries.
+
+The Big Mac compiled executable was checksum-verified after installing on the MacBook, and the prior v0.2.0 app was retained for rollback. The bundled prebuilt installer now points to the v0.2.1 archive and uses `/bin/mkdir` (macOS) instead of the nonexistent `/usr/bin/mkdir`; it continues to refuse overwriting any existing app.
 
 ## What changed in 0.2
 
@@ -26,13 +32,13 @@ This is a safer local control surface, **not** a durable-task reconciler or a ge
 
 ## Install on your MacBook (the low-load route)
 
-The exact v0.2.0 **Apple Silicon release bundle** was built on Big Mac, not on your 8 GB MacBook. It resides at `/Users/bigmac/DEX-Panic-v0.2.0-final-macos-arm64.app.zip` (ZIP SHA-256 `64e67f337097346f76842d3cd19cbb7c4c1605c7ef9c2b26de72471373f0d63f`; executable SHA-256 `fb0174daf988b916a56e73711effab75e8b943c8eebd6ca6396b236a60cb81d2`).
+The exact v0.2.1 **Apple Silicon bundle** was built on Big Mac, and the resulting binary has been installed and observed running on the MacBook. The verified archive lives at `/Users/bigmac/DEX-Panic-v0.2.1-icon-fix-macos-arm64.app.zip` (ZIP SHA-256 `1157ab28f4f6ce5792f1dbf652e2c6633d1d1a2edb874d415959234f87472cdd`; executable SHA-256 `000ef0fc7554cde33a7a4a78381c2281d7ffbb8223ab902fca2d4beb48bc1050`). The installer now uses macOS's actual `/bin/mkdir` path, fixing v0.2.0's prebuilt-installer failure.
 
-Extract this source ZIP on the MacBook, then double-click **`Install-Prebuilt-from-BigMac.command`**. It fetches the exact archive over the existing authenticated `westcat` SSH alias, checks both SHA-256 values, verifies version 0.2.0 and bundle identity, refuses to replace an existing `~/Applications/DEX Panic.app`, then requests an open. If `westcat` is unavailable or the source cannot be verified, the installer stops; it does not silently build, download from somewhere else, or change DEX policy.
+For a **new installation only**, run `Install-Prebuilt-from-BigMac.command` with the owner's SSH alias `westcat`. It authenticates to Big Mac, checks the archive and executable SHA-256, verifies version 0.2.1 and bundle identity, refuses to overwrite an existing `~/Applications/DEX Panic.app`, and requests that macOS open the app. An existing v0.2.0 installation will be left untouched; see `TESTING.md` for a separate, backup-first upgrade and verification policy. To exercise the checksum and extraction path *without installing or launching anything*, run the versioned installer with `--verify-only`. It also accepts a previously downloaded ZIP only after re-verifying its hash and never overwrites the archive.
 
 **Fallback:** if SSH isn't configured, double-click `Install-DEX-Panic.command` to compile locally using Apple's Swift toolchain. Local compilation is heavier and should not be attempted while the MacBook is saturated. Neither installer registers a login item or installs background services. The app is unsigned and unnotarized for internal use only; do not bypass macOS security protections.
 
-**MacBook installation and GUI use have not been verified.** A tested build on Big Mac proves only the build host's result.
+**MacBook installation and process launch are verified.** The visible white/red icon, full Recovery Deck interaction, and real policy/service recovery still require owner-observed acceptance; a running PID does not prove the entire GUI works.
 
 ## Compile and test on a Mac
 
@@ -73,8 +79,8 @@ The app expects a DEX//REACH checkout at `~/DEX-REACH`, including `scripts/dex-r
 - No implicit node selection, fallback, new remote endpoint, or policy bypass.
 - No automatic retry of an uncertain mutation. No claim that restarting a daemon stops or undoes active external effects.
 - Service actions use exact configured labels and argument arrays, not interpolated shell commands.
-- No Git changes to the canonical DEX//REACH repo, no change to installed runtime, no remote push, and no permission/credential modification.
+- Kept within `macos/DEX-Panic/` in the canonical DEX//REACH repo; no changes to DEX runtime, node policy, credentials, or running service configuration.
 
 ## Build status
 
-See `OPERATIONAL_STATE.md` for the evidence matrix. Big Mac v0.2 compile, macOS tests, release bundle and checksum checks passed. MacBook installation, GUI launch, signing, notarization and live recovery remain unverified.
+See `OPERATIONAL_STATE.md` for the evidence matrix and `TESTING.md` for operator acceptance steps. Big Mac v0.2.1 compiled, passed 17 tests and bundle checks; the MacBook app was installed and observed running. UI rendering and destructive recovery flows are not yet end-to-end verified. Signing and notarization are not performed.

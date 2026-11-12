@@ -1,6 +1,6 @@
 # DEX//PANIC Operational State
 
-Updated: 2026-11-10 (America/Detroit)
+Updated: 2026-11-12 (America/Detroit)
 
 ## Purpose and authority
 MacBook-local emergency control independent of the DEX//REACH gateway. Device owner retains final execution and policy authority. This is a standalone Swift app, not a source or runtime modification to the canonical `westkitty/DEX-REACH` repository.
@@ -69,3 +69,20 @@ Validation status: local Linux `swift test` 16/16 PASS after core changes. Apple
 An adversarial inspection found an overclaim in the first v0.2 graphical candidate: `DAEMONS RESPONDING` was derived only from `launchctl` process liveness, not responsiveness. Corrected to **DAEMONS RUNNING**, and stopped-state wording to **REQUIRED SERVICE STOPPED**. Source unit tests remained 16/16 PASS on Linux and Big Mac; the exact revised app was rebuilt on Big Mac and passed bundle verification. The previous first-candidate app ZIP (`3f15b208...`) remains retained but is **SUPERSEDED**; the installer must not use it.
 
 Final Apple Silicon release artifact: `/Users/bigmac/DEX-Panic-v0.2.0-final-macos-arm64.app.zip`, **188,082 bytes**, SHA-256 `64e67f337097346f76842d3cd19cbb7c4c1605c7ef9c2b26de72471373f0d63f`. Final Mach-O arm64 app executable SHA-256 `fb0174daf988b916a56e73711effab75e8b943c8eebd6ca6396b236a60cb81d2`; bundle version remains `0.2.0`. Final macOS UI launch, runtime interaction, MacBook installation and signing/notarization **NOT VERIFIED**. No DEX runtime service or policy was changed; no canonical repository was committed or pushed.
+
+## 2026-11-12 — v0.2.1 MacBook live status, bounded backups, publication packet
+
+**Scope:** Standalone DEX//PANIC only. Canonical DEX//REACH runtime services, node policy, grants, credentials and private configuration were not changed. The public GitHub repository now contains `macos/DEX-Panic/` as a separate source directory; the v0.2.0 historical 'not yet committed' notes above are superseded for source publication, not rewritten.
+
+- v0.2.1 non-template shield icon implementation: white for complete required-service liveness, red for degraded/unknown. Owner mode, coordinator admission and task completion remain separate. No live failure was induced to demonstrate the red visual state.
+- Big Mac macOS `swift test --jobs 4`: 17 tests, zero failures in isolated source copy. Release arm64 binary passed compilation, plist/architecture verification. Installer has a checked, fixed `/bin/mkdir` path and 0.2.1 checksum pins; `zsh -n` is used as the static installer gate.
+- **Verified MacBook:** `~/Applications/DEX Panic.app` v0.2.1 launched as real user `andrew`, executable SHA-256 `000ef0fc7554cde33a7a4a78381c2281d7ffbb8223ab902fca2d4beb48bc1050`, observed process PID `75729` at time of inspection. Four DEX services reported `launchctl state = running`, which proves only daemon liveness. No Dock/icon visual proof has been collected.
+- **Backup:** original v0.2.0 app remains preserved at `~/Downloads/DEX-Panic-icon-fix-20261112/DEX Panic-v0.2.0-backup.app`; archive ZIP SHA-256 `577520219a4d7ca9d50eae3416c4651ee3783702dd9bab7f8319cba1cc57540b` was extracted into a new isolated MacBook directory and its plist, version and executable hash matched. Both 0.2.0 rollback and 0.2.1 archive copies are also present on Big Mac at `/Users/bigmac/DEX-Panic-Backups/2026-11-12/`, with archive integrity checks. **Restoring and launching v0.2.0 in place has not been performed**; there is no reason to disrupt the working v0.2.1 merely to simulate a rollback.
+- **Evidence boundaries:** live owner policy-OFF, recovery after intentionally stopped critical services, actual GUI/VoiceOver color/keyboard behavior, full-task reconciliation, signing/notarization and any whole-machine backup remain NOT VERIFIED or OUT OF SCOPE. A GitHub source push does not itself back up MacBook runtime state or private node credentials.
+- **Installer correction acceptance:** `--verify-only` validates fetch/extract/hash/version without touching the installed app. An existing download is reused only if hash matches. This is a source feature until a MacBook execution proves it.
+- **Owner acceptance:** follow `TESTING.md`. Do not use real `STOP NEW REMOTE AI EXECUTION` or confirm a live service restart while a connected DEX client or unrelated tasks remain active.
+- **Source delivery:** stage/publish only files inside `macos/DEX-Panic/` with an up-to-date GitHub `main` parent; verify remote head and CI independently after publication. No installation of DEX//REACH as part of this source change.
+
+### Read-only installer test admission (not executed)
+
+On the MacBook, attempting to stage the new `--verify-only` installer via the normal DEX//REACH node was refused **before execution**: `COORDINATOR_WAIT_TIMEOUT`, 3 substantive competitors/1 slot (3 uncoordinated heavy workloads). No copy/install/launch occurred from that attempt. This is a capacity boundary, not evidence the installer works or is broken. Static `zsh -n`, executable-path existence, archive/Plist hashes and isolated source tests are the supported proof; live `--verify-only` remains UNVERIFIED. Do not bypass the coordinator through an alternate remote transport.

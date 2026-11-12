@@ -24,8 +24,8 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "shield.lefthalf.filled",
-                                           accessibilityDescription: "DEX Panic recovery controls")
+        statusItem.button?.image = makeStatusIcon(for: .unknown)
+        statusItem.button?.imageScaling = .scaleProportionallyDown
         statusItem.button?.toolTip = "DEX//PANIC: checking local services"
         menu.delegate = self
         statusItem.menu = menu
@@ -94,6 +94,46 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return result
     }
 
+    /// White means required daemon liveness is confirmed; red means degraded or unknown.
+    /// Coordinator admission, owner permission, and task effects are separate diagnostics.
+    private func makeStatusIcon(for health: SystemHealth) -> NSImage {
+        let tone = StatusIndicatorTone.forHealth(health)
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size, flipped: false) { _ in
+            let shield = NSBezierPath()
+            shield.move(to: NSPoint(x: 9, y: 17))
+            shield.curve(to: NSPoint(x: 15.5, y: 14.5),
+                         controlPoint1: NSPoint(x: 11.4, y: 16.7),
+                         controlPoint2: NSPoint(x: 13.7, y: 15.1))
+            shield.line(to: NSPoint(x: 15.5, y: 9))
+            shield.curve(to: NSPoint(x: 9, y: 1),
+                         controlPoint1: NSPoint(x: 15.5, y: 5.1),
+                         controlPoint2: NSPoint(x: 11.9, y: 1.8))
+            shield.curve(to: NSPoint(x: 2.5, y: 9),
+                         controlPoint1: NSPoint(x: 6.1, y: 1.8),
+                         controlPoint2: NSPoint(x: 2.5, y: 5.1))
+            shield.line(to: NSPoint(x: 2.5, y: 14.5))
+            shield.curve(to: NSPoint(x: 9, y: 17),
+                         controlPoint1: NSPoint(x: 4.3, y: 15.1),
+                         controlPoint2: NSPoint(x: 6.6, y: 16.7))
+            shield.close()
+            (tone == .white ? NSColor.white : NSColor.systemRed).setFill()
+            shield.fill()
+            if tone == .red {
+                NSColor.white.setFill()
+                NSBezierPath(roundedRect: NSRect(x: 8.2, y: 7.2, width: 1.6, height: 5.5),
+                             xRadius: 0.8, yRadius: 0.8).fill()
+                NSBezierPath(ovalIn: NSRect(x: 8.2, y: 4.4, width: 1.6, height: 1.6)).fill()
+            }
+            return true
+        }
+        image.isTemplate = false
+        image.accessibilityDescription = tone == .white
+            ? "DEX Panic: required services running"
+            : "DEX Panic: required service health requires attention"
+        return image
+    }
+
     private func rebuildMenu() {
         menu.removeAllItems()
         let health = HealthClassifier.classify(probes)
@@ -146,15 +186,16 @@ final class DEXPanicMenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(item("Quit DEX//PANIC", action: #selector(quit)))
 
-        if health == .degraded {
-            statusItem.button?.contentTintColor = .systemOrange
-            statusItem.button?.toolTip = "DEX//PANIC: one or more required services stopped"
-        } else if health == .healthy {
-            statusItem.button?.contentTintColor = .systemGreen
-            statusItem.button?.toolTip = "DEX//PANIC: services running; resource admission not checked"
-        } else {
-            statusItem.button?.contentTintColor = .secondaryLabelColor
-            statusItem.button?.toolTip = "DEX//PANIC: service health unknown"
+        // An explicitly colored, non-template image avoids macOS menu-bar tint overrides.
+        statusItem.button?.image = makeStatusIcon(for: health)
+        statusItem.button?.contentTintColor = nil
+        switch health {
+        case .healthy:
+            statusItem.button?.toolTip = "DEX//PANIC: required services running; capacity/authority not checked"
+        case .degraded:
+            statusItem.button?.toolTip = "DEX//PANIC: a required service is stopped or missing"
+        case .unknown:
+            statusItem.button?.toolTip = "DEX//PANIC: required service health unknown"
         }
     }
 

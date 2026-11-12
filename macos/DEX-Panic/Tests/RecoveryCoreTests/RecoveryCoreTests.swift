@@ -75,6 +75,17 @@ final class RecoveryCoreTests: XCTestCase {
         XCTAssertEqual(probe.state, .unknown)
     }
 
+    func testStatusIconIsWhiteOnlyForConfirmedRequiredDaemonLiveness() {
+        XCTAssertEqual(StatusIndicatorTone.forHealth(.healthy), .white)
+        XCTAssertEqual(StatusIndicatorTone.forHealth(.degraded), .red)
+        XCTAssertEqual(StatusIndicatorTone.forHealth(.unknown), .red)
+        XCTAssertEqual(StatusIndicatorTone.forHealth(HealthClassifier.classify([])), .red)
+        let observations = ServiceRegistry.reach.map {
+            ServiceProbe(service: $0, state: .running, detail: "")
+        }
+        XCTAssertEqual(StatusIndicatorTone.forHealth(HealthClassifier.classify(observations)), .white)
+    }
+
     func testHealthDoesNotHideRequiredUnknown() {
         let base = ServiceRegistry.reach.filter(\.required)
         XCTAssertEqual(HealthClassifier.classify(base.map { .init(service: $0, state: .running, detail: "") }), .healthy)

@@ -17,3 +17,5 @@ A local, independently operable macOS recovery control when DEX//REACH or a conn
 ## History
 - 2026-11-10: v0.1 initial local menu-bar prototype, guarded launchctl controls and policy-OFF CLI. 9 tests passed on Linux and Big Mac; MacBook runtime never verified.
 - 2026-11-12: v0.2 uplift candidate. Distinctive Recovery Deck adds four evidence layers and flight-recorder timeline; liveness inventory and fresh-probe guards repaired; separate OFF readback and admission parser added. Test and release proof recorded in `OPERATIONAL_STATE.md`. No MacBook installation inferred.
+
+- 2026-11-12: v0.2.1 indicator lock: white = three required daemons positively `running` through complete, fresh launchctl inventory; red + exclamation = `degraded` or `unknown`. The icon MUST NOT be called proof of coordinator admission, owner authority, task success or connection health. Render the shield as non-template to avoid menu-bar tinting; retain text status/VoiceOver. A visual test must not require stopping real DEX services; safe manual acceptance only; service-failure simulation needs a separately scoped, owner-approved window. v0.2.0 remains a preserved rollback.

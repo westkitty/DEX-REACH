@@ -1,3 +1,18 @@
+# DEX//PANIC v0.2.1 — High-contrast menu-bar indicator
+
+**Scope:** Small safety/visibility update to the standalone macOS recovery application. v0.2.0 notes follow below as historical release evidence.
+
+- Replaced the subtle template SF-symbol status-bar image with an explicitly colored **non-template** drawn shield. White means the required launchd daemons are observed running; red with exclamation means their observed liveness is degraded/unknown. It does not conflate liveness with policy, coordinator admission or task outcome.
+- Added a regression test for healthy/degraded/unknown indicator mapping: **17/17 macOS Swift tests passed** on Big Mac (arm64 Swift 6.4).
+- Incremented bundle version to `0.2.1` (build `3`), retaining the existing bundle identifier and menu bar behavior.
+- Fixed the v0.2.0 prebuilt installer: `/usr/bin/mkdir` does not exist on macOS. v0.2.1 uses `/bin/mkdir`, points at the versioned Big Mac archive, and pins its executable and ZIP SHA-256 checksums. It remains **install-only and never overwrites an existing app**. It also supports a non-installing `--verify-only` mode and safe reuse of a previously verified archive.
+- Compiled/verified release executable SHA-256: `000ef0fc7554cde33a7a4a78381c2281d7ffbb8223ab902fca2d4beb48bc1050`; prebuilt ZIP SHA-256: `1157ab28f4f6ce5792f1dbf652e2c6633d1d1a2edb874d415959234f87472cdd`.
+- MacBook installed `0.2.1`; observed running executable and four DEX//REACH launchd services. The prior installed `0.2.0` was preserved as a rollback bundle, archived and extracted into an independent restoration-check folder. Both binary archives were separately preserved on Big Mac.
+- **Unverified:** actual perceived menu-bar color/contrast, interaction with the Recovery Deck on a physical GUI, actual policy-OFF effect and restoration, and deliberate service-stop/recovery. Do not change DEX access/service state just to turn the shield red while work is running.
+- Internal unsigned/unnotarized software. No change to installed DEX//REACH service code, credentials, ownership, roots, client authority or runtime policy.
+
+---
+
 # DEX//PANIC v0.2.0 — Local Recovery Deck
 
 **Status:** Final code and native build validated on Big Mac. MacBook runtime not yet accepted. Internal unsigned build; no notarization.
