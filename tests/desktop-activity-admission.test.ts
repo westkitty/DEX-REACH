@@ -113,11 +113,19 @@ test('5. unknown resource-intensive processes are not exempt, and unknown host C
     '  1100     1 95.0  5.0    00:01:00 /usr/bin/python3 /tmp/x.py --name claude --tool tsc\n',
     '  1101     1 100.0 1.0    00:01:00 /usr/local/bin/mystery-build --jobs 1\n'
   ]) assert.equal(decide(ORDINARY_DESKTOP + job).observed.uncoordinatedHeavy, 1, job);
-  // When CPU pressure is busy, saturated or unmeasured, every hot process is competition again.
-  assert.equal(decide(ORDINARY_DESKTOP, 6.5).observed.uncoordinatedHeavy, 7);
+  // A busy (not saturated) host does not spend its only slot on multiple sub-core UI processes.
+  const busy = decide(ORDINARY_DESKTOP, 6.5);
+  assert.equal(busy.observed.uncoordinatedHeavy, 0);
+  assert.equal(busy.capacity.livePressure.cpu, 'busy');
+  assert.equal(busy.capacity.canAdmit, true, busy.capacity.reasons.join('; '));
+  // Real jobs still compete, and heavy work still queues on a busy CPU.
+  assert.equal(decide(ORDINARY_DESKTOP + ACTIVE_AGENT, 6.5).observed.uncoordinatedHeavy, 1);
+  assert.equal(decide(ORDINARY_DESKTOP + '  1199     1 95.0  0.5    00:03:00 /usr/local/bin/unknown-build\n', 6.5).observed.uncoordinatedHeavy, 1);
+  assert.equal(decide(ORDINARY_DESKTOP, 6.5, {}, {}, { workload: 'heavy', access: 'mutate' }).capacity.canAdmit, false);
+  // Saturated or unmeasured CPU remains fail-closed for anonymous hot activity.
   assert.equal(decide(ORDINARY_DESKTOP, null).observed.uncoordinatedHeavy, 7);
-  assert.equal(decide(ORDINARY_DESKTOP, 6.5).capacity.canAdmit, false);
-  for (const hostCpu of ['busy', 'saturated', 'unknown'] as const)
+  assert.equal(decide(ORDINARY_DESKTOP, null).capacity.canAdmit, false);
+  for (const hostCpu of ['saturated', 'unknown'] as const)
     assert.equal(classifyObservedWorkloads(rows(ORDINARY_DESKTOP), { selfPid: 2_147_483_000, hostCpu }).uncoordinatedHeavy, 7, hostCpu);
 });
 
@@ -168,7 +176,7 @@ test('13. the admission snapshot binds classification to its own CPU probe and s
   const { classifyForSnapshot, decideAdmission } = await import('../src/shared/work-coordinator.js');
   const table = rows(ORDINARY_DESKTOP);
   assert.equal(classifyForSnapshot(table, host, [], Date.now()).uncoordinatedHeavy, 0);
-  assert.equal(classifyForSnapshot(table, { ...host, loadAverage1m: 6.5 }, [], Date.now()).uncoordinatedHeavy, 7);
+  assert.equal(classifyForSnapshot(table, { ...host, loadAverage1m: 6.5 }, [], Date.now()).uncoordinatedHeavy, 0);
   assert.equal(classifyForSnapshot(table, { ...host, loadAverage1m: null }, [], Date.now()).uncoordinatedHeavy, 7);
   assert.equal(classifyForSnapshot(null, host, [], Date.now()).processObservation, 'unknown');
   const observed = classifyForSnapshot(table, host, [], Date.now());
@@ -265,10 +273,13 @@ test('19. launchd and PID 1 never group unrelated processes; separate families s
 `;
   const healthy = decide(launchdSiblings).observed;
   assert.equal(healthy.uncoordinatedHeavy, 0);
-  // Under contention each unrelated process is still its own competitor, not one launchd group.
+  // Busy but not saturated CPU alone does not turn sub-core launchd children into job-sized work.
   const busy = decide(launchdSiblings, 6.5).observed;
-  assert.equal(busy.uncoordinatedHeavy, 3);
-  assert.ok(!busy.uncoordinatedDetails?.some(detail => detail.pid === 1));
+  assert.equal(busy.uncoordinatedHeavy, 0);
+  // Unmeasured CPU still fails closed and preserves separate workload identities.
+  const unknown = decide(launchdSiblings, null).observed;
+  assert.equal(unknown.uncoordinatedHeavy, 3);
+  assert.ok(!unknown.uncoordinatedDetails?.some(detail => detail.pid === 1));
   const second = FAMILY.replace(/600(\d)/g, '700$1');
   const two = decide(FAMILY + second).observed;
   assert.equal(two.uncoordinatedHeavy, 2);
@@ -358,11 +369,12 @@ test('24. process-group evidence separates independent jobs and supervisors but 
   assert.equal(rowsWithPgid[0]!.pgid, 9000); assert.equal(rowsWithPgid[0]!.cpu, 1); assert.equal(rowsWithPgid[0]!.command, '-zsh');
   assert.equal(parseProcessTable(HEADER + '  9000     1  1.0  0.1    01:00:00 -zsh\n')[0]!.pgid, undefined);
   // Job control: each job owns a process group. Job-sized jobs count separately; sub-core jobs in different
-  // groups are not summed into one job on a healthy host, and still compete when CPU is not healthy.
+  // groups are not summed into one job on a healthy or merely busy host; unknown/saturated CPU remains conservative.
   assert.equal(pgDecide('  9000     1  9000  1.0  0.1    01:00:00 -zsh\n  9001  9000  9001 95.0  1.0    00:03:00 /usr/local/bin/a\n  9002  9000  9002 95.0  1.0    00:03:00 /usr/local/bin/b\n', host.loadAverage1m, twoSlot).observed.uncoordinatedHeavy, 2);
   const separateSmall = '  9100     1  9100  1.0  0.1    01:00:00 -zsh\n  9101  9100  9101 50.0  1.0    00:03:00 /usr/local/bin/a\n  9102  9100  9102 50.0  1.0    00:03:00 /usr/local/bin/b\n';
   assert.equal(pgDecide(separateSmall).observed.uncoordinatedHeavy, 0);
-  assert.equal(pgDecide(separateSmall, 6.5).observed.uncoordinatedHeavy, 2);
+  assert.equal(pgDecide(separateSmall, 6.5).observed.uncoordinatedHeavy, 0);
+  assert.equal(pgDecide(separateSmall, null).observed.uncoordinatedHeavy, 2);
   // Without PGID evidence the same shape merges conservatively into one job-sized family.
   assert.equal(decide('  9100     1  1.0  0.1    01:00:00 -zsh\n  9101  9100 50.0  1.0    00:03:00 /usr/local/bin/a\n  9102  9100 50.0  1.0    00:03:00 /usr/local/bin/b\n').observed.uncoordinatedHeavy, 1);
   // A non-PID-1 supervisor (systemd --user style) whose services each own a session is not one job.
