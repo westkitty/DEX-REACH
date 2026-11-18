@@ -6,7 +6,8 @@ import { persistTaskFailure, persistProcessExitFailure } from './task-failure.js
 import { ProcessExitError, assertProcessSucceeded } from '../shared/process-outcome.js';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
-import { isReplayableRead, savePrivateReadDescriptor, loadVerifiedPrivateReadDescriptor, discardPrivateReadDescriptor } from './private-read-recovery.js';
+import { isReplayableRead, savePrivateReadDescriptor, loadVerifiedPrivateReadDescriptor, discardPrivateReadDescriptor, discardPrivateReadIfClosed } from './private-read-recovery.js';
+import { RecoveryCoordinatorUnavailableError, retryCoordinatorRecovery } from './boot-read-retry.js';
 import { withFileLock, withLockPatience } from '../shared/state-io.js';
 import { requiredCapabilities, requestPaths } from '../shared/capabilities.js';
 import { parseRepoInspection } from '../shared/repo-inspection.js';
@@ -666,10 +667,18 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
  * Only the boot classifier's RETRY_SAFE pure reads with verified private descriptors
  * may cross this boundary. Shell, mutations, unknown effects and legacy payloads do not.
  */
+async function recoveryCoordinatorStatus() {
+  try { return await coordinatedStatus({ requireDaemon: true }); }
+  catch { throw new RecoveryCoordinatorUnavailableError('coordinator status temporarily unavailable'); }
+}
+
 async function resumeOneBootRead(taskId: string): Promise<void> {
   const task = await taskStore.read(taskId);
   if (!task || task.nodeId !== config.nodeId || task.safetyClass !== 'PURE_READ_IDEMPOTENT' ||
     !isReplayableRead(task.operation) || !['ACCEPTED', 'PREPARING', 'RUNNING'].includes(task.state)) return;
+  // Enclose *all* early exits, not only the execution tail, so terminal refusals
+  // never strand persisted private inputs after a boot recovery attempt.
+  try {
   let descriptor;
   try { descriptor = await loadVerifiedPrivateReadDescriptor(taskStore.rootDir, task); }
   catch {
@@ -711,7 +720,7 @@ async function resumeOneBootRead(taskId: string): Promise<void> {
   // Wait for an old node's lease to disappear through the coordinator's own
   // normal release/reclaim path. Never force-release a lease or assume it expired.
   const waitUntil = Date.now() + 180_000;
-  let status = await coordinatedStatus({ requireDaemon: true });
+  let status = await recoveryCoordinatorStatus();
   let waitingRecorded = false;
   while (status.leases.some(lease => lease.taskId === taskId)) {
     const current = await taskStore.read(taskId);
@@ -727,7 +736,7 @@ async function resumeOneBootRead(taskId: string): Promise<void> {
       waitingRecorded = true;
     }
     await sleep(3000);
-    status = await coordinatedStatus({ requireDaemon: true });
+    status = await recoveryCoordinatorStatus();
   }
   const oldTickets = status.tickets.filter(ticket => ticket.taskId === taskId);
   for (const ticket of oldTickets) {
@@ -735,14 +744,17 @@ async function resumeOneBootRead(taskId: string): Promise<void> {
       await taskStore.update(taskId, { status: 'Unexpected coordinator ticket attempt; read recovery refused.' });
       return;
     }
-    const cancelled = await coordinatedCancel(ticket.id);
+    let cancelled = false;
+    try { cancelled = await coordinatedCancel(ticket.id, { requireDaemon: true }); }
+    catch { throw new RecoveryCoordinatorUnavailableError('old ticket cancellation response unavailable'); }
     if (!cancelled) {
-      await taskStore.update(taskId, { status: 'Queued ticket cancellation not confirmed; no duplicate replay.' });
-      return;
+      // The ticket might have expired between the snapshot and cancellation.
+      // Never guess: a subsequent bounded probe must observe it gone before replay.
+      throw new RecoveryCoordinatorUnavailableError('old ticket cancellation not confirmed');
     }
   }
   // A cancellation response alone is not proof that no ticket or lease remains.
-  const afterCancellation = await coordinatedStatus({ requireDaemon: true });
+  const afterCancellation = await recoveryCoordinatorStatus();
   if (afterCancellation.tickets.some(ticket => ticket.taskId === taskId) ||
       afterCancellation.leases.some(lease => lease.taskId === taskId)) {
     await taskStore.update(taskId, { status: 'Coordinator still reports a ticket or lease; automatic replay refused.' });
@@ -785,11 +797,12 @@ async function resumeOneBootRead(taskId: string): Promise<void> {
       // An error after RUNNING is a read failure, never a fabricated successful result.
       await persistTaskFailure(taskStore, taskId, 'PURE_READ_IDEMPOTENT', error, true);
     }
+  }
   } finally {
-    const final = await taskStore.read(taskId);
-    if (final && ['COMPLETED', 'FAILED', 'CANCELLED', 'RECONCILED'].includes(final.state)) {
-      await discardPrivateReadDescriptor(taskStore.rootDir, taskId).catch(() => undefined);
-    }
+    const final = await taskStore.read(taskId).catch(() => null);
+    // INPUT_REQUIRED is also a closed automatic-recovery boundary. Retain the
+    // task/evidence history, never unnecessary private replay arguments.
+    await discardPrivateReadIfClosed(taskStore.rootDir, final).catch(() => undefined);
   }
 }
 
@@ -954,8 +967,22 @@ const retryableAtBoot = bootRecovery.filter(item => item.decision.kind === 'RETR
 if (retryableAtBoot.length) {
   void processCheckpoint().track(async () => {
     for (const item of retryableAtBoot) {
-      try { await resumeOneBootRead(item.taskId); }
-      catch { console.error('BOOT_READ_RECOVERY_BLOCKED: inspect task status and original identity'); }
+      try { await retryCoordinatorRecovery(() => resumeOneBootRead(item.taskId)); }
+      catch (error) {
+        if (error instanceof RecoveryCoordinatorUnavailableError) {
+          // Bounded read-only coordinator probes failed. No execution was
+          // attempted through this path; preserve a truthful owner-visible stop.
+          const pending = await taskStore.read(item.taskId).catch(() => null);
+          if (pending && ['ACCEPTED', 'PREPARING', 'RUNNING'].includes(pending.state)) {
+            const next = pending.state === 'ACCEPTED' ? 'CANCELLED' :
+              pending.state === 'PREPARING' ? 'FAILED' : 'INPUT_REQUIRED';
+            await taskStore.update(item.taskId, { state: next, failureClass: 'DEPENDENCY_WAIT',
+              status: 'Coordinator remained unavailable after bounded recovery probes; no replay occurred.' });
+            await discardPrivateReadDescriptor(taskStore.rootDir, item.taskId).catch(() => undefined);
+          }
+        }
+        console.error('BOOT_READ_RECOVERY_BLOCKED: inspect task status and original identity');
+      }
     }
   }).catch(() => console.error('BOOT_READ_RECOVERY_UNRESOLVED: inspect durable task state'));
 }

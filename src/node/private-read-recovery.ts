@@ -112,8 +112,18 @@ export async function loadVerifiedPrivateReadDescriptor(rootDir: string, task: R
 
 /** The descriptor is no longer necessary once the original task is safely terminal. */
 export async function discardPrivateReadDescriptor(rootDir: string, taskId: string): Promise<void> {
+  // Do not follow a swapped symlinked directory during private-data cleanup.
+  if (!await privateDirectoryReady(rootDir, false)) return;
   try { await fs.unlink(descriptorFile(rootDir, taskId)); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+}
+
+
+/** Never retain private replay arguments after a terminal or owner-input stop. */
+export async function discardPrivateReadIfClosed(rootDir: string, task: ReachTaskRecord | null): Promise<void> {
+  if (task && ['COMPLETED', 'FAILED', 'CANCELLED', 'RECONCILED', 'INPUT_REQUIRED'].includes(task.state)) {
+    await discardPrivateReadDescriptor(rootDir, task.taskId);
   }
 }
