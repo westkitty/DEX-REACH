@@ -28,15 +28,15 @@ export type BootRecoveryOptions = {
 };
 
 function matchingActivity(task: ReachTaskRecord, records: readonly ProcessActivity[]): ProcessActivity | undefined {
-  return records.find(record => record.taskId === task.taskId && (record.attempt === undefined || record.attempt === task.attemptNumber));
+  return records.find(record => record.taskId === task.taskId && (record.attempt === undefined || record.attempt === (task.recoveryAttempt ?? task.attemptNumber)));
 }
 
 function matchingLease(task: ReachTaskRecord, status: WorkStatus | null) {
-  return status?.leases.find(lease => lease.taskId === task.taskId && (lease.attempt === undefined || lease.attempt === task.attemptNumber));
+  return status?.leases.find(lease => lease.taskId === task.taskId && (lease.attempt === undefined || lease.attempt === (task.recoveryAttempt ?? task.attemptNumber)));
 }
 
 function matchingTicket(task: ReachTaskRecord, status: WorkStatus | null) {
-  return status?.tickets.find(ticket => ticket.taskId === task.taskId && (ticket.attempt === undefined || ticket.attempt === task.attemptNumber));
+  return status?.tickets.find(ticket => ticket.taskId === task.taskId && (ticket.attempt === undefined || ticket.attempt === (task.recoveryAttempt ?? task.attemptNumber)));
 }
 
 async function hasVerifiedResult(task: ReachTaskRecord, results: ResultStore): Promise<boolean> {
@@ -168,7 +168,9 @@ export async function reconcileBootTasks(taskStore: NodeTaskStore, results: Resu
     const evidenceUnavailable = task.state === 'RUNNING' && activities === null;
     const unverifiable = task.state === 'RUNNING' && verdict === 'UNVERIFIABLE';
     const contradictory = evidenceUnavailable || unverifiable ||
-      (task.state === 'RUNNING' && ((Boolean(activity) && !liveLease) || (task.safetyClass === 'PROCESS_UNKNOWN_EFFECT' && liveLease && !liveActivity)));
+      (task.state === 'RUNNING' && ((Boolean(activity) && !liveLease &&
+        !(task.safetyClass === 'PURE_READ_IDEMPOTENT' && verdict === 'GONE')) ||
+        (task.safetyClass === 'PROCESS_UNKNOWN_EFFECT' && liveLease && !liveActivity)));
     const decision = decideBootRecovery({
       state: task.state,
       safetyClass: task.safetyClass ?? 'PROCESS_UNKNOWN_EFFECT',
@@ -200,11 +202,13 @@ export async function reconcileBootTasks(taskStore: NodeTaskStore, results: Resu
     } else if (decision.kind === 'INPUT_REQUIRED') {
       if (task.state === 'RUNNING') await taskStore.transition(task.taskId, 'INPUT_REQUIRED', decision.reason);
       else if (task.summary.status !== decision.reason) await taskStore.update(task.taskId, { status: decision.reason });
+    } else if (decision.kind === 'WAIT_FOR_LEASE') {
+      await setStatusIfChanged(task, decision.reason, taskStore);
     } else if (decision.kind === 'RETRY_SAFE' && task.state === 'RUNNING') {
-      // A pure read with no execution evidence cannot have had an effect. Leaving it RUNNING would strand it:
-      // it is recorded FAILED as a retryable transient outcome, and a retry is a new request.
-      await taskStore.transition(task.taskId, 'FAILED', 'Boot found no execution evidence for an interrupted pure read; it may be retried under a new request.');
-      await taskStore.update(task.taskId, { failureClass: 'TRANSIENT_TRANSPORT' });
+      // Keep the original task available for the node's private-descriptor re-admission
+      // after backend startup. Without a verified descriptor, the boot runner marks it
+      // FAILED instead; a missing payload is never reconstructed from the hash.
+      await taskStore.update(task.taskId, { status: 'Interrupted pure read is awaiting private-descriptor and policy verification.' });
     } else {
       await taskStore.update(task.taskId, { status: decision.reason });
     }

@@ -223,7 +223,9 @@ test('capability-present task routing carries the exact node and lifecycle actio
     assert.match(String((started.content as Array<{ text: string }>)[0]?.text), /"status": "working"/);
     assert.match(String((started.content as Array<{ text: string }>)[0]?.text), /"reachState": "RUNNING"/);
     await client.callTool({ name: 'reach_task', arguments: { node_id: 'exact-node', action: 'get', task_id: 'rtsk_19999999999_0123456789abcdef' } });
-    assert.equal(calls.length, 2);
+    await client.callTool({ name: 'reach_task', arguments: { node_id: 'exact-node', action: 'list', limit: 7 } });
+    assert.equal(calls.length, 3);
+    assert.deepEqual(calls[2]?.[6], { action: 'list', limit: 7 });
     assert.equal(calls[0]?.[0], 'exact-node');
     assert.deepEqual((calls[0]?.[6] as { action: string; operation: string; args: Record<string, unknown> }), { action: 'start', operation: 'dex.process.run', args: { command: 'printf ok' } });
     assert.deepEqual((calls[1]?.[6] as { action: string; taskId: string }), { action: 'get', taskId: 'rtsk_19999999999_0123456789abcdef' });

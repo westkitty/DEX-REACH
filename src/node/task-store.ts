@@ -49,6 +49,8 @@ export type ReachTaskRecord = {
   mutationLevel?: string;
   state: TaskState;
   attemptNumber: number;
+  /** Optional safe-read retry ordinal; legacy schema-v1 attemptNumber remains 1. */
+  recoveryAttempt?: number;
   attemptBudget: number;
   createdAtUtc: string;
   updatedAtUtc: string;
@@ -206,6 +208,9 @@ function validateRecord(value: unknown, location: string): ReachTaskRecord {
   const attemptBudget = record.attemptBudget;
   if (record.attemptNumber !== 1 || typeof attemptBudget !== 'number' || !Number.isInteger(attemptBudget) || attemptBudget < 1 || attemptBudget > 100) {
     throw new TaskStoreCorruptError(`${location}.attempt budget is invalid for C2`);
+  }
+  if (record.recoveryAttempt !== undefined && (!Number.isInteger(record.recoveryAttempt) || record.recoveryAttempt < 2 || record.recoveryAttempt > attemptBudget || record.safetyClass !== 'PURE_READ_IDEMPOTENT')) {
+    throw new TaskStoreCorruptError(`${location}.recoveryAttempt is invalid`);
   }
   if (typeof record.idempotencyKey !== 'string') throw new TaskStoreCorruptError(`${location}.idempotencyKey is missing`);
   assertSafe(record.idempotencyKey, `${location}.idempotencyKey`);
@@ -401,6 +406,39 @@ export class NodeTaskStore implements TaskStore {
     });
     await this.event({ taskId: created.taskId, kind: 'accepted', state: created.state, actorId: created.actorId, nodeId: created.nodeId, operation: created.operation, attempt: created.attemptNumber, summary: created.summary.status, ...(created.traceId ? { traceId: created.traceId } : {}) });
     return created;
+  }
+
+  /**
+   * A boot-recovered PURE READ may reuse its original task identity only after external
+   * coordinator/process evidence and a private request descriptor were verified by the node.
+   * This is not an owner/client retry endpoint and never applies to shell or mutations.
+   */
+  async reserveBootReadRetry(taskId: string, observedAttempt: number): Promise<ReachTaskRecord> {
+    assertTaskId(taskId);
+    await assertNotQuarantined(this.dir, taskId);
+    const updated = await this.mutate(document => {
+      const record = document.records[taskId];
+      if (!record || record.safetyClass !== 'PURE_READ_IDEMPOTENT' ||
+        !['ACCEPTED', 'PREPARING', 'RUNNING'].includes(record.state) ||
+        (record.recoveryAttempt ?? record.attemptNumber) !== observedAttempt || record.resultRef || record.resultHash) {
+        throw new Error('read recovery state changed or is ineligible; refusing replay');
+      }
+      if (record.state !== 'ACCEPTED') {
+        if (observedAttempt >= record.attemptBudget) throw new Error('read recovery attempt budget exhausted');
+        // v1-rollback compatibility: do not alter attemptNumber, which legacy readers require to equal 1.
+        record.recoveryAttempt = observedAttempt + 1;
+      }
+      record.state = 'PREPARING';
+      record.updatedAtUtc = new Date().toISOString();
+      record.summary = { status: 'Private descriptor verified; safe read retry queued under original task identity.', isShareSafe: true };
+      delete record.failureClass;
+      return record;
+    });
+    await this.event({ taskId: updated.taskId, kind: 'transition', state: updated.state, toState: updated.state,
+      actorId: updated.actorId, nodeId: updated.nodeId, operation: updated.operation,
+      attempt: updated.recoveryAttempt ?? updated.attemptNumber, summary: updated.summary.status,
+      ...(updated.traceId ? { traceId: updated.traceId } : {}) });
+    return updated;
   }
 
   async read(taskId: string): Promise<ReachTaskRecord | null> {

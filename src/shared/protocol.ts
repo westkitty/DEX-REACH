@@ -168,6 +168,7 @@ export type GatewayRequest = {
 export type DurableTaskRequest =
   | { action: 'start'; operation: string; args: Record<string, unknown>; ttlMs?: number }
   | { action: 'get' | 'result' | 'cancel'; taskId: string }
+  | { action: 'list'; limit?: number }
   | { action: 'events'; taskId: string; cursor?: string };
 
 export type GatewayResponse = {

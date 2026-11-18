@@ -5,6 +5,9 @@ import { acquireTaskAdmission, waitingStatusWriter } from './task-admission.js';
 import { persistTaskFailure, persistProcessExitFailure } from './task-failure.js';
 import { ProcessExitError, assertProcessSucceeded } from '../shared/process-outcome.js';
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
+import { isReplayableRead, savePrivateReadDescriptor, loadVerifiedPrivateReadDescriptor, discardPrivateReadDescriptor, discardPrivateReadIfClosed } from './private-read-recovery.js';
+import { RecoveryCoordinatorUnavailableError, retryCoordinatorRecovery, bootReadStopState } from './boot-read-retry.js';
 import { withFileLock, withLockPatience } from '../shared/state-io.js';
 import { requiredCapabilities, requestPaths } from '../shared/capabilities.js';
 import { parseRepoInspection } from '../shared/repo-inspection.js';
@@ -131,6 +134,28 @@ async function handleTaskControl(request: GatewayRequest): Promise<GatewayRespon
   }
   const access = await currentAccess();
   if (access.effectiveMode === 'off') throw new Error('NODE OWNER has disabled remote AI task controls; request refused locally');
+  if (control.action === 'list') {
+    if (!request.actor) throw new Error('task discovery requires authenticated actor');
+    const limit = Math.max(1, Math.min(50, Number.isInteger(control.limit) ? control.limit! : 20));
+    const owned = await taskStore.list({ nodeId: config.nodeId, actorId: actorIdFor(request.actor) });
+    const terminals = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'RECONCILED']);
+    // Show active work first, then recent terminal outcomes; no payloads, policies,
+    // local paths, actor metadata or free-text summaries cross this interface.
+    const ordered = [...owned.filter(task => !terminals.has(task.state)),
+      ...owned.filter(task => terminals.has(task.state))];
+    const visible: Array<{ taskId: string; nodeId: string; operation: string; state: string; updatedAtUtc: string }> = [];
+    for (const candidate of ordered) {
+      try {
+        authorizeTaskControl(await loadAccessState(config.nodeId), request.actor, candidate.operation,
+          config.profile, candidate.authority, candidate.policyHash);
+      } catch { continue; }
+      visible.push({ taskId: candidate.taskId, nodeId: candidate.nodeId, operation: candidate.operation,
+        state: candidate.state, updatedAtUtc: candidate.updatedAtUtc });
+      if (visible.length > limit) break;
+    }
+    return { type: 'response', id: request.id, ok: true,
+      result: { nodeId: config.nodeId, tasks: visible.slice(0, limit), hasMore: visible.length > limit } };
+  }
   const task = await taskStore.read(control.taskId);
   if (!task || task.actorId !== actorIdFor(request.actor) || task.nodeId !== config.nodeId) throw new Error('task unavailable or unauthorized');
   if (task.nodeId !== config.nodeId) throw new Error('task node binding mismatch');
@@ -150,8 +175,9 @@ async function handleTaskControl(request: GatewayRequest): Promise<GatewayRespon
   const cancelled = await taskStore.transition(task.taskId, 'CANCELLED', 'Task cancelled before execution by its owning actor.', ['ACCEPTED', 'PREPARING']);
   const coordinator = await coordinatedStatus();
   for (const ticket of coordinator.tickets) {
-    if (ticket.taskId === task.taskId && ticket.attempt === task.attemptNumber) await coordinatedCancel(ticket.id);
+    if (ticket.taskId === task.taskId && ticket.attempt === (task.recoveryAttempt ?? task.attemptNumber)) await coordinatedCancel(ticket.id);
   }
+  await discardPrivateReadDescriptor(taskStore.rootDir, cancelled.taskId).catch(() => undefined);
   return { type: 'response', id: request.id, ok: true, result: cancelled };
 }
 
@@ -376,7 +402,7 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
   try {
     let value: unknown;
     try {
-      const executionContext: ProcessExecutionContext = { taskId: task.taskId, attempt: task.attemptNumber, phase: request.operation };
+      const executionContext: ProcessExecutionContext = { taskId: task.taskId, attempt: task.recoveryAttempt ?? task.attemptNumber, phase: request.operation };
       if (request.operation === 'dex.plan') {
         value = await buildPlan(actor, request.args);
         receiptCheckpoint = (value as { checkpointId?: string | null }).checkpointId ?? null;
@@ -437,11 +463,16 @@ async function executeAdmittedTask(state: AdmittedTaskExecution): Promise<Gatewa
     return { type: 'response', id: request.id, ok: false, error: message, traceId: trace.traceId };
   } finally {
     await releaseBudgetConcurrency(config.nodeId, state.budgetReservationId).catch(() => undefined);
+    // Only a finished, persisted task may discard its private replay arguments.
+    const final = await taskStore.read(task.taskId).catch(() => null);
+    if (final && ['COMPLETED', 'FAILED', 'CANCELLED', 'RECONCILED'].includes(final.state)) {
+      await discardPrivateReadDescriptor(taskStore.rootDir, task.taskId).catch(() => undefined);
+    }
   }
 }
 
 async function handleRequest(request: GatewayRequest, options: { defer?: boolean; admissionDeadline?: number } = {}): Promise<GatewayResponse> {
-  if (request.task?.action === 'get' || request.task?.action === 'result' || request.task?.action === 'cancel' || request.task?.action === 'events') {
+  if (request.task?.action === 'get' || request.task?.action === 'result' || request.task?.action === 'cancel' || request.task?.action === 'events' || request.task?.action === 'list') {
     try { return await handleTaskControl(request); }
     catch (error) { return { type: 'response', id: request.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
   }
@@ -582,6 +613,16 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
       traceId: trace.traceId
     });
     taskId = task.taskId;
+    // Persist a private, integrity-bound read descriptor before returning a durable handle.
+    // Older tasks without this descriptor are never reconstructed or blindly replayed.
+    if (options.defer && taskSafety === 'PURE_READ_IDEMPOTENT' && actor && isReplayableRead(request.operation)) {
+      await savePrivateReadDescriptor(taskStore.rootDir, {
+        schemaVersion: 1, taskId, nodeId: config.nodeId, actor,
+        operation: request.operation, args: request.args,
+        payloadSha256: idempotency.payloadHash, policyHash: task.policyHash!
+      });
+      if (!await loadVerifiedPrivateReadDescriptor(taskStore.rootDir, task)) throw new Error('private read descriptor readback failed');
+    }
     await taskStore.transition(taskId, 'PREPARING', 'Task admitted on the selected node.');
     const runExecution = async (): Promise<GatewayResponse> => {
       leaseId = await acquireTaskAdmission(coordinatorRequest(taskId!, task.attemptNumber, request.operation, taskSafety!),
@@ -618,6 +659,150 @@ async function handleRequest(request: GatewayRequest, options: { defer?: boolean
     return failRequest(error);
   } finally {
     if (!executionStarted && !continuationStarted) await releaseBudgetConcurrency(config.nodeId, budgetReservationId).catch(() => undefined);
+  }
+}
+
+/**
+ * Local-only boot replay. The original caller and transport are not required.
+ * Only the boot classifier's RETRY_SAFE pure reads with verified private descriptors
+ * may cross this boundary. Shell, mutations, unknown effects and legacy payloads do not.
+ */
+async function recoveryCoordinatorStatus() {
+  try { return await coordinatedStatus({ requireDaemon: true }); }
+  catch { throw new RecoveryCoordinatorUnavailableError('coordinator status temporarily unavailable'); }
+}
+
+async function resumeOneBootRead(taskId: string): Promise<void> {
+  const task = await taskStore.read(taskId);
+  if (!task || task.nodeId !== config.nodeId || task.safetyClass !== 'PURE_READ_IDEMPOTENT' ||
+    !isReplayableRead(task.operation) || !['ACCEPTED', 'PREPARING', 'RUNNING'].includes(task.state)) return;
+  // Enclose *all* early exits, not only the execution tail, so terminal refusals
+  // never strand persisted private inputs after a boot recovery attempt.
+  try {
+  let descriptor;
+  try { descriptor = await loadVerifiedPrivateReadDescriptor(taskStore.rootDir, task); }
+  catch {
+    const next = task.state === 'RUNNING' ? 'INPUT_REQUIRED' : task.state === 'PREPARING' ? 'FAILED' : 'CANCELLED';
+    await taskStore.update(taskId, { state: next, failureClass: 'CORRUPT_STATE',
+      status: 'Private read recovery evidence was invalid; owner review required. No replay.' });
+    return;
+  }
+  if (!descriptor) {
+    if (task.state === 'RUNNING') {
+      await taskStore.update(taskId, { state: 'FAILED', failureClass: 'TRANSIENT_TRANSPORT',
+        status: 'Interrupted read has no verified private descriptor; automatic replay refused.' });
+    } else {
+      await taskStore.update(taskId, { state: task.state === 'ACCEPTED' ? 'CANCELLED' : 'FAILED',
+        failureClass: 'INVALID_INPUT', status: 'No private recovery descriptor for historical task; no replay.' });
+    }
+    return;
+  }
+  if (!task.policyHash || (task.state !== 'ACCEPTED' && (task.recoveryAttempt ?? task.attemptNumber) >= task.attemptBudget)) {
+    const terminal = task.state === 'ACCEPTED' ? 'CANCELLED' : 'FAILED';
+    await taskStore.update(taskId, { state: terminal, failureClass: 'DEADLINE_EXCEEDED',
+      status: 'Safe read recovery budget or binding exhausted; no automatic replay.' });
+    return;
+  }
+
+  // A changed owner policy is a refusal, not a reason to grant old authority.
+  try {
+    await reserveOperation(config.nodeId, descriptor.actor, task.operation, config.profile, descriptor.args,
+      { expectedPolicyHash: task.policyHash, reserveBudget: false, consumeGrant: false });
+  } catch {
+    const terminal = task.state === 'ACCEPTED' ? 'CANCELLED' : 'FAILED';
+    await taskStore.update(taskId, { state: terminal, failureClass: 'POLICY_CHANGED',
+      status: 'Owner policy prevents automatic read recovery; original request not replayed.' });
+    return;
+  }
+
+  // A queued ticket can outlive its node continuation. Cancel only the exact old
+  // ticket; never replay when an existing lease or cancellation outcome is uncertain.
+  // Wait for an old node's lease to disappear through the coordinator's own
+  // normal release/reclaim path. Never force-release a lease or assume it expired.
+  const waitUntil = Date.now() + 180_000;
+  let status = await recoveryCoordinatorStatus();
+  let waitingRecorded = false;
+  while (status.leases.some(lease => lease.taskId === taskId)) {
+    const current = await taskStore.read(taskId);
+    if (!current || current.state !== task.state || current.policyHash !== task.policyHash) return;
+    if (Date.now() >= waitUntil) {
+      await taskStore.update(taskId, { state: bootReadStopState(task.state),
+        failureClass: 'DEPENDENCY_WAIT',
+        status: 'Old coordinator lease remained present; owner review required, no duplicate read.' });
+      return;
+    }
+    if (!waitingRecorded) {
+      await taskStore.update(taskId, { status: 'Waiting for old coordinator lease to release before safe read recovery.' });
+      waitingRecorded = true;
+    }
+    await sleep(3000);
+    status = await recoveryCoordinatorStatus();
+  }
+  const oldTickets = status.tickets.filter(ticket => ticket.taskId === taskId);
+  for (const ticket of oldTickets) {
+    if (ticket.attempt !== undefined && ticket.attempt !== (task.recoveryAttempt ?? task.attemptNumber)) {
+      await taskStore.update(taskId, { status: 'Unexpected coordinator ticket attempt; read recovery refused.' });
+      return;
+    }
+    let cancelled = false;
+    try { cancelled = await coordinatedCancel(ticket.id, { requireDaemon: true }); }
+    catch { throw new RecoveryCoordinatorUnavailableError('old ticket cancellation response unavailable'); }
+    if (!cancelled) {
+      // The ticket might have expired between the snapshot and cancellation.
+      // Never guess: a subsequent bounded probe must observe it gone before replay.
+      throw new RecoveryCoordinatorUnavailableError('old ticket cancellation not confirmed');
+    }
+  }
+  // A cancellation response alone is not proof that no ticket or lease remains.
+  const afterCancellation = await recoveryCoordinatorStatus();
+  if (afterCancellation.tickets.some(ticket => ticket.taskId === taskId) ||
+      afterCancellation.leases.some(lease => lease.taskId === taskId)) {
+    await taskStore.update(taskId, { status: 'Coordinator still reports a ticket or lease; automatic replay refused.' });
+    return;
+  }
+
+  const retryTask = await taskStore.reserveBootReadRetry(taskId, task.recoveryAttempt ?? task.attemptNumber);
+  let leaseId: string | null = null;
+  let budgetReservationId: string | undefined;
+  let enteredExecution = false;
+  try {
+    leaseId = await acquireTaskAdmission(
+      coordinatorRequest(retryTask.taskId, retryTask.recoveryAttempt ?? retryTask.attemptNumber, retryTask.operation, 'PURE_READ_IDEMPOTENT'),
+      waitingStatusWriter(taskStore, taskId), performance.now() + MAX_ADMISSION_MS
+    );
+    const reservation = await reserveOperation(config.nodeId, descriptor.actor, task.operation, config.profile, descriptor.args,
+      { expectedPolicyHash: retryTask.policyHash });
+    budgetReservationId = reservation.budgetReservationId;
+    await taskStore.transition(taskId, 'RUNNING', 'Automatic safe read recovery executing with verified identity and policy.', ['PREPARING']);
+    const trace = traceContextFrom(retryTask.traceId ? {
+      traceparent: '00-' + retryTask.traceId + '-' + crypto.randomBytes(8).toString('hex') + '-01'
+    } : {});
+    const request: GatewayRequest = {
+      type: 'request', id: 'boot-' + taskId, operation: retryTask.operation,
+      args: descriptor.args, actor: descriptor.actor
+    };
+    const heartbeatTimer = startTaskHeartbeat(taskId, leaseId);
+    enteredExecution = true;
+    await executeAdmittedTask({
+      request, actor: descriptor.actor, trace, started: Date.now(), policy: reservation.policy,
+      budgetReservationId, task: retryTask, taskSafety: 'PURE_READ_IDEMPOTENT',
+      leaseId, heartbeatTimer, effectiveProfile: reservation.decision.effectiveProfile, authorizeSpan: childSpan(trace)
+    });
+  } catch (error) {
+    if (leaseId && !enteredExecution) await coordinatedRelease(leaseId).catch(() => undefined);
+    if (!enteredExecution) {
+      await releaseBudgetConcurrency(config.nodeId, budgetReservationId).catch(() => undefined);
+      await persistTaskFailure(taskStore, taskId, 'PURE_READ_IDEMPOTENT', error, false);
+    } else {
+      // An error after RUNNING is a read failure, never a fabricated successful result.
+      await persistTaskFailure(taskStore, taskId, 'PURE_READ_IDEMPOTENT', error, true);
+    }
+  }
+  } finally {
+    const final = await taskStore.read(taskId).catch(() => null);
+    // INPUT_REQUIRED is also a closed automatic-recovery boundary. Retain the
+    // task/evidence history, never unnecessary private replay arguments.
+    await discardPrivateReadIfClosed(taskStore.rootDir, final).catch(() => undefined);
   }
 }
 
@@ -776,6 +961,31 @@ async function shutdown(): Promise<void> {
 process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
 await connect();
+// A task's boot decision is read-only proof, never authority. The replay worker
+// rechecks the current owner policy, exact old ticket, budget and task identity.
+const retryableAtBoot = bootRecovery.filter(item => item.decision.kind === 'RETRY_SAFE' || item.decision.kind === 'WAIT_FOR_LEASE');
+if (retryableAtBoot.length) {
+  void processCheckpoint().track(async () => {
+    for (const item of retryableAtBoot) {
+      try { await retryCoordinatorRecovery(() => resumeOneBootRead(item.taskId)); }
+      catch (error) {
+        if (error instanceof RecoveryCoordinatorUnavailableError) {
+          // Bounded read-only coordinator probes failed. No execution was
+          // attempted through this path; preserve a truthful owner-visible stop.
+          const pending = await taskStore.read(item.taskId).catch(() => null);
+          if (pending && ['ACCEPTED', 'PREPARING', 'RUNNING'].includes(pending.state)) {
+            const next = pending.state === 'ACCEPTED' ? 'CANCELLED' :
+              pending.state === 'PREPARING' ? 'FAILED' : 'INPUT_REQUIRED';
+            await taskStore.update(item.taskId, { state: next, failureClass: 'DEPENDENCY_WAIT',
+              status: 'Coordinator remained unavailable after bounded recovery probes; no replay occurred.' });
+            await discardPrivateReadDescriptor(taskStore.rootDir, item.taskId).catch(() => undefined);
+          }
+        }
+        console.error('BOOT_READ_RECOVERY_BLOCKED: inspect task status and original identity');
+      }
+    }
+  }).catch(() => console.error('BOOT_READ_RECOVERY_UNRESOLVED: inspect durable task state'));
+}
 
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await runNode();
