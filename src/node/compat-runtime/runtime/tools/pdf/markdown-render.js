@@ -15,10 +15,19 @@ export function pdfOptions(options={}){
  }
  return {...pdf,timeout:10000};
 }
+/** Render Markdown, never raw caller HTML that could trigger browser navigation. */
+export function markdownToSafeHtml(markdown){
+ const renderer=new marked.Renderer();
+ // Marked normally preserves <meta http-equiv=refresh>, iframes, scripts and
+ // inline HTML. A CSP and disabled JavaScript do not disable meta refresh.
+ // Suppress raw HTML tokens before a browser ever sees the document.
+ renderer.html=()=>'';
+ return marked.parse(markdown,{renderer});
+}
 export async function renderMarkdown(markdown,options,executablePath){
  const pdf=pdfOptions(options);
  if(!executablePath)throw new Error('DEX PDF generation requires an already installed Chrome or Chromium');
- const html=marked.parse(markdown);
+ const html=markdownToSafeHtml(markdown);
  const browser=await puppeteer.launch({executablePath,headless:true,timeout:10000,protocolTimeout:10000});
  try{
   const page=await browser.newPage();

@@ -1,7 +1,7 @@
 # PR #34 — Safe Read Recovery Review and C14/C15 Gate
 
 State: DRAFT / SOURCE-TESTED / NOT MERGED / NOT INSTALLED / PHYSICAL RECOVERY UNPROVEN.
-Reference reviewed: westkitty/DEX-REACH PR #34, head bf8f1fccddd2cada5751599bd299d399751595f9.
+Reference reviewed: westkitty/DEX-REACH PR #34 through head bb0415f8c2abcaf177b68725e1bd9405715490ab, initially bf8f1fccddd2cada5751599bd299d399751595f9. Exact candidate identity must be refreshed after each push.
 Scope: isolated MacBook worktree /Users/andrew/DEX-REACH-recovery-20261117; exact node macbook-air.local.
 
 ## Authority and provenance
@@ -16,12 +16,13 @@ The current user instruction permits adversarial review and bounded branch repai
 - R34-04: Optional recoveryAttempt preserves original schema-v1 attemptNumber=1; source compatibility passes current tests, but actual retained installed-runtime reader and rollback remain UNVERIFIED.
 - R34-05: The public reach_task action=list is actor-restricted and bounded at source level, but the installed public MCP connector has NOT been refreshed or tested against the new schema.
 - R34-06: Unknown-effect command/process replay remains refused by source and synthetic C14 tests; physical interruption is NOT proven.
+- R34-08: The native Markdown PDF renderer passed Marked's untrusted raw HTML directly to Chromium. The existing end-to-end fixture injects a zero-delay meta-refresh; original and later PR-head GitHub validation both failed this PDF test, the later failure explicitly naming a destroyed execution context after navigation. The raw HTML escape route is CONFIRMED by a direct Marked parser readback, and it plausibly explains the navigation error; browser-level causation is not yet proved. Repair in the isolated worktree: suppress raw HTML tokens before browser rendering, preserve standard Markdown formatting; add focused tests for refresh/meta/script/iframe/style/img tags. Do not relax the end-to-end PDF/URL-security checks.
 
 ## Source checks and hosted CI
 
-Initial PR commit bf8f1fc: GitHub CodeQL SUCCESS (run 44220905778), reproducible-build SUCCESS and runtime-proof SUCCESS, but DEX validation FAILED (run 44220905513, job 134522191149): 1068/1069 tests passed, one test failed. The unrelated standalone native backend PDF write_pdf test timed out at 10 seconds waiting for a browser WebSocket endpoint. The cause is not independently reproduced. It is not permissible to waive, weaken or relabel a failed required job. New exact-head hosted checks will be required after repairs are pushed.
+Initial PR commit bf8f1fc: GitHub CodeQL SUCCESS (run 44220905778), reproducible-build SUCCESS and runtime-proof SUCCESS, but DEX validation FAILED (run 44220905513, job 134522191149): 1068/1069 tests passed, one test failed. The unrelated standalone native backend PDF write_pdf test timed out at 10 seconds waiting for a browser WebSocket endpoint. The cause is not independently reproduced. On bb0415f8c2abcaf177b68725e1bd9405715490ab, CodeQL, reproducible-build, and runtime-proof passed; full DEX validation failed again (1 of 1,074 tests). It was the same native PDF fixture, now with the error 'Execution context was destroyed, most likely because of a navigation.' The source renderer accepted the exact untrusted meta-refresh input and a focused parser check reproduced the unsafe HTML. Removal of raw HTML is a bounded candidate fix; full hosted verification is still required. Do not waive, weaken or relabel either failing required job.
 
-Bounded MacBook source tests: 57/57 focused recovery, security, orphan, task-store and MCP tests passed after repairs; new retry/cleanup tests passed 10/10. These are not physical start/kill/recover observations. TypeScript checks are separately required after final edits. The prior branch passed 42/42 invariants and build/native packaging, but results must be matched to final source head.
+Bounded MacBook source tests: 57/57 focused recovery, security, orphan, task-store and MCP tests passed after repairs; new retry/cleanup tests passed 10/10. The additional native HTML security parser and recovery cohort passed 14/14 in the isolated worktree, and TypeScript typecheck passed. This is source-level proof, not a passing browser render or installed runtime proof. These are not physical start/kill/recover observations. TypeScript checks are separately required after final edits. The prior branch passed 42/42 invariants and build/native packaging, but results must be matched to final source head.
 
 ## Thirty official C14 gates: no 30/30 claim
 
