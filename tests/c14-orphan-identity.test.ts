@@ -255,14 +255,45 @@ test('missing or corrupt activity evidence: a RUNNING task is AMBIGUOUS, never r
   } finally { await w.cleanup(); }
 });
 
-test('an interrupted pure read with no execution evidence is FAILED as retryable, never left RUNNING', async () => {
+test('a proven-ended pure read without a lease remains safe for private-descriptor recovery', async () => {
+  const w = await createSyntheticWorkspace(); try {
+    const store = new NodeTaskStore(w.source.state);
+    const task = await runningTask(store, 'pure-read-process-gone', 'PURE_READ_IDEMPOTENT');
+    const reports = await reconcileBootTasks(store, new ResultStore(64 * 1024, 60_000, w.source.state), {
+      activities: [activityFor(task, UNUSED_PID, 'exited')],
+      coordinator: { leases: [], tickets: [] } as unknown as WorkStatus,
+      transportConnected: true
+    });
+    assert.equal(reports[0]?.decision.kind, 'RETRY_SAFE');
+    assert.equal((await store.read(task.taskId))?.state, 'RUNNING');
+  } finally { await w.cleanup(); }
+});
+
+test('interrupted pure read with an old lease waits for independent release rather than replaying', async () => {
+  const w = await createSyntheticWorkspace(); try {
+    const store = new NodeTaskStore(w.source.state), results = new ResultStore(64 * 1024, 60_000, w.source.state);
+    const task = await runningTask(store, 'pure-read-stale-lease', 'PURE_READ_IDEMPOTENT');
+    const [report] = await reconcileBootTasks(store, results, {
+      coordinator: leaseFor(task), transportConnected: true, activities: []
+    });
+    assert.equal(report?.decision.kind, 'WAIT_FOR_LEASE');
+    const after = await store.read(task.taskId);
+    assert.equal(after?.state, 'RUNNING');
+    assert.match(after?.summary.status ?? '', /old coordinator lease/i);
+    assert.equal(after?.resultRef, undefined);
+  } finally { await w.cleanup(); }
+});
+
+test('an interrupted pure read remains eligible only for the private-descriptor boot gate, with no execution in the classifier', async () => {
   const w = await createSyntheticWorkspace(); try {
     const store = new NodeTaskStore(w.source.state), results = new ResultStore(64 * 1024, 60_000, w.source.state);
     const task = await runningTask(store, 'pure-read-gone', 'PURE_READ_IDEMPOTENT');
-    await reconcileBootTasks(store, results, { coordinator: { leases: [], tickets: [] } as unknown as WorkStatus, transportConnected: true, activities: [] });
+    const decisions = await reconcileBootTasks(store, results, { coordinator: { leases: [], tickets: [] } as unknown as WorkStatus, transportConnected: true, activities: [] });
+    assert.equal(decisions[0]?.decision.kind, 'RETRY_SAFE');
     const after = (await store.read(task.taskId))!;
-    assert.equal(after.state, 'FAILED');
-    assert.equal(after.failureClass, 'TRANSIENT_TRANSPORT');
+    assert.equal(after.state, 'RUNNING');
+    assert.match(after.summary.status, /awaiting private-descriptor and policy verification/);
+    assert.equal(after.resultRef, undefined, 'classification alone never executes a replay');
   } finally { await w.cleanup(); }
 });
 

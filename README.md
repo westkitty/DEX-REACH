@@ -188,7 +188,15 @@ DEX//REACH currently exposes 17 first-class MCP actions:
 | `reach_receipts` | Read recent node-signed execution receipts and their tamper-evident hash chain |
 | `reach_result_read` | Continue reading a large bounded result |
 | `reach_revoke_node` | Revoke one node credential and disconnect that node |
-| `reach_task` | Start, inspect, or read one durable task on an explicitly selected node; use only supported lifecycle actions |
+| `reach_task` | Start a durable task, list a bounded set of the authenticated actor's own task handles, inspect, retrieve result, or cancel on an explicitly selected node |
+
+### Safe read recovery after node restart
+
+For a deferred durable **pure read**, the node stores a bounded, owner-private descriptor of the original request before acknowledging its handle. After restart, boot recovery can re-admit that **same task ID** without an active ChatGPT conversation, but only when source/actor/node/input/policy bindings match, the original execution has no verified remaining result or live effect, coordinator tickets/leases are clear, and current owner authorization and budget checks pass. A separate optional safe-retry ordinal keeps the existing v1 task format backward-readable.
+
+Existing tasks lacking verified private descriptors are never reconstructed from hashes. An orphan that may still run, an unconfirmed lease/ticket, corrupt evidence, exhausted attempts, changed owner policy, arbitrary shell command, or uncertain external mutation cannot be automatically replayed. Such work remains failed, ambiguous, or input-required as appropriate. Recovery is limited to eligible operations and does **not** resume an interrupted ChatGPT conversation or independently author a multi-step plan.
+
+The `reach_task` action `list` returns at most 50 authenticated actor-owned task handles, with fixed metadata only, so clients can retrieve results after reconnect without retaining an earlier chat turn. The public connector must be refreshed when this changed schema is installed. **Source implementation is not production recovery proof**; installed interruption/rollback acceptance remains a separate release gate.
 
 The pinned compatibility package currently exposes 26 raw local tools to the node internally. DEX//REACH deliberately advertises only **22** of them to remote clients: safety-configuration mutation, compatibility call-history recovery, vendor feedback, and vendor onboarding/prompt tools are withheld. URL-fetch mode is also blocked, so `reach_call` cannot turn the node into a generic HTTP/SSRF proxy. DEX//REACH owns the gateway, authentication, routing, node policy, audit, native operations, and safety boundaries; `@wonderwhy-er/desktop-commander` remains a pinned local compatibility dependency while the remaining primitives are replaced incrementally.
 

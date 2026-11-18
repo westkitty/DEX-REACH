@@ -62,7 +62,7 @@ export type BootRecoveryEvidence = {
 };
 
 export type BootRecoveryDecision = {
-  kind: 'FINISH_FROM_DURABLE_EVIDENCE' | 'REATTACH' | 'MONITOR_ORPHAN' | 'RETRY_SAFE' | 'INPUT_REQUIRED' | 'AMBIGUOUS' | 'DEGRADED';
+  kind: 'FINISH_FROM_DURABLE_EVIDENCE' | 'REATTACH' | 'MONITOR_ORPHAN' | 'WAIT_FOR_LEASE' | 'RETRY_SAFE' | 'INPUT_REQUIRED' | 'AMBIGUOUS' | 'DEGRADED';
   reason: string;
 };
 
@@ -87,7 +87,16 @@ export function decideBootRecovery(evidence: BootRecoveryEvidence): BootRecovery
       ? 'The matching task activity and coordinator lease are live; execution was not replayed.'
       : 'The coordinator lease is live for this task; execution was not replayed.' };
   }
+  if (evidence.state === 'RUNNING' && evidence.safetyClass === 'PURE_READ_IDEMPOTENT' &&
+      evidence.hasMatchingLease && !evidence.hasMatchingLiveActivity && evidence.transportConnected) {
+    return { kind: 'WAIT_FOR_LEASE', reason: 'An old coordinator lease still exists; wait for independent release before safe read recovery.' };
+  }
   if (evidence.hasMatchingQueueTicket && evidence.transportConnected && (evidence.state === 'ACCEPTED' || evidence.state === 'PREPARING')) {
+    // The initiating node continuation died at boot. A queued pure read is replayable
+    // after its stale ticket is cancelled and owner policy/descriptor are rechecked.
+    if (evidence.safetyClass === 'PURE_READ_IDEMPOTENT' && !evidence.hasMatchingLease && !evidence.hasMatchingLiveActivity) {
+      return { kind: 'RETRY_SAFE', reason: 'Queued pure read requires stale-ticket cancellation and safe node-side re-admission.' };
+    }
     return { kind: 'REATTACH', reason: 'The coordinator queue ticket still names this task and attempt; its FIFO position was preserved.' };
   }
   if (evidence.state === 'ACCEPTED' || evidence.state === 'PREPARING') {

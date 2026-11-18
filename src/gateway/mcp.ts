@@ -266,17 +266,18 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
 
   server.registerTool('reach_task', {
     title: 'Control Durable Task',
-    description: 'Start, inspect, read the result of, or cancel one durable task on the explicitly selected node. Start names an exact DEX operation and its native arguments. Nodes without the durable_tasks capability use an explicit synchronous fallback only when mode is auto; mode durable refuses with CAPABILITY_UNSUPPORTED_ON_NODE and never fabricates a handle. Task ownership, exact node identity and current node policy are rechecked on every lifecycle request.',
+    description: 'Start, list your own task handles, inspect, read the result of, or cancel a durable task on an explicitly selected node. List returns only bounded actor-owned task IDs and fixed metadata, never inputs or results. Nodes lacking durable_tasks support only explicit synchronous fallback for start. Actor ownership, exact node identity and current node policy are rechecked for every lifecycle request.',
     inputSchema: {
       node_id: z.string().min(1).describe(NODE_ID_HINT),
-      action: z.enum(['start', 'get', 'result', 'cancel']),
-      task_id: z.string().optional().describe('Required for get, result and cancel; use the taskId returned by start.'),
+      action: z.enum(['start', 'list', 'get', 'result', 'cancel']),
+      task_id: z.string().optional().describe('Required for get, result and cancel; use a task ID from start or actor-owned list.'),
+      limit: z.number().int().min(1).max(50).default(20).describe('Maximum actor-owned task handles to list, at most 50.'),
       operation: z.enum(['dex.fingerprint', 'dex.trustReport', 'dex.repoInfo', 'dex.adbDevices', 'dex.file.read', 'dex.result.read', 'dex.receipts.list', 'dex.file.write', 'dex.checkpoint', 'dex.process.run', 'dc.call', 'dex.plan', 'dex.commitPlan']).optional().describe('Required for start; exact native DEX operation.'),
       arguments: z.record(z.string(), z.unknown()).default({}).describe('Native arguments for operation when action is start.'),
       mode: z.enum(['auto', 'durable']).default('auto').describe('auto permits an explicit synchronous legacy-node fallback; durable refuses if the node lacks durable_tasks.')
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
-  }, async ({ node_id, action, task_id, operation, arguments: taskArgs, mode }) => {
+  }, async ({ node_id, action, task_id, operation, arguments: taskArgs, mode, limit }) => {
     if (action === 'start') {
       if (!operation) throw new Error('operation is required for task start');
       if (!registry.supportsDurableTasks(node_id)) {
@@ -286,6 +287,7 @@ export function createReachMcpServer(registry: NodeRegistry, audit: AuditLog, cl
       }
       return routedTask(node_id, { action: 'start', operation, args: taskArgs });
     }
+    if (action === 'list') return routedTask(node_id, { action: 'list', limit });
     if (!task_id) throw new Error(`task_id is required for ${action}`);
     return routedTask(node_id, { action, taskId: task_id });
   });
