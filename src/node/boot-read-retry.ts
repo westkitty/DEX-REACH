@@ -31,3 +31,12 @@ export async function retryCoordinatorRecovery<T>(
   }
   throw new Error('unreachable recovery retry state');
 }
+
+
+/** Legal, conservative stop state when no safe boot read was executed. */
+export function bootReadStopState(state: string): 'CANCELLED' | 'FAILED' | 'INPUT_REQUIRED' {
+  if (state === 'ACCEPTED') return 'CANCELLED';
+  if (state === 'PREPARING') return 'FAILED';
+  if (state === 'RUNNING') return 'INPUT_REQUIRED';
+  throw new Error('boot read is not in an executable recovery state');
+}

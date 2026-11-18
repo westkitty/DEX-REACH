@@ -7,7 +7,7 @@ import { ProcessExitError, assertProcessSucceeded } from '../shared/process-outc
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { isReplayableRead, savePrivateReadDescriptor, loadVerifiedPrivateReadDescriptor, discardPrivateReadDescriptor, discardPrivateReadIfClosed } from './private-read-recovery.js';
-import { RecoveryCoordinatorUnavailableError, retryCoordinatorRecovery } from './boot-read-retry.js';
+import { RecoveryCoordinatorUnavailableError, retryCoordinatorRecovery, bootReadStopState } from './boot-read-retry.js';
 import { withFileLock, withLockPatience } from '../shared/state-io.js';
 import { requiredCapabilities, requestPaths } from '../shared/capabilities.js';
 import { parseRepoInspection } from '../shared/repo-inspection.js';
@@ -726,7 +726,7 @@ async function resumeOneBootRead(taskId: string): Promise<void> {
     const current = await taskStore.read(taskId);
     if (!current || current.state !== task.state || current.policyHash !== task.policyHash) return;
     if (Date.now() >= waitUntil) {
-      await taskStore.update(taskId, { state: task.state === 'RUNNING' ? 'INPUT_REQUIRED' : 'FAILED',
+      await taskStore.update(taskId, { state: bootReadStopState(task.state),
         failureClass: 'DEPENDENCY_WAIT',
         status: 'Old coordinator lease remained present; owner review required, no duplicate read.' });
       return;

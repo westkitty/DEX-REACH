@@ -3,10 +3,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { RecoveryCoordinatorUnavailableError, retryCoordinatorRecovery } from '../src/node/boot-read-retry.js';
+import { RecoveryCoordinatorUnavailableError, retryCoordinatorRecovery, bootReadStopState } from '../src/node/boot-read-retry.js';
 import { NodeTaskStore } from '../src/node/task-store.js';
 import { hashValue } from '../src/shared/hash.js';
 import { savePrivateReadDescriptor, loadVerifiedPrivateReadDescriptor, discardPrivateReadIfClosed } from '../src/node/private-read-recovery.js';
+
+test('a timed-out accepted, preparing or running read uses only legal stop states', () => {
+  assert.equal(bootReadStopState('ACCEPTED'), 'CANCELLED');
+  assert.equal(bootReadStopState('PREPARING'), 'FAILED');
+  assert.equal(bootReadStopState('RUNNING'), 'INPUT_REQUIRED');
+  assert.throws(() => bootReadStopState('COMPLETED'), /not in an executable recovery state/);
+});
 
 test('coordinator probe outage retries with bounded backoff, then resumes once', async () => {
   let attempts = 0;
