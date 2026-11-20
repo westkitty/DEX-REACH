@@ -12,7 +12,7 @@ import { NodeAuthStore } from '../src/gateway/node-auth.js';
 import { classifyTask, inspectTasks, publicTaskReport, safeRead, type Evidence } from '../scripts/lib/recovery-reconciliation.js';
 import { inspectCoverage, verifyCoverage, manifestDigest, publicCoverage, type Manifest } from '../scripts/lib/recovery-coverage.js';
 import { createSyntheticWorkspace, rehearseRestore, type SyntheticWorkspace } from '../scripts/lib/recovery-rehearsal.js';
-import { RELEASE_ROOT, RETAINED_RELEASE, RETAINED_TREE, baselineBlockers, evaluatePreflight, requiredFreeBytes, type PreflightFacts } from '../scripts/lib/c14-recovery-preflight.js';
+import { RELEASE_ROOT, RETAINED_RELEASE, RETAINED_TREE, releaseIdFromLaunchdOutput, singleServiceReleaseId, reviewedRuntimePin, baselineBlockers, evaluatePreflight, requiredFreeBytes, type PreflightFacts } from '../scripts/lib/c14-recovery-preflight.js';
 
 const nodeId = 'macbook-air.local', hash = 'a'.repeat(64);
 const evidence: Evidence = { result: 'missing', activity: false, lease: false, ticket: false, process: 'absent', sharedProcess: false, stale: true, complete: true, eventState: 'PREPARING' };
@@ -164,4 +164,41 @@ test('the release line accepts only main or a detached HEAD, and the release wor
   for (const branch of ['c14-chaos-recovery', 'release/0.4.0-prep']) { const f = goodFacts(); f.branch = branch; assert.equal(evaluatePreflight(f).checks.AUTHORIZED_BRANCH, false); }
   const f = goodFacts(); f.root = '/Users/andrew/dex-reach-c13-worker-repair'; assert.equal(evaluatePreflight(f).checks.EXACT_REPOSITORY, false);
   assert.equal(Object.keys(evaluatePreflight(goodFacts()).checks).length, 30);
+});
+
+test('the actual active release is parsed from exactly one launchd working-directory route', () => {
+  const launchd = (id: string) => 'state = running\n  working directory = /Users/andrew/.dex-reach/runtime/releases/' + id + '\n  active count = 1';
+  const current = '0.4.0-f7f59b35ebcd-191f252a5681';
+  assert.equal(releaseIdFromLaunchdOutput(launchd(RETAINED_RELEASE)), RETAINED_RELEASE);
+  assert.equal(releaseIdFromLaunchdOutput(launchd(current)), current);
+  assert.equal(releaseIdFromLaunchdOutput(launchd(RETAINED_RELEASE + '/other')), null);
+  assert.equal(releaseIdFromLaunchdOutput(launchd('0.4.0-unknown')), null);
+  assert.equal(releaseIdFromLaunchdOutput(launchd(RETAINED_RELEASE) + '\n  working directory = /tmp/other'), null);
+  assert.equal(releaseIdFromLaunchdOutput('working directory = /tmp/other'), null);
+  assert.equal(singleServiceReleaseId(Array(5).fill(RETAINED_RELEASE)), RETAINED_RELEASE);
+  assert.equal(singleServiceReleaseId([RETAINED_RELEASE, current, current, current, current]), null);
+  assert.equal(singleServiceReleaseId(Array(4).fill(RETAINED_RELEASE)), null);
+});
+
+test('active runtime requires a source-reviewed tree pin, never a matching name alone', () => {
+  assert.equal(reviewedRuntimePin('0.4.0-f7f59b35ebcd-191f252a5681'), null);
+  assert.equal(reviewedRuntimePin('constructor'), null);
+  assert.equal(reviewedRuntimePin('0.4.0-274ba16e058e-2d5b454853af')?.sourceSha, '274ba16e058e2b1e855a8ae4a5c30ad63ea81363');
+  assert.equal(reviewedRuntimePin(RETAINED_RELEASE)?.treeSha256, RETAINED_TREE);
+});
+
+test('an old retained C13 directory cannot impersonate the five active services at C14 preflight', () => {
+  const facts = goodFacts();
+  assert.equal(evaluatePreflight(facts).checks.INSTALLED_IDENTITY, true);
+  facts.baseline.serviceReleaseIds[0] = '0.4.0-f7f59b35ebcd-191f252a5681';
+  assert.equal(evaluatePreflight(facts).checks.INSTALLED_IDENTITY, false);
+  assert.equal(evaluatePreflight(facts).checks.FIVE_SERVICES, false);
+  facts.baseline.serviceReleaseIds = Array(5).fill('0.4.0-f7f59b35ebcd-191f252a5681');
+  facts.installedRelease = '0.4.0-f7f59b35ebcd-191f252a5681';
+  facts.baseline.previousDigest = RETAINED_TREE;
+  assert.equal(evaluatePreflight(facts).checks.INSTALLED_IDENTITY, false);
+  facts.baseline.serviceReleaseIds = Array(5).fill(RETAINED_RELEASE);
+  facts.installedRelease = RETAINED_RELEASE;
+  facts.baseline.observedDigest = 'b'.repeat(64);
+  assert.equal(evaluatePreflight(facts).checks.INSTALLED_IDENTITY, false);
 });
