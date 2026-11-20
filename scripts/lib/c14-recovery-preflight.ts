@@ -1,4 +1,5 @@
 import { isVerifiedWindowEvidence } from './c14-window-evidence.js';
+import { TRUSTED_RUNTIME_RELEASES } from './runtime-rollback.js';
 /**
  * The release candidate runs from a dedicated worktree checked out detached at the exact origin/main tip.
  * (main itself stays checked out in the owner's primary checkout, which holds unrelated uncommitted work.)
@@ -11,6 +12,36 @@ export const RETAINED_RELEASE = '0.3.2-87a99494ebb3-2f44ae46b11b';
 export const RETAINED_TREE = 'fcb78a6b99db10aac565a1b2b4af90faf142ef5bd5162523a662febeafd36b12';
 export const RETAINED_SOURCE = '87a99494ebb3471d3ecc3a79acd630ec18858a92';
 export const RETAINED_TRANSACTION = '9bf5079f-397e-4cd8-af35-99f1550d3d68';
+
+/**
+ * Observe one exact immutable runtime from each launchd working directory.
+ * The historical C13 tree is a separate rollback artifact, not proof of
+ * what the five active macOS services currently run.
+ */
+const LIVE_RELEASE_DIRECTORY = '/Users/andrew/.dex-reach/runtime/releases/';
+const IMMUTABLE_RELEASE_ID = /^\d+\.\d+\.\d+-[a-f0-9]{12}-[a-f0-9]{12}$/;
+export function releaseIdFromLaunchdOutput(output: string): string | null {
+  const matches = [...output.matchAll(/^[ \t]*working directory = ([^\r\n]+)\r?$/gm)];
+  if (matches.length !== 1) return null;
+  const pathname = matches[0]![1]!.trim();
+  if (!pathname.startsWith(LIVE_RELEASE_DIRECTORY)) return null;
+  const releaseId = pathname.slice(LIVE_RELEASE_DIRECTORY.length);
+  return IMMUTABLE_RELEASE_ID.test(releaseId) ? releaseId : null;
+}
+export function singleServiceReleaseId(ids: readonly string[]): string | null {
+  const id = ids[0];
+  return ids.length === 5 && typeof id === 'string' && IMMUTABLE_RELEASE_ID.test(id) &&
+    ids.every(candidate => candidate === id) ? id : null;
+}
+/** A running release needs a source-reviewed source/tree pin, not a self-report. */
+export function reviewedRuntimePin(id: string | null) {
+  if (!id || !Object.prototype.hasOwnProperty.call(TRUSTED_RUNTIME_RELEASES, id)) return null;
+  const pin = TRUSTED_RUNTIME_RELEASES[id]!;
+  const shortSourceSha = id.split('-')[1];
+  if (!/^[a-f0-9]{40}$/.test(pin.sourceSha) || !/^[a-f0-9]{64}$/.test(pin.treeSha256) ||
+      shortSourceSha !== pin.sourceSha.slice(0, 12)) return null;
+  return pin;
+}
 export type RetainedProvenance = { sourceSha: string; installTransaction: string; dependencyDigest: string; configDigest: string; expectedConfigDigest: string; policyDigest: string; expectedPolicyDigest: string; ownerManifestDigest: string; trustedManifestDigest: string; snapshotComplete: boolean; metadataVerified: boolean; reserveVerified: boolean };
 export function retainedProvenanceBlockers(p?: RetainedProvenance): string[] {
   if (!p) return ['RETAINED_PROVENANCE_MISSING'];
@@ -120,6 +151,8 @@ export function aggregateCheckRuns(rows: unknown): Record<string, string> {
 }
 export type PreflightFacts = { hostname: string; model: string; platform: string; arch: string; user: string; uid: number; home: string; root: string; repositoryUrl?: string; branch: string; head: string; remoteHead: string; dirty: boolean; approvedSha?: string; candidateVersion: string; approvedVersion?: string; ciHead?: string; ciChecks: Record<string, string>; installedIntact: boolean; installedRelease: string; servicesVerified: boolean; backupCertified: boolean; baseline: Baseline; restoreProof: { scope: 'synthetic' | 'installed'; sourceSha: string; passed: boolean }; taskCount: number; taskUnresolved: number; taskQuarantined?: number; releaseScope?: 'local-runtime-only'; claimsKnown: boolean; claimsCount: number; ownerPreservationVerified: boolean; freeBytes: number; spaceMeasured: boolean; space: SpacePlan; exactLegacyPairingVerified: boolean; credentialsCompatible: boolean; requiredHostCapabilityAvailable: boolean; maintenanceAuthorized: boolean; boundary?: RecoveryBoundaryEvidence };
 export function evaluatePreflight(f: PreflightFacts) {
+  const activeRelease = singleServiceReleaseId(f.baseline.serviceReleaseIds);
+  const activePin = reviewedRuntimePin(activeRelease);
   const checks: Record<string, boolean> = {
     EXACT_HOST: f.hostname === 'MacBook-Air.local' && f.model === 'MacBookAir10,1' && f.platform === 'darwin' && f.arch === 'arm64',
     EXACT_ACCOUNT: f.user === 'andrew' && f.uid === 501 && f.home === '/Users/andrew',
@@ -130,8 +163,10 @@ export function evaluatePreflight(f: PreflightFacts) {
     REMOTE_PARITY: f.head === f.remoteHead,
     HOSTED_CHECKS: f.ciHead === f.head && REQUIRED_HOSTED_CHECKS.every(k => f.ciChecks[k] === 'SUCCESS'),
     APPROVED_SHA: /^[a-f0-9]{40}$/.test(f.head) && f.approvedSha === f.head,
-    INSTALLED_IDENTITY: f.installedIntact && f.installedRelease === RETAINED_RELEASE,
-    FIVE_SERVICES: f.servicesVerified,
+    INSTALLED_IDENTITY: !!activeRelease && !!activePin && f.installedIntact &&
+      f.installedRelease === activeRelease && f.baseline.observedDigest === activePin.treeSha256 &&
+      f.baseline.previousDigest === activePin.treeSha256,
+    FIVE_SERVICES: f.servicesVerified && activeRelease !== null,
     BACKUP_COVERAGE: f.backupCertified,
     RECOVERY_BASELINE: baselineBlockers(f.baseline).length === 0,
     SYNTHETIC_RESTORE: f.restoreProof.scope === 'synthetic' && f.restoreProof.passed && f.restoreProof.sourceSha === f.head,

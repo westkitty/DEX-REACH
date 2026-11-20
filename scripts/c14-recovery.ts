@@ -14,7 +14,7 @@ import { TransactionEvidenceLog, ExpectationStore } from './lib/recovery-evidenc
 import { COMPAT_HOME_PRESERVATION_RULE, defaultLinkPolicy } from './lib/recovery-symlinks.js';
 import { recoveryStorageEstimate } from './lib/recovery-storage.js';
 import type { DestinationFacts } from './lib/recovery-destination.js';
-import { reloadHelperIdle, isCanonicalRepository, readReleaseHostedEvidence, RELEASE_LINE, RELEASE_ROOT, RETAINED_RELEASE, RETAINED_TREE, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
+import { reloadHelperIdle, isCanonicalRepository, readReleaseHostedEvidence, RELEASE_LINE, RELEASE_ROOT, releaseIdFromLaunchdOutput, singleServiceReleaseId, reviewedRuntimePin, aggregateCheckRuns, evaluatePreflight, type PreflightFacts } from './lib/c14-recovery-preflight.js';
 import { parseCaptureExclusionFlags } from './lib/recovery-capture-flags.js';
 
 const runFile = promisify(execFile);
@@ -50,9 +50,6 @@ async function livePreflight() {
   const hosted = await readReleaseHostedEvidence(head, endpoint => run('gh', ['api', endpoint]));
   const ciRows = hosted.rows;
   const rows = await liveTaskReport();
-  const releaseRoot = path.join(liveRoots.state, 'runtime/releases', RETAINED_RELEASE);
-  let observedDigest = '', installedIntact = false;
-  try { observedDigest = await runtimeTreeSha256(releaseRoot); installedIntact = observedDigest === RETAINED_TREE; } catch { /* Missing release refuses. */ }
   const serviceReleaseIds: string[] = []; let servicesVerified = true, helperIdle = false;
   const disabled = await run('/bin/launchctl', ['print-disabled', 'gui/501']);
   const processTable = await run('/bin/ps', ['-axo', 'uid=,pid=,command=']);
@@ -60,9 +57,12 @@ async function livePreflight() {
     try {
       const label = `com.stinkyweasel.dex-reach.${role}`, plist = await fs.readFile(path.join(liveRoots.agents, `${label}.plist`), 'utf8');
       const loaded = await run('/bin/launchctl', ['print', `gui/501/${label}`]);
-      serviceReleaseIds.push(loaded.match(/working directory = .*\/runtime\/releases\/([^\n]+)/)?.[1] ?? 'unknown');
+      const serviceRelease = releaseIdFromLaunchdOutput(loaded) ?? 'unknown';
+      serviceReleaseIds.push(serviceRelease);
       if (new RegExp(`"${label.replaceAll('.', '\\.')}"\\s*=>\\s*true`).test(disabled)) servicesVerified = false;
-      if (!plist.includes(releaseRoot) || !loaded.includes(`working directory = ${releaseRoot}`)) servicesVerified = false;
+      // Route identity comes from the active service, never the retained C13 directory.
+      const observedServiceRoot = path.join(liveRoots.state, 'runtime/releases', serviceRelease);
+      if (serviceRelease === 'unknown' || !plist.includes(observedServiceRoot)) servicesVerified = false;
       if (role !== 'oauth-canary') {
         const pid = loaded.match(/\bpid = (\d+)/)?.[1];
         const matches = processTable.split('\n').filter(l => l.includes(`/dist/src/${role}/main.js`));
@@ -70,6 +70,17 @@ async function livePreflight() {
       } else if (!/last exit code = 0/.test(loaded) || /\bpid = \d+/.test(loaded)) servicesVerified = false;
     } catch { servicesVerified = false; serviceReleaseIds.push('unknown'); }
   }
+  const observedInstalledRelease = singleServiceReleaseId(serviceReleaseIds);
+  const installedPin = reviewedRuntimePin(observedInstalledRelease);
+  let observedDigest = '', installedIntact = false;
+  // Without a reviewed immutable pin, no active tree is claimed authenticated.
+  if (observedInstalledRelease && installedPin) {
+    try {
+      observedDigest = await runtimeTreeSha256(path.join(liveRoots.state, 'runtime/releases', observedInstalledRelease));
+      installedIntact = observedDigest === installedPin.treeSha256;
+    } catch { /* Missing/unreadable/mismatched active release refuses. */ }
+  }
+  servicesVerified = servicesVerified && observedInstalledRelease !== null;
   const helperPrint = await runFile('/bin/launchctl', ['print', 'gui/501/com.stinkyweasel.dex-reach.install-reloader-once'], { timeout: 20_000 }).then(r => ({ output: r.stdout }), (e: { stderr?: string; stdout?: string; killed?: boolean }) => !e.killed && /Could not find service/.test(`${e.stderr ?? ''}${e.stdout ?? ''}`) ? { notFound: true as const } : { error: true as const });
   helperIdle = reloadHelperIdle(helperPrint, processTable);
   const recoveryActive = /scripts\/(?:install-macos|rollback-macos|reload-launchagents)\.(?:ts|js)(?:\s|$)/m.test(processTable);
@@ -88,8 +99,8 @@ async function livePreflight() {
     hostname: os.hostname(), model: 'MacBookAir10,1', platform: os.platform(), arch: os.arch(), user: os.userInfo().username, uid: process.geteuid!(), home: os.homedir(), root: RELEASE_ROOT, repositoryUrl: await run('/usr/bin/git', ['remote', 'get-url', 'origin']), branch, head, remoteHead, dirty,
     candidateVersion: pkg.version, ciHead: ciRows.length ? head : '', ciChecks,
     ...(approved ? { approvedSha: authorization!.approvedSha, approvedVersion: authorization!.approvedVersion } : {}),
-    installedIntact, installedRelease: RETAINED_RELEASE, servicesVerified, backupCertified: window.backupCertified,
-    baseline: { previousReleaseId: RETAINED_RELEASE, previousDigest: RETAINED_TREE, observedDigest, previousExists: installedIntact, provenance: 'journal-bound', legacyProvenanceApproved: approved && authorization!.retainC13, transactionId: window.backupCertified ? window.captureTransactionId! : '', state: window.backupCertified ? 'prepared' : 'uncertain', fresh: window.backupCertified, serviceReleaseIds, configVerified: window.provenance?.configDigest === window.provenance?.expectedConfigDigest && !!window.provenance, inventoryVerified: window.ownerPreservationVerified, helperIdle: helperIdle && !recoveryActive, rollbackActive: recoveryActive, ...(window.provenance ? { provenanceDetails: window.provenance } : {}) },
+    installedIntact, installedRelease: observedInstalledRelease ?? 'UNDETERMINED', servicesVerified, backupCertified: window.backupCertified,
+    baseline: { previousReleaseId: observedInstalledRelease ?? 'UNDETERMINED', previousDigest: installedPin?.treeSha256 ?? '', observedDigest, previousExists: installedIntact, provenance: 'journal-bound', legacyProvenanceApproved: approved && authorization!.retainC13, transactionId: window.backupCertified ? window.captureTransactionId! : '', state: window.backupCertified ? 'prepared' : 'uncertain', fresh: window.backupCertified, serviceReleaseIds, configVerified: window.provenance?.configDigest === window.provenance?.expectedConfigDigest && !!window.provenance, inventoryVerified: window.ownerPreservationVerified, helperIdle: helperIdle && !recoveryActive, rollbackActive: recoveryActive, ...(window.provenance ? { provenanceDetails: window.provenance } : {}) },
     restoreProof: { scope: 'synthetic', sourceSha: syntheticAtHead ? head : '', passed: syntheticAtHead },
     taskCount: rows.length, taskUnresolved: window.unresolved, taskQuarantined: window.quarantined, claimsKnown, claimsCount, ownerPreservationVerified: window.ownerPreservationVerified, freeBytes,
     spaceMeasured: window.spaceMeasured,
@@ -108,7 +119,7 @@ async function livePreflight() {
   // when the whole boundary is minted with no window blocker, so a true component here is not a PASS.
   const { scope: _scope, version: _version, ...boundaryComponents } = window.boundary;
   const liveBoundary = { minted: window.blockers.length === 0, componentResults: boundaryComponents, gatesRequireMintedBoundary: true };
-  return { ...evaluatePreflight(facts), head, installedTreeVerified: installedIntact, freeBytes, liveBoundary, spaceEstimate: window.spaceMeasured ? 'MEASURED_FROM_CERTIFIED_CAPTURE' : 'PLANNING_ONLY_REQUIRES_OWNER_BUDGET', windowBlockers: window.blockers, quarantined: window.quarantined, tasks: publicTaskReport(rows), releaseLine: RELEASE_LINE, hostedCheckRows: ciRows.length };
+  return { ...evaluatePreflight(facts), head, installedTreeVerified: installedIntact, observedInstalledRelease: observedInstalledRelease ?? 'UNDETERMINED', reviewedInstalledTreePin: !!installedPin, freeBytes, liveBoundary, spaceEstimate: window.spaceMeasured ? 'MEASURED_FROM_CERTIFIED_CAPTURE' : 'PLANNING_ONLY_REQUIRES_OWNER_BUDGET', windowBlockers: window.blockers, quarantined: window.quarantined, tasks: publicTaskReport(rows), releaseLine: RELEASE_LINE, hostedCheckRows: ciRows.length };
 }
 /**
  * Owner-run offline capture of the STOPPED installation. Flags are the owner's approval of one exact
